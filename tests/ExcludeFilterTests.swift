@@ -39,6 +39,25 @@ final class ExcludeFilterTests {
                    "a file named cache.* is not the cache/ directory")
     }
 
+    func test_sitePackagesOfficeAssetsAreMandatoryExcluded() throws {
+        // Found 2026-09-27, same endpoint-DLP trigger as the plugin cache dirs above, but
+        // from installed Python packages instead: python-pptx/python-docx ship a default
+        // template, and statsmodels ships .xls test fixtures, both inside site-packages.
+        let filter = ExcludeFilter(patterns: [])
+        for path in [".venvs/py314/lib/python3.14/site-packages/pptx/templates/default.pptx",
+                     ".venvs/py314/lib/python3.14/site-packages/docx/templates/default.docx",
+                     ".claude-science/conda/pkgs/statsmodels-0.15.0/lib/python3.11/site-packages/"
+                     + "statsmodels/datasets/macrodata/src/macrodata.xls/macrodata.xls",
+                     ".claude-science/conda/envs/python/lib/python3.11/site-packages/"
+                     + "statsmodels/tsa/tests/results/test_spec.xls"] {
+            try expect(filter.isExcluded(relativePath: path), "site-packages office asset: \(path)")
+        }
+        // A real document that merely lives near a directory named "site-packages" (not
+        // inside it) must not be swept up by the same pattern.
+        try expect(!filter.isExcluded(relativePath: "GitHub/app/site-packages-notes/report.docx"),
+                   "must not match a sibling directory that only shares the name as a prefix")
+    }
+
     func test_checkoutsAreMandatoryExcludedEvenWithOldConfig() throws {
         let filter = ExcludeFilter(patterns: [])
         try expect(filter.isExcluded(relativePath: ".gbrain/checkouts/Roberdan/roberdan-os/file.md"),

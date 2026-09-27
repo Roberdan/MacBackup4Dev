@@ -20,6 +20,23 @@ struct ExcludeFilter {
         "*.tmp", "*.temp", "*.swp", "*.swo", "*~",
     ]
 
+    /// Office-format sample/template assets bundled *inside* an installed Python package
+    /// (python-docx's default.docx, python-pptx's default.pptx, statsmodels' .xls test
+    /// fixtures, ...). Pip/conda-reinstallable, never the user's own documents -- same
+    /// endpoint-DLP "copying unlabeled office files" trigger as the plugin cache dirs
+    /// above (found 2026-09-27). Handled separately from mandatoryPatterns/globMatch: '*'
+    /// there is deliberately barred from crossing '/' (see globMatch), and the package's
+    /// own subdirectory sits between "site-packages" and the file (.../site-packages/pptx/
+    /// templates/default.pptx), so a single-"*" glob pattern can never reach it.
+    private static let vendoredOfficeExtensions: Set<String> = ["docx", "pptx", "xlsx", "xls", "xlsb"]
+
+    private static func isVendoredOfficeAsset(pathComponents: [String]) -> Bool {
+        guard let fileName = pathComponents.last,
+              vendoredOfficeExtensions.contains((fileName as NSString).pathExtension.lowercased())
+        else { return false }
+        return pathComponents.dropLast().contains("site-packages")
+    }
+
     let patterns: [String]
 
     /// Single-component literal patterns ("node_modules", "logs"). Matching these is a
@@ -57,6 +74,10 @@ struct ExcludeFilter {
         let pathComponents = Self.pathComponents(path)
 
         for component in pathComponents where literalComponents.contains(component) {
+            return true
+        }
+
+        if Self.isVendoredOfficeAsset(pathComponents: pathComponents) {
             return true
         }
 
