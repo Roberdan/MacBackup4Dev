@@ -13,7 +13,10 @@ struct ExcludeFilter {
         ".gradle/caches", ".gradle/daemon", ".gradle/workers",
         // Re-clonable/re-downloadable working copies (e.g. ~/.gbrain/checkouts, 11 GB+).
         "checkouts",
-        "Caches", "GPUCache", "ShaderCache", "Code Cache",
+        // "cache" (no dot) is a distinct literal from ".cache" above -- e.g. a plugin
+        // manager's <tool>/plugins/cache/ (found 2026-09-27: unlabeled .docx/.pptx/.xlsx
+        // template assets in there tripped an org's endpoint-DLP block during backup).
+        "Caches", "cache", "GPUCache", "ShaderCache", "Code Cache",
         "*.tmp", "*.temp", "*.swp", "*.swo", "*~",
     ]
 

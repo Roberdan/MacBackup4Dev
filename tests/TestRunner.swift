@@ -42,6 +42,7 @@ struct TestRunner {
             ("ExcludeFilter.directorySkip", exclude.test_directorySkip),
             ("ExcludeFilter.dotPatterns", exclude.test_dotPatterns),
             ("ExcludeFilter.checkoutsMandatory", exclude.test_checkoutsAreMandatoryExcludedEvenWithOldConfig),
+            ("ExcludeFilter.pluginCacheDirMandatory", exclude.test_pluginCacheDirIsMandatoryExcludedDistinctFromDotCache),
             ("HiddenDiscovery.deniedCacheNames", hidden.test_deniedCacheNames),
             ("HiddenDiscovery.realConfigSurvives", hidden.test_realConfigSurvives),
             ("HiddenDiscovery.deniedPaths", hidden.test_deniedPaths),

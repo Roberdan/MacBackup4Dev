@@ -24,6 +24,21 @@ final class ExcludeFilterTests {
         }
     }
 
+    func test_pluginCacheDirIsMandatoryExcludedDistinctFromDotCache() throws {
+        // Found 2026-09-27: ".cache" (dotfile, already mandatory) did not cover a plugin
+        // manager's own "cache" subdirectory (no leading dot) -- unlabeled .docx/.pptx/.xlsx
+        // template assets in ~/.codex/plugins/cache/ tripped an org's endpoint-DLP block on
+        // every backup run.
+        let filter = ExcludeFilter(patterns: [])
+        try expect(filter.isExcluded(relativePath: ".codex/plugins/cache/openai-templates/reference.docx"),
+                   "plugin cache dir must be excluded even with an old/empty config.toml")
+        try expect(filter.shouldSkipDirectory(relativePath: ".codex/plugins/cache"),
+                   "cache subtree must be pruned, not just filtered file by file")
+        // A file merely named "cache.ext" is real data, not the directory -- must survive.
+        try expect(!filter.isExcluded(relativePath: "GitHub/app/src/cache.swift"),
+                   "a file named cache.* is not the cache/ directory")
+    }
+
     func test_checkoutsAreMandatoryExcludedEvenWithOldConfig() throws {
         let filter = ExcludeFilter(patterns: [])
         try expect(filter.isExcluded(relativePath: ".gbrain/checkouts/Roberdan/roberdan-os/file.md"),
