@@ -79,13 +79,20 @@ detected but left **off by default** — you opt into them explicitly, exactly a
 
 ### What It Will Never Touch
 
-These paths are hardcoded as forbidden and enforced at both the UI and engine level:
+These paths are hardcoded as forbidden and enforced at both the UI and engine level —
+including the "Aggiungi percorso" picker, which now rejects them on add instead of
+listing them as if they were backupable:
 
 ```
 ~/Library/Mail         ~/Library/Messages      ~/Library/Safari
-~/Library/Containers   ~/Library/CloudStorage  ~/Library/Caches
+~/Library/Containers   ~/Library/Caches
 /Library   /System   /etc   /Applications   /usr   /opt   /private
 ```
+
+`~/Library/CloudStorage` (OneDrive, Dropbox, Google Drive, …) is forbidden by the same
+rule but for a different reason: not a daemon-crash risk, a *provider* one (a sync client
+re-uploading a local copy, a company's DLP policy blocking the copy). See `[protection]`
+below for the config-only opt-in.
 
 No Full Disk Access required. No TCC prompts. No system file access.
 
@@ -235,7 +242,18 @@ monthly = 0     # keep forever
 
 [protection]
 include_rights_managed_files = false
+include_cloud_storage = false
 ```
+
+### CloudStorage opt-in (OneDrive, Dropbox, Google Drive, …)
+
+`~/Library/CloudStorage` is excluded by default (see above). Setting
+`[protection] include_cloud_storage = true` in `config.toml` lifts the exclusion for
+that one path — it does **not** weaken any of the other forbidden paths. There is
+**no UI checkbox for this on purpose**: unlike Rights Management (worst case, a file is
+skipped), touching a cloud-provider folder from a backup tool is one accidental click
+away from that provider's sync client behaving unpredictably. Edit the config file
+directly if you need it.
 
 ### Rights Management protection (managed documents)
 
@@ -278,11 +296,22 @@ Detected markers indicate protection, not license validity. Files changing durin
 can also invalidate inspection. See Microsoft's
 [supported formats](https://learn.microsoft.com/en-us/information-protection/develop/concept-supported-filetypes).
 
-**Endpoint DLP is different:** a company may block USB copies of *unprotected, unlabeled*
+**Endpoint DLP is different:** a company may block copies of *unprotected, unlabeled*
 documents. Such a policy is not stored as Rights Management protection in the file; this
 filter cannot predict it or guarantee that every company dialog disappears. Full Disk Access
 does not override it. The previous `skip_unlabeled_office` / `skip_when_label_unknown` flags
 are retired; older configs adopt the new protection-only default when the new key is absent.
+
+**It is easy to blame the wrong folder here.** `~/Library/CloudStorage` (OneDrive included)
+is always excluded (see "What It Will Never Touch" above), so it is never the source of an
+endpoint-DLP prompt during a backup. The real, repeatable source: an **ordinary Git repo
+that is a configured backup source and happens to contain unlabeled company Office files**
+(e.g. a `.pptx`/`.xlsx`/`.docx` committed into a corporate repo's docs/archive folder). The
+backup engine genuinely reads/copies those — that is a real "copying an unlabeled office
+file" event, not a false positive. Confirmed 2026-09-27: `~/GitHub/FDE_Update/zzArchive/`
+had four such files. Fix at the source, not in this tool: apply a sensitivity label to the
+file (even the unencrypted default label clears it), or add an `exclude.patterns` entry for
+that specific file/folder if it doesn't need to be in the backup at all.
 
 ---
 

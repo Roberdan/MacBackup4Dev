@@ -46,6 +46,7 @@ struct Config {
         out.append("")
         out.append("[protection]")
         out.append("include_rights_managed_files = \(protection.includeRightsManagedFiles)")
+        out.append("include_cloud_storage = \(protection.includeCloudStorage)")
         out.append("")
 
         let data = out.joined(separator: "\n").data(using: .utf8)!
@@ -153,6 +154,7 @@ struct Config {
     private static func assign(section: String, key: String, boolValue: Bool, to config: inout Config) {
         switch "\(section).\(key)" {
         case "protection.include_rights_managed_files": config.protection.includeRightsManagedFiles = boolValue
+        case "protection.include_cloud_storage": config.protection.includeCloudStorage = boolValue
         default: break
         }
     }
@@ -244,6 +246,9 @@ struct RetentionConfig {
 /// Missing keys, including older label-based configurations, default to exclusion.
 struct ProtectionConfig {
     var includeRightsManagedFiles: Bool = false
+    /// OneDrive/Dropbox/Google Drive et al. (~/Library/CloudStorage). Config-only: no UI
+    /// checkbox on purpose -- edit config.toml directly to turn this on.
+    var includeCloudStorage: Bool = false
 }
 
 /// Patterns excluded from every backup by default. Also used by discovery when sizing a

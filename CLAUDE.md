@@ -77,7 +77,19 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 
 ## Forbidden Paths (hardcoded)
 
-Never allow backup of: `Library/Mail`, `Library/Messages`, `Library/Safari`, `Library/Containers`, `Library/CloudStorage`, `Library/Mobile Documents`, `Library/Caches`, `/Library`, `/System`, `/etc`, `/Applications`, `/usr`, `/opt`, `/private`
+Never allow backup of: `Library/Mail`, `Library/Messages`, `Library/Safari`, `Library/Containers`, `Library/Mobile Documents`, `Library/Caches`, `/Library`, `/System`, `/etc`, `/Applications`, `/usr`, `/opt`, `/private`
+
+`Library/CloudStorage` (OneDrive/Dropbox/Google Drive) is forbidden the same way but lives in
+its own list (`ConfigDiscovery.cloudStoragePrefixes`), gated by `isForbidden(_:allowCloudStorage:)`
+and `ProtectionConfig.includeCloudStorage` (config.toml only, no UI checkbox — see README
+"CloudStorage opt-in"). Kept separate from the list above because the risk is different: a
+sync-provider/DLP concern, not the daemon-crash one that applies to the others.
+
+**The picker (`TreeSelectionModel.addCustomPath`, used by "Aggiungi percorso") must call
+`isForbidden` before adding anything.** Before 2026-09-27 it didn't: `NSOpenPanel` lets the
+user browse anywhere, so a forbidden path (e.g. CloudStorage) would show up checked in the
+tree even though `BackupEngine` would still block it at run time — confusing, and the origin
+of a real bug report ("why is OneDrive even in the list").
 
 ## UI State
 

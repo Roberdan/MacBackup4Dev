@@ -18,7 +18,7 @@ enum BackupEngine {
         var allPaths: [String] = []
         for path in config.source.allExpandedPaths() {
             let contracted = ConfigDiscovery.contract(path)
-            if ConfigDiscovery.isForbidden(contracted) {
+            if ConfigDiscovery.isForbidden(contracted, allowCloudStorage: config.protection.includeCloudStorage) {
                 Log.error("BLOCKED forbidden path: \(path)")
                 throw BackupError.forbiddenPath(path)
             }

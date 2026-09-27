@@ -259,6 +259,9 @@ enum ConfigDiscovery {
         ("Cloud", "Tailscale prefs", ["~/Library/Preferences/io.tailscale.ipn.macos.plist",
                                        "~/Library/Application Support/Tailscale"], false),
 
+        // macOS scheduled jobs (per-user launchd agents: what runs automatically and when)
+        ("macOS", "LaunchAgents", ["~/Library/LaunchAgents"], false),
+
         // macOS Preferences (safe plist files -- read-only copies)
         ("macOS", "Keyboard shortcuts", ["~/Library/Preferences/com.apple.symbolichotkeys.plist"], false),
         ("macOS", "Global preferences", ["~/Library/Preferences/.GlobalPreferences.plist"], false),
@@ -306,7 +309,7 @@ enum ConfigDiscovery {
     static let cacheNames: Set<String> = [
         "cache", "caches", ".cache", "cacheddata", "cachedextensions", "gpucache",
         "code cache", "shadercache", "crashpad", "logs", "log", "tmp", "temp",
-        "node_modules", "models", "blobs", "backup", "backups", "sessions",
+        "node_modules", "models", "blobs", "backup", "backups", "checkouts", "sessions",
         "session-state", "session-store", "history", "worktrees", "target", "dist",
         "build", "venv", ".venv", "__pycache__", "registry", "downloads",
         "language_servers", "shell-snapshots", "derivedddata", "deriveddata",
@@ -544,7 +547,7 @@ enum ConfigDiscovery {
         "~/Library/Suggestions", "~/Library/PersonalizationPortrait",
         // iCloud/cloud daemon-managed (touching crashes bird/tccd)
         "~/Library/Containers", "~/Library/Group Containers",
-        "~/Library/Daemon Containers", "~/Library/CloudStorage",
+        "~/Library/Daemon Containers",
         "~/Library/Mobile Documents", "~/Library/Application Support/CloudDocs",
         // System-managed data stores
         "~/Library/Application Support/com.apple.TCC",
@@ -560,21 +563,38 @@ enum ConfigDiscovery {
         "~/Pictures/Photos Library.photoslibrary",
         "~/Pictures/Photo Booth Library",
         "~/Music/Music/Media.localized",
-        // Claude CLI build artifacts (16 GB+)
+        // Claude CLI build artifacts (16 GB+). NOT ~/.claude/scripts (under 1 MB, real
+        // config the user edits) -- that stays a builtin candidate, see below.
         "~/.claude/rust", "~/.claude/debug", "~/.claude/worktrees",
         "~/.claude/node_modules", "~/.claude/file-history",
-        "~/.claude/data", "~/.claude/scripts", "~/.claude/backups",
+        "~/.claude/data", "~/.claude/backups",
         "~/.claude/logs", "~/.claude/.copilot-tracking",
         // System paths
         "/Library", "/System", "/etc", "/Applications", "/usr", "/opt", "/private",
     ]
 
-    static func isForbidden(_ path: String) -> Bool {
+    // Cloud-sync provider folders (OneDrive, Dropbox, Google Drive, iCloud's own mount here
+    // too). Kept separate from forbiddenPrefixes: unlike Mail/Messages/Containers, touching
+    // this does not crash a system daemon -- the risk here is a *provider* concern (a sync
+    // client re-uploading a copy, an org's DLP/rights-management policy blocking the copy),
+    // not a macOS stability one. Off by default (config-only; no UI checkbox -- a one-click
+    // toggle next to the safe rights-management one would invite turning this on by mistake).
+    static let cloudStoragePrefixes: [String] = ["~/Library/CloudStorage"]
+
+    static func isForbidden(_ path: String, allowCloudStorage: Bool = false) -> Bool {
         let expanded = expand(path)
         for prefix in forbiddenPrefixes {
             let expandedPrefix = expand(prefix)
             if expanded == expandedPrefix || expanded.hasPrefix(expandedPrefix + "/") {
                 return true
+            }
+        }
+        if !allowCloudStorage {
+            for prefix in cloudStoragePrefixes {
+                let expandedPrefix = expand(prefix)
+                if expanded == expandedPrefix || expanded.hasPrefix(expandedPrefix + "/") {
+                    return true
+                }
             }
         }
         return false

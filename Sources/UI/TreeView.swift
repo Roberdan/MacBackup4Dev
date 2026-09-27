@@ -186,7 +186,11 @@ final class TreeSelectionModel: ObservableObject {
         else                   { item.paths.forEach { checkedPaths.insert($0) } }
     }
 
-    func addCustomPath(_ path: String) {
+    /// Returns false (and adds nothing) for a system-protected path -- OneDrive/CloudStorage
+    /// included, since that toggle is config-only and this picker has no way to read it.
+    @discardableResult
+    func addCustomPath(_ path: String) -> Bool {
+        guard !ConfigDiscovery.isForbidden(path) else { return false }
         let label = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath).lastPathComponent
         let info = ItemInfo(paths: [path], label: label, sensitive: false, isConflict:
             FileManager.default.fileExists(atPath: NSString(string: path).expandingTildeInPath))
@@ -197,6 +201,7 @@ final class TreeSelectionModel: ObservableObject {
             expandedCategories.insert("Custom")
         }
         checkedPaths.insert(path)
+        return true
     }
 
     func selectAll()    { categories.flatMap(\.items).flatMap(\.paths).forEach { checkedPaths.insert($0) } }

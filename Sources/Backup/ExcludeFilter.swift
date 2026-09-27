@@ -11,6 +11,8 @@ struct ExcludeFilter {
         ".venv", ".tox", ".nox", "*.pyc", "*.pyo",
         ".build", "DerivedData", "build/intermediates", "target/debug", "target/release",
         ".gradle/caches", ".gradle/daemon", ".gradle/workers",
+        // Re-clonable/re-downloadable working copies (e.g. ~/.gbrain/checkouts, 11 GB+).
+        "checkouts",
         "Caches", "GPUCache", "ShaderCache", "Code Cache",
         "*.tmp", "*.temp", "*.swp", "*.swo", "*~",
     ]

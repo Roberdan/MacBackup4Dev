@@ -24,6 +24,14 @@ final class ExcludeFilterTests {
         }
     }
 
+    func test_checkoutsAreMandatoryExcludedEvenWithOldConfig() throws {
+        let filter = ExcludeFilter(patterns: [])
+        try expect(filter.isExcluded(relativePath: ".gbrain/checkouts/Roberdan/roberdan-os/file.md"),
+                   "Re-clonable checkouts must be excluded regardless of what an old config.toml has on disk")
+        try expect(filter.shouldSkipDirectory(relativePath: ".gbrain/checkouts"),
+                   "checkouts subtree must be pruned, not just filtered file by file")
+    }
+
     func test_nestedMultiComponentPatterns() throws {
         let filter = ExcludeFilter(patterns: [".git/objects", "custom/cache"])
         try expect(filter.isExcluded(relativePath: "GitHub/app/.git/objects/pack/data"), "Nested configured paths must match")

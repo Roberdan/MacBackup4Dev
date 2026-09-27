@@ -30,4 +30,22 @@ final class TreeSelectionTests {
             try expect(reopened.includeRightsManagedFiles, "Tutti must also preserve opt-in")
         }
     }
+
+    func test_addCustomPathRejectsForbiddenPaths() throws {
+        try MainActor.assumeIsolated {
+            let model = TreeSelectionModel(mode: .backup)
+            model.categories = []
+            let before = model.categories.count
+            // The "Aggiungi percorso" picker (NSOpenPanel) lets the user browse anywhere on
+            // disk, including OneDrive/CloudStorage -- addCustomPath is the last line of
+            // defense that must reject it before it ever appears checked in the tree.
+            try expect(!model.addCustomPath("~/Library/CloudStorage/OneDrive-Microsoft/FY27"),
+                       "OneDrive path must be rejected")
+            try expect(!model.addCustomPath("~/Library/Mail"),
+                       "any forbidden path must be rejected, not just CloudStorage")
+            try expectEqual(model.categories.count, before, "rejected paths add no category/row")
+            try expect(model.addCustomPath("~/Desktop/SomeFolder"), "an ordinary path must still be accepted")
+            try expect(model.checkedPaths.contains("~/Desktop/SomeFolder"), "accepted path must be checked")
+        }
+    }
 }

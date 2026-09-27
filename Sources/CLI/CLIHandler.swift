@@ -357,7 +357,7 @@ enum CLIHandler {
             guard subArgs.count >= 2 else { throw err("Usage: config add <path>") }
             var cfg = try loadConfig(configPath: configPath)
             let path = ConfigDiscovery.contract(expandPath(subArgs[1]))
-            guard !ConfigDiscovery.isForbidden(path) else {
+            guard !ConfigDiscovery.isForbidden(path, allowCloudStorage: cfg.protection.includeCloudStorage) else {
                 throw err("Path is system-protected: \(path)")
             }
             guard !cfg.source.paths.contains(path) else {
