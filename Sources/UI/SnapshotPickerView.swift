@@ -89,7 +89,7 @@ struct SnapshotPickerView: View {
                 Button("Annulla") { onCancel() }
                     .keyboardShortcut(.escape)
                 Spacer()
-                Button("Restore da questo snapshot →") {
+                Button("Ripristina da questo snapshot →") {
                     if let entry = selectedEntry { onPick(entry.url) }
                 }
                 .keyboardShortcut(.return)

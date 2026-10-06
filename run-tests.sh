@@ -1,6 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+# The Command Line Tools ship without the SwiftUI macro plugins (@State fails with
+# "plugin for module 'SwiftUIMacros' not found"). Use the full Xcode when it is there.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Developer ] \
+   && [[ "$(xcode-select -p 2>/dev/null)" == *CommandLineTools* ]]; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+
 echo "🧪 Running RustyMacBackup Tests..."
 mkdir -p build
 

@@ -1,312 +1,274 @@
 import SwiftUI
 
-/// SwiftUI content of the menu bar popover.
+/// SwiftUI content of the menu bar popover (3.0).
+/// First line answers "am I protected, and since when?" counting only COMPLETE snapshots;
+/// then the problems, each with the button that fixes it; then the actions.
 /// Observes AppUIState via @EnvironmentObject; all actions go through state callbacks.
 struct PopoverView: View {
     @EnvironmentObject var state: AppUIState
     @State private var volumes: [URL] = []
+    @State private var showAllIssues = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // ZONE 1 — Header (always visible, fixed height)
             headerSection
             updateBanner
+            VStack(alignment: .leading, spacing: 10) {
+                if state.appState == .needsSetup {
+                    diskSetupSection
+                } else {
+                    heroCard
+                    if state.isRunning, let s = state.status { progressSection(status: s) }
+                    if let phase = state.cleanupPhase { cleanupRow(phase) }
+                    if state.appState == .error { errorCard }
+                    if let result = state.restoreResult { restoreResultCard(result) }
+                    issuesList
+                    if let p = state.protection, state.appState != .diskAbsent { timeline(p) }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             Divider()
-            // ZONE 2 — Health (status, stats, error/restore cards, progress)
-            healthZone
+            primaryActions
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .disabled(state.isCleaning)
             Divider()
-            // ZONE 3 — Actions (primary filled + secondary list)
-            actionsZone
-            Divider()
-            // ZONE 4 — Context (quit)
-            contextZone
+            secondaryActions
+                .disabled(state.isCleaning)
+                .padding(.vertical, 4)
         }
-        .frame(width: 320)
+        .frame(width: 340)
         .onAppear { if state.appState == .needsSetup { refreshVolumes() } }
         .onChange(of: state.appState) { _, newState in
             if newState == .needsSetup { refreshVolumes() }
         }
     }
 
-    // MARK: - Zone 2: Health
-
-    private var healthZone: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            statusSection
-            if state.appState == .needsSetup {
-                Divider().padding(.horizontal, 14)
-                diskSetupSection
-            }
-        }
-        .frame(minHeight: 64, alignment: .top)
-    }
-
-    // MARK: - Zone 3: Actions
-
-    private var actionsZone: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Primary action — contextual, filled button
-            primaryActionButton
-                .disabled(state.isCleaning)
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
-            // Secondary actions — always same structure for stable layout
-            secondaryActions
-                .disabled(state.isCleaning)
-        }
-        .padding(.bottom, 4)
-    }
-
-    @ViewBuilder
-    private var primaryActionButton: some View {
-        switch state.appState {
-        case .running:
-            Button { state.onRequestStop?() } label: {
-                Label("Stop Backup", systemImage: "stop.circle.fill")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.mlRosso)
-            .accessibilityHint("Interrompe il backup in corso")
-
-        case .stopping:
-            Label("Stopping…", systemImage: "stop.circle")
-                .frame(maxWidth: .infinity, alignment: .center)
-                .foregroundColor(.secondary)
-                .font(.body)
-
-        case .restoring:
-            Label("Restore in corso…", systemImage: "arrow.down.doc")
-                .frame(maxWidth: .infinity, alignment: .center)
-                .foregroundColor(.secondary)
-                .font(.body)
-
-        case .needsSetup, .diskAbsent:
-            EmptyView()
-
-        default:
-            Button { state.onRequestBackup?() } label: {
-                Label("Start Backup", systemImage: "arrow.up.doc.fill")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.mlGold)
-            .accessibilityHint("Avvia un nuovo backup")
-        }
-    }
-
-    private var secondaryActions: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if state.hasBackups {
-                actionButton("Ripristina snapshot…", icon: "arrow.down.doc",
-                             hint: "Ripristina file da uno snapshot di backup") { state.onRequestRestore?() }
-            }
-            if state.canUndo {
-                actionButton("Annulla ultimo restore", icon: "arrow.uturn.backward", tint: .orange,
-                             hint: "Ripristina i file originali sovrascritti dall'ultimo restore") {
-                    state.onRequestUndoRestore?()
-                }
-            }
-            scheduleRow
-            actionButton("Libera spazio…", icon: "trash",
-                         hint: "Elimina backup più vecchi di 1 mese, 6 mesi o 1 anno, dopo un'anteprima") {
-                state.onRequestCleanupMenu?()
-            }
-            .disabled(state.isRunning || state.config == nil || state.appState == .diskAbsent)
-            Divider().padding(.horizontal, 14).padding(.vertical, 2)
-            actionButton("Apri cartella backup", icon: "folder",
-                         hint: "Apre la cartella di backup nel Finder") { state.onRequestOpenFolder?() }
-            actionButton("Espelli disco", icon: "eject",
-                         hint: "Smonta il disco di backup in modo sicuro") { state.onRequestEject?() }
-        }
-    }
-
-    // MARK: - Zone 4: Context
-
-    private var contextZone: some View {
-        actionButton("Esci", icon: "power",
-                     hint: "Chiude RustyMacBackup") { state.onRequestQuit?() }
-            .disabled(state.isCleaning)
-            .padding(.vertical, 2)
-    }
-
-    // MARK: - Update banner
-
-    @ViewBuilder
-    private var updateBanner: some View {
-        if let version = state.updateAvailable,
-           state.dismissedUpdateVersion != version {
-            Divider()
-            HStack(spacing: 8) {
-                Button { state.onRequestUpdate?() } label: {
-                    HStack(spacing: 8) {
-                        if state.isUpdating {
-                            ProgressView().controlSize(.small)
-                            // F-17: explicit install phase text
-                            Text(updatePhaseLabel)
-                                .font(.subheadline).foregroundColor(.mlInfo)
-                        } else {
-                            Image(systemName: "arrow.down.circle.fill").foregroundColor(.mlInfo)
-                            Text("Aggiornamento v\(version) disponibile")
-                                .font(.subheadline).foregroundColor(.mlInfo)
-                            Spacer()
-                            Text("Installa").font(.subheadline.weight(.semibold)).foregroundColor(.mlInfo)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(state.isUpdating)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityHint("Scarica e installa la versione \(version)")
-
-                // F-17: Dismiss button
-                if !state.isUpdating {
-                    Button {
-                        state.dismissedUpdateVersion = version
-                    } label: {
-                        Image(systemName: "xmark").font(.caption).foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Ignora aggiornamento \(version)")
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Color.mlInfo.opacity(0.08))
-        }
-    }
-
-    private var updatePhaseLabel: String {
-        switch state.updatePhase {
-        case .downloading: return "Scaricamento…"
-        case .verifying:   return "Verifica firma…"
-        case .installing:  return "Installazione…"
-        case nil:          return "Aggiornamento in corso…"
-        }
-    }
-
     // MARK: - Header
 
-    /// Reads the running bundle rather than a literal, so it can never disagree with the
-    /// app it is printed on. A `swiftc` build with no bundle shows "dev", which is the
-    /// honest answer there.
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     }
 
     private var headerSection: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(statusDotColor)
-                .frame(width: 8, height: 8)
-                .accessibilityLabel("Stato: \(statusText)")  // F-16: non solo colore
-            Text("RustyMacBackup")
-                .font(.headline)
-            Text("v\(appVersion)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .accessibilityLabel("Versione \(appVersion)")
+            Circle().fill(levelColor).frame(width: 9, height: 9)
+                .accessibilityLabel("Stato: \(heroHeadline)")
+            Text("Backup").font(.headline)
             Spacer()
-            if !statusBadge.isEmpty {
-                Text(statusBadge)
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(statusDotColor)
-                    .accessibilityLabel(statusBadge)
-            }
+            if let c = state.config { diskLabel(c) }
+            Text("v\(appVersion)").font(.caption2).foregroundColor(.secondary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
     }
 
-    // MARK: - Status / Stats / Progress
+    @ViewBuilder
+    private func diskLabel(_ config: Config) -> some View {
+        let (free, total) = DiskDiagnostics.diskSpace(at: config.destination.path)
+        let vol = URL(fileURLWithPath: config.destination.path).deletingLastPathComponent().lastPathComponent
+        if total > 0 {
+            Text("\(vol) · \(Fmt.formatBytes(free)) liberi")
+                .font(.caption).foregroundColor(diskSpaceColor(free: free))
+        } else {
+            Text("\(vol) non collegato").font(.caption).foregroundColor(.mlRosso)
+        }
+    }
 
-    private var statusSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if let phase = state.cleanupPhase {
+    // MARK: - Hero
+
+    private var heroLevel: ProtectionSummary.Level {
+        switch state.appState {
+        case .error, .diskAbsent: return state.protection?.level == .protected ? .attention : (state.protection?.level ?? .unprotected)
+        default: return state.protection?.level ?? .unprotected
+        }
+    }
+
+    private var levelColor: Color {
+        if state.appState == .running || state.appState == .restoring { return .mlGold }
+        switch heroLevel {
+        case .protected: return .mlVerde
+        case .attention: return .orange
+        case .unprotected: return .mlRosso
+        }
+    }
+
+    private var heroHeadline: String {
+        switch state.appState {
+        case .running: return "Backup in corso…"
+        case .stopping: return "Interrompo il backup…"
+        case .restoring: return "Ripristino in corso…"
+        case .diskAbsent:
+            return "Disco di backup non collegato" + (state.protection?.lastCompleteDate.map { " · ultimo completo \(ProtectionSummary.ago(Date().timeIntervalSince($0)))" } ?? "")
+        case .error: return "L'ultimo backup non è riuscito"
+        default: return state.protection?.headline ?? "Nessun backup"
+        }
+    }
+
+    private var heroDetail: String {
+        switch state.appState {
+        case .diskAbsent: return "Collega il disco: il backup riparte da solo all'orario previsto."
+        case .error: return state.protection?.lastCompleteDate.map { "Ultimo completo: \(ProtectionSummary.dateLabel($0))" } ?? ""
+        default:
+            var parts: [String] = []
+            if let d = state.protection?.detail, !d.isEmpty { parts.append(d) }
+            return parts.joined(separator: " · ")
+        }
+    }
+
+    private var heroCard: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(heroHeadline).font(.system(size: 15, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+            if !heroDetail.isEmpty {
+                Text(heroDetail).font(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let p = state.protection, p.level == .protected, state.appState == .idle {
                 HStack(spacing: 6) {
-                    if phase.showsProgress { ProgressView().controlSize(.small) }
-                    Text(phase.label).font(.subheadline)
+                    chip(p.reposWithSavedCommits > 0 ? "\(p.reposWithSavedCommits) repo con commit salvati" : "Commit non pubblicati: nessuno", ok: true)
+                    if p.databasesSaved > 0 { chip("\(p.databasesSaved) database salvati", ok: true) }
                 }
-                .accessibilityElement(children: .combine)
-            } else {
-                Text(statusText)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            if let s = state.status, !s.lastCompleted.isEmpty {
-                Text("\(Fmt.timeAgo(from: s.lastCompleted))  ·  \(Fmt.formatFileCount(s.filesTotal)) files  ·  \(Fmt.formatBytes(s.bytesCopied))")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else if state.appState != .running && state.appState != .restoring && state.appState != .stopping {
-                Text("No backups yet")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            if let c = state.config {
-                diskSpaceRow(for: c)
-            }
-
-            // F-15: Diagnostics card when last backup failed
-            if state.appState == .error {
-                errorCard
-            }
-
-            // F-18: Restore result card visible for 60s after completion
-            if let result = state.restoreResult {
-                restoreResultCard(result)
-            }
-
-            if (state.appState == .running || state.appState == .restoring || state.appState == .stopping),
-               let s = state.status {
-                progressSection(status: s)
+                .padding(.top, 4)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(levelColor.opacity(0.12))
+        .cornerRadius(10)
+        .accessibilityElement(children: .combine)
     }
 
-    // MARK: - F-15: Error diagnostics card
+    private func chip(_ text: String, ok: Bool) -> some View {
+        Text(text).font(.caption2)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background((ok ? Color.mlVerde : Color.orange).opacity(0.14))
+            .foregroundColor(ok ? .mlVerde : .orange)
+            .clipShape(Capsule())
+    }
+
+    // MARK: - Issues
+
+    private struct Issue: Identifiable {
+        let id: String
+        let title: String
+        let detail: String
+        let primary: (String, () -> Void)?
+        let secondary: (String, () -> Void)?
+    }
+
+    private var issues: [Issue] {
+        var out: [Issue] = []
+        if let p = state.protection, p.latestIsIncomplete, state.appState == .idle || state.appState == .stale {
+            out.append(Issue(id: "incomplete", title: "Ultimo backup incompleto",
+                             detail: p.latestReasons.prefix(2).joined(separator: " "),
+                             primary: ("Riprova", { state.onRequestBackup?() }), secondary: nil))
+        }
+        for gap in state.coverageGaps {
+            out.append(Issue(id: "gap-\(gap.path)",
+                             title: gap.kind == .database ? "Un database non viene copiato" : "Una cartella non viene salvata",
+                             detail: "\(gap.path) · cambiata \(ProtectionSummary.dateLabel(ISO8601DateFormatter().date(from: gap.lastModified) ?? Date()))",
+                             primary: ("Aggiungi", { state.onAddCoverage?(gap) }),
+                             secondary: ("Ignora", { state.onIgnoreCoverage?(gap) })))
+        }
+        return out
+    }
+
+    @ViewBuilder
+    private var issuesList: some View {
+        let all = issues
+        if !all.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(showAllIssues ? all : Array(all.prefix(3))) { issue in
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(issue.title).font(.subheadline.weight(.semibold))
+                            Text(issue.detail).font(.caption).foregroundColor(.secondary)
+                                .lineLimit(2).truncationMode(.middle)
+                        }
+                        Spacer(minLength: 4)
+                        if let s = issue.secondary {
+                            Button(s.0, action: s.1).buttonStyle(.borderless).font(.caption)
+                        }
+                        if let p = issue.primary {
+                            Button(p.0, action: p.1).buttonStyle(.borderedProminent).tint(.mlGold)
+                                .controlSize(.small)
+                        }
+                    }
+                    .padding(8)
+                    .background(Color(.controlBackgroundColor))
+                    .cornerRadius(8)
+                }
+                if all.count > 3 {
+                    Button(showAllIssues ? "Mostra meno" : "Altri \(all.count - 3) avvisi") { showAllIssues.toggle() }
+                        .buttonStyle(.borderless).font(.caption)
+                }
+            }
+        }
+    }
+
+    // MARK: - Timeline (last 14 days)
+
+    private func timeline(_ p: ProtectionSummary) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Ultimi 14 giorni").font(.caption2).foregroundColor(.secondary)
+            HStack(spacing: 3) {
+                ForEach(Array(p.days.enumerated()), id: \.offset) { _, day in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(day == .complete ? Color.mlVerde : day == .incomplete ? Color.orange : Color.secondary.opacity(0.18))
+                        .frame(height: 14)
+                }
+            }
+            .accessibilityLabel("\(p.days.filter { $0 == .complete }.count) giorni con un backup completo su 14")
+        }
+    }
+
+    // MARK: - Progress, cleanup, error, restore result
+
+    private func progressSection(status s: BackupStatusFile) -> some View {
+        let pct = s.filesTotal > 0 ? Double(s.filesDone) / Double(s.filesTotal) : 0
+        return VStack(alignment: .leading, spacing: 3) {
+            ProgressView(value: pct).tint(.mlGold)
+                .accessibilityValue("\(Int(pct * 100)) percento completato")
+            HStack(spacing: 8) {
+                Text("\(Fmt.formatFileCount(s.filesDone)) file").font(.caption.monospacedDigit()).foregroundColor(.secondary)
+                Spacer()
+                if s.bytesPerSec > 0 { Text(Fmt.formatBytes(s.bytesPerSec) + "/s").font(.caption).foregroundColor(.secondary) }
+                if s.etaSecs > 0 { Text("ancora \(Fmt.formatDuration(Double(s.etaSecs)))").font(.caption).foregroundColor(.secondary) }
+            }
+            if !s.currentFile.isEmpty {
+                Text(s.currentFile).font(.caption2).foregroundColor(Color(.tertiaryLabelColor))
+                    .lineLimit(1).truncationMode(.middle)
+            }
+        }
+    }
+
+    private func cleanupRow(_ phase: CleanupPhase) -> some View {
+        HStack(spacing: 6) {
+            if phase.showsProgress { ProgressView().controlSize(.small) }
+            Text(phase.label).font(.subheadline)
+        }
+    }
 
     @ViewBuilder
     private var errorCard: some View {
-        if let errors = loadErrors(), let topCategory = topErrorCategory(errors) {
+        if let errors = loadErrors(), let top = topErrorCategory(errors) {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.mlRosso)
-                        .font(.caption)
-                    Text(ErrorReporter.localizedTitle(for: topCategory))
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.mlRosso)
-                }
-                Text(ErrorReporter.suggestedAction(for: topCategory))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                Text(ErrorReporter.localizedTitle(for: top)).font(.caption.weight(.semibold)).foregroundColor(.mlRosso)
+                Text(ErrorReporter.suggestedAction(for: top)).font(.caption2).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    Button("Mostra log") {
-                        NSWorkspace.shared.open(ErrorReporter.logURL)
-                    }
-                    .font(.caption)
-                    .buttonStyle(.plain)
-                    .foregroundColor(.mlInfo)
-                    .accessibilityHint("Apre il file di log in Console")
+                HStack(spacing: 10) {
+                    Button("Mostra log") { NSWorkspace.shared.open(ErrorReporter.logURL) }
                     Button("Riprova") { state.onRequestBackup?() }
-                        .font(.caption)
-                        .buttonStyle(.plain)
-                        .foregroundColor(.mlInfo)
-                        .accessibilityHint("Avvia un nuovo backup")
                 }
+                .buttonStyle(.borderless).font(.caption)
             }
             .padding(8)
-            .background(Color.mlRosso.opacity(0.07))
-            .cornerRadius(6)
-            .padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.mlRosso.opacity(0.08))
+            .cornerRadius(8)
         }
     }
 
@@ -316,118 +278,143 @@ struct PopoverView: View {
     }
 
     private func topErrorCategory(_ errors: BackupErrorFile) -> String? {
-        errors.categories
-            .filter { $0.value.count > 0 }
-            .max(by: { $0.value.count < $1.value.count })?.key
+        errors.categories.filter { $0.value.count > 0 }.max(by: { $0.value.count < $1.value.count })?.key
     }
 
-    // MARK: - F-18: Restore result card
-
-    @ViewBuilder
     private func restoreResultCard(_ result: RestoreResultSummary) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill").foregroundColor(.mlVerde).font(.caption)
-                Text("Restore completato").font(.caption.weight(.semibold)).foregroundColor(.mlVerde)
-            }
-            Text("\(result.restored) ripristinati · \(result.overwritten) sovrascritti · \(result.failed) falliti")
+            Text("Ripristino completato").font(.caption.weight(.semibold)).foregroundColor(.mlVerde)
+            Text("\(result.restored) ripristinati · \(result.overwritten) sostituiti · \(result.failed) non riusciti")
                 .font(.caption2).foregroundColor(.secondary)
             if !result.backedUpTo.isEmpty {
-                Text("Originali in ~/.rustybackup-pre-restore/")
-                    .font(.caption2).foregroundColor(.secondary)
+                Text("Le versioni precedenti sono annullabili dal menu.").font(.caption2).foregroundColor(.secondary)
             }
         }
         .padding(8)
-        .background(Color.mlVerde.opacity(0.07))
-        .cornerRadius(6)
-        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.mlVerde.opacity(0.08))
+        .cornerRadius(8)
     }
 
+    // MARK: - Actions
+
     @ViewBuilder
-    private func diskSpaceRow(for config: Config) -> some View {
-        let (free, total) = DiskDiagnostics.diskSpace(at: config.destination.path)
-        if total > 0 {
-            let vol = URL(fileURLWithPath: config.destination.path)
-                .deletingLastPathComponent().lastPathComponent
-            Text("\(vol): \(Fmt.formatBytes(free)) free")
-                .font(.caption)
-                .foregroundColor(diskSpaceColor(free: free))
+    private var primaryActions: some View {
+        HStack(spacing: 8) {
+            switch state.appState {
+            case .running:
+                Button { state.onRequestStop?() } label: {
+                    Label("Interrompi", systemImage: "stop.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(.mlRosso)
+            case .stopping, .restoring:
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+            case .needsSetup, .diskAbsent:
+                Button { state.onRequestRestore?() } label: {
+                    Label("Ripristina…", systemImage: "clock.arrow.circlepath").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!state.hasBackups)
+            default:
+                Button { state.onRequestBackup?() } label: {
+                    Label("Esegui ora", systemImage: "arrow.up.circle.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(.mlGold)
+                Button { state.onRequestRestore?() } label: {
+                    Label("Ripristina…", systemImage: "clock.arrow.circlepath").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!state.hasBackups)
+            }
+        }
+        .controlSize(.large)
+    }
+
+    private var secondaryActions: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if state.canUndo {
+                row("Annulla l'ultimo ripristino", icon: "arrow.uturn.backward") { state.onRequestUndoRestore?() }
+            }
+            if state.onRequestScheduleMenu != nil {
+                row("Pianificazione: \(state.scheduleLabel)", icon: "clock") { state.onRequestScheduleMenu?() }
+            }
+            row("Libera spazio…", icon: "trash") { state.onRequestCleanupMenu?() }
+                .disabled(state.isRunning || state.config == nil || state.appState == .diskAbsent)
+            row("Apri cartella dei backup", icon: "folder") { state.onRequestOpenFolder?() }
+            row("Espelli disco", icon: "eject") { state.onRequestEject?() }
+                .disabled(state.isRunning || state.appState == .diskAbsent)
+            Divider().padding(.vertical, 3)
+            row("Esci", icon: "power") { state.onRequestQuit?() }
         }
     }
 
+    private func row(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading)
+                .foregroundColor(Color(.labelColor))
+        }
+        .buttonStyle(.plain)
+        .modifier(DimWhenDisabled())
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: - Update banner
+
     @ViewBuilder
-    private func progressSection(status s: BackupStatusFile) -> some View {
-        let pct = s.filesTotal > 0 ? Double(s.filesDone) / Double(s.filesTotal) : 0
-        // F-21: color reflects current backup phase
-        let phaseColor: Color = {
-            switch s.phase {
-            case "scanning":   return .secondary
-            case "copying":    return .mlGold
-            case "linking":    return .mlVerde
-            case "finalizing": return .mlVerde
-            case "cancelled":  return .mlRosso
-            default:           return .mlGold
-            }
-        }()
-
-        VStack(alignment: .leading, spacing: 3) {
-            ProgressView(value: pct)
-                .tint(phaseColor)
-                .accessibilityValue("\(Int(pct * 100)) percento completato")  // F-16
-
+    private var updateBanner: some View {
+        if let version = state.updateAvailable, state.dismissedUpdateVersion != version {
             HStack(spacing: 8) {
-                if s.filesTotal > 0 {
-                    Text("\(Int(pct * 100))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundColor(.secondary)
+                Button { state.onRequestUpdate?() } label: {
+                    HStack(spacing: 8) {
+                        if state.isUpdating {
+                            ProgressView().controlSize(.small)
+                            Text(updatePhaseLabel).font(.subheadline).foregroundColor(.mlInfo)
+                        } else {
+                            Image(systemName: "arrow.down.circle.fill").foregroundColor(.mlInfo)
+                            Text("Versione \(version) disponibile").font(.subheadline).foregroundColor(.mlInfo)
+                            Spacer()
+                            Text("Installa").font(.subheadline.weight(.semibold)).foregroundColor(.mlInfo)
+                        }
+                    }
                 }
-                Spacer()
-                if s.bytesPerSec > 0 {
-                    Text(Fmt.formatBytes(s.bytesPerSec) + "/s")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                if s.etaSecs > 0 {
-                    Text("ETA: \(Fmt.formatDuration(Double(s.etaSecs)))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                .buttonStyle(.plain)
+                .disabled(state.isUpdating)
+                if !state.isUpdating {
+                    Button { state.dismissedUpdateVersion = version } label: {
+                        Image(systemName: "xmark").font(.caption).foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Ignora aggiornamento \(version)")
                 }
             }
-
-            if !s.currentFile.isEmpty {
-                Text(s.currentFile)
-                    .font(.caption2)
-                    .foregroundColor(Color(.tertiaryLabelColor))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color.mlInfo.opacity(0.08))
         }
-        .padding(.top, 4)
     }
 
-    // MARK: - Disk Setup
+    private var updatePhaseLabel: String {
+        switch state.updatePhase {
+        case .downloading: return "Scaricamento…"
+        case .verifying: return "Verifica firma…"
+        case .installing: return "Installazione…"
+        case nil: return "Aggiornamento in corso…"
+        }
+    }
+
+    // MARK: - Disk setup
 
     private var diskSetupSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Select Backup Disk")
-                .font(.subheadline.weight(.semibold))
-
+            Text("Scegli il disco di backup").font(.subheadline.weight(.semibold))
             if volumes.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundColor(.mlRosso)
-                    Text("No external disk connected")
-                        .font(.caption)
-                        .foregroundColor(.mlRosso)
-                }
+                Text("Nessun disco esterno collegato.").font(.caption).foregroundColor(.mlRosso)
             } else {
-                ForEach(volumes, id: \.path) { vol in
-                    diskButton(for: vol)
-                }
+                ForEach(volumes, id: \.path) { vol in diskButton(for: vol) }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 
     @ViewBuilder
@@ -435,16 +422,10 @@ struct PopoverView: View {
         let (free, total) = DiskDiagnostics.diskSpace(at: vol.path)
         Button { state.onSelectDisk?(vol) } label: {
             HStack(spacing: 8) {
-                Image(systemName: "externaldrive")
-                    .foregroundColor(.mlInfo)
+                Image(systemName: "externaldrive").foregroundColor(.mlInfo)
                 Text(vol.lastPathComponent)
-                    .font(.body)
                 Spacer()
-                if total > 0 {
-                    Text(Fmt.formatBytes(free) + " free")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                if total > 0 { Text(Fmt.formatBytes(free) + " liberi").font(.caption).foregroundColor(.secondary) }
             }
             .padding(7)
             .background(Color(.controlBackgroundColor))
@@ -453,89 +434,20 @@ struct PopoverView: View {
         .buttonStyle(.plain)
     }
 
-    // (old actionSection removed — replaced by actionsZone above)
-
-    @ViewBuilder
-    private var scheduleRow: some View {
-        if state.onRequestScheduleMenu != nil {
-            actionButton("Pianificazione: \(state.scheduleLabel)", icon: "clock") {
-                state.onRequestScheduleMenu?()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func actionButton(_ title: String, icon: String, tint: Color = .primary,
-                               hint: String = "",
-                               action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .foregroundColor(tint == .primary ? Color(.labelColor) : tint)
-        }
-        .buttonStyle(.plain)
-        .modifier(DimWhenDisabled())
-        .font(.body)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .accessibilityHint(hint)  // F-16
-    }
-
     // MARK: - Helpers
 
-    private var statusDotColor: Color {
-        switch state.appState {
-        case .idle:           return .mlVerde
-        case .running:        return .mlGold
-        case .stopping:       return .orange
-        case .restoring:      return .mlInfo
-        case .error:          return .mlRosso
-        case .diskAbsent:     return .mlRosso
-        case .stale:          return .orange
-        case .needsSetup:     return .mlInfo
-        }
-    }
-
-    private var statusBadge: String {
-        switch state.appState {
-        case .idle, .needsSetup: return ""
-        case .running:    return "RUNNING"
-        case .stopping:   return "STOPPING"
-        case .restoring:  return "RESTORING"
-        case .error:      return "ERROR"
-        case .diskAbsent: return "NO DISK"
-        case .stale:      return "OVERDUE"
-        }
-    }
-
-    private var statusText: String {
-        switch state.appState {
-        case .needsSetup: return "Setup required — select a disk"
-        case .idle:       return "Ready"
-        case .running:    return "Backup in progress…"
-        case .stopping:   return "Stopping backup…"
-        case .restoring:  return "Restore in progress…"
-        case .error:      return "Last backup failed"
-        case .diskAbsent: return "Backup disk not connected"
-        case .stale:      return "Backup overdue (>24h)"
-        }
-    }
-
     private func diskSpaceColor(free: UInt64) -> Color {
-        if free > 50 * 1_073_741_824 { return .mlVerde }
+        if free > 50 * 1_073_741_824 { return .secondary }
         if free > 10 * 1_073_741_824 { return .orange }
         return .mlRosso
     }
 
     private func refreshVolumes() {
         guard let vols = FileManager.default.mountedVolumeURLs(
-            includingResourceValuesForKeys: [.volumeNameKey],
-            options: [.skipHiddenVolumes]) else { return }
+            includingResourceValuesForKeys: [.volumeNameKey], options: [.skipHiddenVolumes]) else { return }
         volumes = vols.filter {
             let p = $0.path
-            return p != "/" && p != "/System/Volumes/Data"
-                && $0.lastPathComponent != "Macintosh HD" && p.hasPrefix("/Volumes/")
+            return p != "/" && p != "/System/Volumes/Data" && $0.lastPathComponent != "Macintosh HD" && p.hasPrefix("/Volumes/")
         }
     }
 }

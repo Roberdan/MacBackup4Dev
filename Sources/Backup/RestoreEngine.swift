@@ -46,7 +46,7 @@ enum RestoreEngine {
         var items: [RestoreItem] = []
         for url in contents {
             let name = url.lastPathComponent
-            if name == "_environment" { continue }
+            if SelectiveRestore.internalDirectories.contains(name) { continue }
 
             let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
             let isDir = values?.isDirectory ?? false
@@ -185,6 +185,8 @@ enum RestoreEngine {
 
     // MARK: - Undo restore
 
+    static var preRestoreBaseURL: URL { preRestoreBase }
+
     private static var preRestoreBase: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".rustybackup-pre-restore")
@@ -287,7 +289,7 @@ enum RestoreEngine {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["brew", "bundle", "install",
-                             "--file=\(brewfile.path)", "--no-lock"]
+                             "--file=\(brewfile.path)"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {

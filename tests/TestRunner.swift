@@ -21,8 +21,44 @@ struct TestRunner {
         let hidden = HiddenDiscoveryTests()
         let tree = TreeSelectionTests()
         let cleanup = SnapshotCleanupTests()
+        let safety = SafetyTests()
+        let restore = RestoreTests()
+        let protectionSummary = ProtectionSummaryTests()
+        let guards = RestoreGuardTests()
+        let review = ReviewFixTests()
+        let review2 = ReviewRound2Tests()
+        let realRun = RealRunTests()
 
         let suites: [(String, TestClosure)] = [
+            ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
+            ("Safety.copyErrorMakesIncomplete", safety.test_copyErrorMakesSnapshotIncomplete),
+            ("Safety.shrinkWarning", safety.test_shrinkWarningOnEmptiedHome),
+            ("Safety.retentionProtectsComplete", safety.test_retentionProtectsLastCompleteSnapshots),
+            ("Safety.retentionPausesAfterShrink", safety.test_retentionPausesAfterShrink),
+            ("Safety.unpushedCommitsSurvive", safety.test_unpushedCommitsSurviveRestore),
+            ("Safety.sqliteCopied", safety.test_sqliteIsCopiedConsistently),
+            ("Safety.coverageFindsUncovered", safety.test_coverageFindsActiveUncoveredFolder),
+            ("Safety.configRoundTrip", safety.test_configRoundTripNewSections),
+            ("Restore.topicWildcardsAndJunk", restore.test_topicFilesExpandWildcardsAndSkipJunk),
+            ("Restore.configTopics", restore.test_configTopicsOverrideAndExtend),
+            ("Restore.planApplyPerFileUndo", restore.test_planApplyAndPerFileUndo),
+            ("Restore.versions", restore.test_versionsAreDistinctNewestFirst),
+            ("Restore.newMacRepository", restore.test_newMacRebuildsRepository),
+            ("Protection.levels", protectionSummary.test_levels),
+            ("Restore.symlinksAndDotDot", guards.test_symlinksAndDotDotAreLeftAlone),
+            ("Review.H1.undoKeepsChanged", review.test_undoKeepsFilesChangedAfterRestore),
+            ("Review.H2.unreadableRepo", review.test_unreadableRepositoryMakesSnapshotIncomplete),
+            ("Review.H3.missingSource", review.test_missingSourceAfterCompleteSnapshotIsIncomplete),
+            ("Review.H4.deletedRemoteBranch", review.test_bundleAppliesWhenRemoteBranchWasDeleted),
+            ("Review.M4.typeConflict", review.test_typeConflictIsLeftAlone),
+            ("Review.M5.safeRelative", review.test_safeRelativeRefusesTricks),
+            ("Review.M8.slotPrefersComplete", review.test_retentionSlotPrefersComplete),
+            ("Review.shrinkBaseline", review.test_shrinkAgainstUnverifiedBaseline),
+            ("Review.R1.stopMidBackup", review2.test_stopMidBackupDoesNotCrash),
+            ("Review.R2.longOutput", review2.test_longOutputIsComplete),
+            ("Review.R3.bundleHardLinked", review2.test_unchangedBundleIsHardLinked),
+            ("RealRun.objectlessGit", realRun.test_objectlessGitIsAWarning),
+            ("RealRun.walDatabase", realRun.test_walDatabaseIsCopied),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

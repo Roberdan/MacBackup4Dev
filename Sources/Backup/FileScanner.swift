@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct FileEntry {
     let relativePath: String
@@ -32,9 +33,16 @@ enum FileScanner {
             // Always use HOME as base — ensures snapshot preserves full relative paths
             // e.g. ~/GitHub/MyRepo/file.swift → "GitHub/MyRepo/file.swift" (not "file.swift")
             let basePath = basePaths[index].hasSuffix("/") ? basePaths[index] : basePaths[index] + "/"
-            guard FileManager.default.fileExists(atPath: source.path) else { continue }
+            // The source existed when the backup started: gone now means data not saved.
+            guard FileManager.default.fileExists(atPath: source.path) else {
+                onTraversalError?(source.path, NSError(domain: NSCocoaErrorDomain, code: NSFileNoSuchFileError,
+                    userInfo: [NSLocalizedDescriptionKey: "Cartella sparita durante il backup"]))
+                continue
+            }
+            // Outside the home the relative path is the absolute path without its leading "/",
+            // the same shape single-file sources get (review R8).
             let sourceRelativePath = source.path.hasPrefix(basePath)
-                ? String(source.path.dropFirst(basePath.count)) : source.path
+                ? String(source.path.dropFirst(basePath.count)) : String(source.path.drop(while: { $0 == "/" }))
             guard !excludeFilter.isExcluded(relativePath: sourceRelativePath) else { continue }
 
             // Check if source is a single file (not a directory)
@@ -50,7 +58,8 @@ enum FileScanner {
                 if source.path.hasPrefix(basePath) {
                     rel = String(source.path.dropFirst(basePath.count))
                 } else {
-                    rel = source.lastPathComponent
+                    // Outside the home: keep the whole path, never only the name (collisions).
+                    rel = String(source.path.drop(while: { $0 == "/" }))
                 }
                 let entry = FileEntry(
                     relativePath: rel,
@@ -72,16 +81,29 @@ enum FileScanner {
                     onTraversalError?(url.path, error)
                     return true  // continue traversal past unreadable entries
                 }
-            ) else { continue }
+            ) else {
+                onTraversalError?(source.path, NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError,
+                    userInfo: [NSLocalizedDescriptionKey: "Cartella non leggibile"]))
+                continue
+            }
 
+            // The enumerator may hand back resolved paths (/private/var for /var, a symlinked
+            // parent folder). Never fall back to the bare file name: two files with the same
+            // name in different folders would overwrite each other in the snapshot.
+            let resolvedBase = realPath(basePath) + "/"
+            let resolvedSource = realPath(source.path) + "/"
             var batchCount = 0
             while let url = enumerator.nextObject() as? URL {
                 let fullPath = url.path
                 let relativePath: String
                 if fullPath.hasPrefix(basePath) {
                     relativePath = String(fullPath.dropFirst(basePath.count))
+                } else if fullPath.hasPrefix(resolvedBase) {
+                    relativePath = String(fullPath.dropFirst(resolvedBase.count))
+                } else if fullPath.hasPrefix(resolvedSource) {
+                    relativePath = sourceRelativePath + "/" + String(fullPath.dropFirst(resolvedSource.count))
                 } else {
-                    relativePath = url.lastPathComponent
+                    relativePath = sourceRelativePath + "/" + url.lastPathComponent
                 }
 
                 // Skip iCloud placeholder files (evicted by bird)
@@ -89,7 +111,15 @@ enum FileScanner {
                     continue
                 }
 
-                guard let values = try? url.resourceValues(forKeys: keySet) else { continue }
+                let values: URLResourceValues
+                do {
+                    values = try url.resourceValues(forKeys: keySet)
+                } catch {
+                    // A temp file deleted between listing and reading is normal; anything
+                    // else that cannot be read is data not saved (review H3).
+                    if FileManager.default.fileExists(atPath: fullPath) { onTraversalError?(fullPath, error) }
+                    continue
+                }
                 let isDirectory = values.isDirectory == true
 
                 // `skipDescendants()` must only ever be called for a directory. Calling it
@@ -134,5 +164,14 @@ enum FileScanner {
                 }
             }
         }
+    }
+
+    /// Canonical path through realpath(3). Unlike `resolvingSymlinksInPath`, it keeps the
+    /// `/private` prefix that the enumerator itself reports for /var and /tmp.
+    static func realPath(_ path: String) -> String {
+        let trimmed = path.hasSuffix("/") && path.count > 1 ? String(path.dropLast()) : path
+        guard let resolved = Darwin.realpath(trimmed, nil) else { return trimmed }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 }
