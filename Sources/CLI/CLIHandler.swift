@@ -37,6 +37,15 @@ enum CLIHandler {
             case "schedule": try runSchedule(subArgs: subArgs)
             case "discover": try runDiscover(subArgs: subArgs)
             case "errors": runErrors(subArgs: subArgs)
+            case "snapshots": try runSnapshots(configPath: configPath)
+            case "coverage": try runCoverage(subArgs: subArgs, configPath: configPath)
+            case "versions": try runVersions(subArgs: subArgs, configPath: configPath)
+            case "find": try runFind(subArgs: subArgs, configPath: configPath)
+            case "topics": try runTopics(configPath: configPath)
+            case "restore-topic": try runRestoreTopic(subArgs: subArgs, configPath: configPath)
+            case "restore-file": try runRestoreFile(subArgs: subArgs, configPath: configPath)
+            case "undo": try runUndo(subArgs: subArgs)
+            case "new-mac": try runNewMac(subArgs: subArgs, configPath: configPath)
             default:
                 printError("Unknown command: \(command)")
                 printUsage()
@@ -50,7 +59,8 @@ enum CLIHandler {
     }
 
     static func commandNeedsConfig(_ command: String) -> Bool {
-        ["backup", "stop", "list", "status", "prune", "restore", "config", "schedule", "errors"].contains(command)
+        ["backup", "stop", "list", "status", "prune", "restore", "config", "schedule", "errors",
+         "snapshots", "coverage", "versions", "find", "topics", "restore-topic", "restore-file", "new-mac"].contains(command)
     }
 
     static func printUsage() {
@@ -76,6 +86,20 @@ enum CLIHandler {
           discover        Show detected dev tool configs
           discover add    Add custom discovery entry (portable across Macs)
           errors          Show backup errors
+
+        Ripristino e sicurezza (3.0):
+          snapshots                     Elenco snapshot: completo / incompleto / non verificato
+          coverage [--days N]           Cartelle attive e database che il backup non salva
+          versions <file>               Tutte le versioni di un file negli snapshot
+          find <testo> [--snapshot S]   Cerca file in uno snapshot
+          topics                        Argomenti ripristinabili (Warp, Terminale, Claude…)
+          restore-topic <nome> [--snapshot S] [--yes]
+          restore-file <file> [--snapshot S] [--to <cartella>] [--yes]
+                                        Senza --yes mostra solo l'anteprima
+          undo [cartella] [--file <file>]   Annulla l'ultimo ripristino, o un solo file
+          new-mac [--snapshot S] [--steps config,repos,databases,homebrew,launch-agents]
+                  [--agents label1,label2] [--yes]
+                                        Ripristino guidato di un Mac nuovo
           version         Show version
           help            Show this help
         """)
@@ -161,7 +185,16 @@ enum CLIHandler {
         final class ErrorBox: @unchecked Sendable { var error: Error? }
         let box = ErrorBox()
         Task {
-            do { try await BackupEngine.run(config: cfg) }
+            do {
+                if let r = try await BackupEngine.run(config: cfg) {
+                    if r.manifest.complete {
+                        print(green("Backup completo: \(r.snapshot.lastPathComponent) · \(r.manifest.filesProcessed) file"))
+                    } else {
+                        print(yellow("Backup INCOMPLETO: \(r.snapshot.lastPathComponent)"))
+                        for reason in r.manifest.incompleteReasons { print("  - \(reason)") }
+                    }
+                }
+            }
             catch { box.error = error }
             sem.signal()
         }
@@ -481,7 +514,7 @@ enum CLIHandler {
         else { print("Schedule: on") }
     }
 
-    private static func loadConfig(configPath: String?) throws -> Config {
+    static func loadConfig(configPath: String?) throws -> Config {
         try Config.load(from: configPath.map { URL(fileURLWithPath: expandPath($0)) } ?? Config.defaultPath)
     }
 
@@ -508,12 +541,12 @@ enum CLIHandler {
         return c.count > 2 && c[1] == "Volumes" ? c[2] : URL(fileURLWithPath: path).lastPathComponent
     }
 
-    private static func expandPath(_ p: String) -> String { (p as NSString).expandingTildeInPath }
-    private static func err(_ msg: String) -> NSError {
+    static func expandPath(_ p: String) -> String { (p as NSString).expandingTildeInPath }
+    static func err(_ msg: String) -> NSError {
         NSError(domain: "CLI", code: 1, userInfo: [NSLocalizedDescriptionKey: msg])
     }
 
-    private static func colored(_ t: String, _ c: String) -> String {
+    static func colored(_ t: String, _ c: String) -> String {
         isatty(STDOUT_FILENO) != 0 ? "\u{001B}[\(c)m\(t)\u{001B}[0m" : t
     }
     static func green(_ t: String) -> String { colored(t, "32") }

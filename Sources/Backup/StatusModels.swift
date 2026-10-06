@@ -14,6 +14,11 @@ struct BackupStatusFile: Codable {
     var errors: UInt64
     var filesSkipped: UInt64
     var currentFile: String
+    // 3.0: what the last finished backup was worth. Optional so older status files decode.
+    var lastResult: String?            // "complete" | "incomplete"
+    var lastCompleteAt: String?        // ISO 8601 of the newest complete snapshot
+    var incompleteReasons: [String]?
+    var lastSnapshot: String?
 
     enum CodingKeys: String, CodingKey {
         case state
@@ -29,6 +34,10 @@ struct BackupStatusFile: Codable {
         case errors
         case filesSkipped = "files_skipped"
         case currentFile = "current_file"
+        case lastResult = "last_result"
+        case lastCompleteAt = "last_complete_at"
+        case incompleteReasons = "incomplete_reasons"
+        case lastSnapshot = "last_snapshot"
     }
 
     init(state: String = "idle", phase: String = "",
@@ -47,6 +56,11 @@ struct BackupStatusFile: Codable {
     }
 }
 
+struct CoverageReport: Codable {
+    var checkedAt: String
+    var gaps: [CoverageGap]
+}
+
 struct BackupErrorFile: Codable {
     var total: Int
     var timestamp: String
@@ -60,19 +74,42 @@ struct ErrorCategoryInfo: Codable {
 
 final class StatusWriter {
     private static let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
-    static let statusPath = "\(home)/.local/share/rusty-mac-backup/status.json"
-    static let errorPath = "\(home)/.local/share/rusty-mac-backup/errors.json"
+    static let directory = "\(home)/.local/share/rusty-mac-backup"
+    static let statusPath = "\(directory)/status.json"
+    static let errorPath = "\(directory)/errors.json"
+    static let coveragePath = "\(directory)/coverage.json"
+
+    /// Tests point this somewhere else: a test must never overwrite the real status while
+    /// a real backup is running.
+    let statusPath: String
+    let errorPath: String
+    let coveragePath: String
+
+    init(directory: String = StatusWriter.directory) {
+        statusPath = "\(directory)/status.json"
+        errorPath = "\(directory)/errors.json"
+        coveragePath = "\(directory)/coverage.json"
+    }
 
     func write(status: BackupStatusFile) throws {
-        try writeJSON(status, to: URL(fileURLWithPath: Self.statusPath))
+        try writeJSON(status, to: URL(fileURLWithPath: statusPath))
     }
 
     func writeErrors(errors: BackupErrorFile) throws {
-        try writeJSON(errors, to: URL(fileURLWithPath: Self.errorPath))
+        try writeJSON(errors, to: URL(fileURLWithPath: errorPath))
+    }
+
+    func writeCoverage(_ report: CoverageReport) throws {
+        try writeJSON(report, to: URL(fileURLWithPath: coveragePath))
+    }
+
+    func readCoverage() -> CoverageReport? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: coveragePath)) else { return nil }
+        return try? JSONDecoder().decode(CoverageReport.self, from: data)
     }
 
     func read() -> BackupStatusFile? {
-        let url = URL(fileURLWithPath: Self.statusPath)
+        let url = URL(fileURLWithPath: statusPath)
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(BackupStatusFile.self, from: data)
     }

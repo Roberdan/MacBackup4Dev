@@ -6,6 +6,10 @@ struct Config {
     var exclude: ExcludeConfig
     var retention: RetentionConfig
     var protection: ProtectionConfig = ProtectionConfig()
+    var databases: DatabaseConfig = DatabaseConfig()
+    var coverage: CoverageConfig = CoverageConfig()
+    /// User-defined restore topics; they extend (and can override) the built-in ones.
+    var topics: [String: [String]] = [:]
 
     static var defaultPath: URL {
         URL(fileURLWithPath: ("~/.config/rusty-mac-backup/config.toml" as NSString).expandingTildeInPath)
@@ -48,6 +52,28 @@ struct Config {
         out.append("include_rights_managed_files = \(protection.includeRightsManagedFiles)")
         out.append("include_cloud_storage = \(protection.includeCloudStorage)")
         out.append("")
+        out.append("[databases]")
+        out.append("sqlite = [")
+        for path in databases.sqlite { out.append("    \"\(Self.escape(path))\",") }
+        out.append("]")
+        out.append("postgres = [")
+        for name in databases.postgres { out.append("    \"\(Self.escape(name))\",") }
+        out.append("]")
+        out.append("")
+        out.append("[coverage]")
+        out.append("ignore = [")
+        for path in coverage.ignore { out.append("    \"\(Self.escape(path))\",") }
+        out.append("]")
+        out.append("")
+        if !topics.isEmpty {
+            out.append("[topics]")
+            for name in topics.keys.sorted() {
+                out.append("\"\(Self.escape(name))\" = [")
+                for path in topics[name] ?? [] { out.append("    \"\(Self.escape(path))\",") }
+                out.append("]")
+            }
+            out.append("")
+        }
 
         let data = out.joined(separator: "\n").data(using: .utf8)!
         try data.write(to: url, options: [.atomic])
@@ -143,10 +169,19 @@ struct Config {
         }
     }
 
-    private static func assign(section: String, key: String, values: [String], to config: inout Config) {        switch "\(section).\(key)" {
+    private static func assign(section: String, key: String, values: [String], to config: inout Config) {
+        if section == "topics" {
+            let name = key.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !name.isEmpty { config.topics[name] = values }
+            return
+        }
+        switch "\(section).\(key)" {
         case "source.paths": config.source.paths = values
         case "source.extra_paths": config.source.legacyExtraPaths = values
         case "exclude.patterns": config.exclude.patterns = values
+        case "databases.sqlite": config.databases.sqlite = values
+        case "databases.postgres": config.databases.postgres = values
+        case "coverage.ignore": config.coverage.ignore = values
         default: break
         }
     }
@@ -226,6 +261,11 @@ struct SourceConfig {
     func allExpandedPaths() -> [String] {
         paths.map { ConfigDiscovery.expand($0) }
     }
+}
+
+/// Folders the coverage audit must not report (the user said "non mi interessa").
+struct CoverageConfig: Equatable {
+    var ignore: [String] = []
 }
 
 struct DestinationConfig {

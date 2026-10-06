@@ -14,16 +14,16 @@ func fail(_ message: String) throws {
 }
 
 @discardableResult
-func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws -> Bool {
-    if !condition() {
+func expect(_ condition: @autoclosure () throws -> Bool, _ message: String) throws -> Bool {
+    if try !condition() {
         throw TestFailure.failed(message)
     }
     return true
 }
 
-func expectEqual<T: Equatable>(_ actual: @autoclosure () -> T, _ expected: @autoclosure () -> T, _ message: String) throws {
-    let lhs = actual()
-    let rhs = expected()
+func expectEqual<T: Equatable>(_ actual: @autoclosure () throws -> T, _ expected: @autoclosure () throws -> T, _ message: String) throws {
+    let lhs = try actual()
+    let rhs = try expected()
     if lhs != rhs {
         throw TestFailure.failed("\(message) (got: \(lhs), expected: \(rhs))")
     }

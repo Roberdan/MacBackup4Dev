@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct FileEntry {
     let relativePath: String
@@ -74,14 +75,23 @@ enum FileScanner {
                 }
             ) else { continue }
 
+            // The enumerator may hand back resolved paths (/private/var for /var, a symlinked
+            // parent folder). Never fall back to the bare file name: two files with the same
+            // name in different folders would overwrite each other in the snapshot.
+            let resolvedBase = realPath(basePath) + "/"
+            let resolvedSource = realPath(source.path) + "/"
             var batchCount = 0
             while let url = enumerator.nextObject() as? URL {
                 let fullPath = url.path
                 let relativePath: String
                 if fullPath.hasPrefix(basePath) {
                     relativePath = String(fullPath.dropFirst(basePath.count))
+                } else if fullPath.hasPrefix(resolvedBase) {
+                    relativePath = String(fullPath.dropFirst(resolvedBase.count))
+                } else if fullPath.hasPrefix(resolvedSource) {
+                    relativePath = sourceRelativePath + "/" + String(fullPath.dropFirst(resolvedSource.count))
                 } else {
-                    relativePath = url.lastPathComponent
+                    relativePath = sourceRelativePath + "/" + url.lastPathComponent
                 }
 
                 // Skip iCloud placeholder files (evicted by bird)
@@ -134,5 +144,14 @@ enum FileScanner {
                 }
             }
         }
+    }
+
+    /// Canonical path through realpath(3). Unlike `resolvingSymlinksInPath`, it keeps the
+    /// `/private` prefix that the enumerator itself reports for /var and /tmp.
+    static func realPath(_ path: String) -> String {
+        let trimmed = path.hasSuffix("/") && path.count > 1 ? String(path.dropLast()) : path
+        guard let resolved = Darwin.realpath(trimmed, nil) else { return trimmed }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 }

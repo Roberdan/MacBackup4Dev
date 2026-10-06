@@ -42,7 +42,8 @@ final class SnapshotCleanup {
         self.destination = destination
         self.cutoff = cutoff
         self.latest = backups.first
-        self.candidates = backups.dropFirst().filter { $0.timestamp < cutoff }
+        let protected = RetentionManager.protectedNames(backups, fillWithUnverified: false)
+        self.candidates = backups.dropFirst().filter { $0.timestamp < cutoff && !protected.contains($0.name) }
         self.lock = lock
     }
 
@@ -52,7 +53,8 @@ final class SnapshotCleanup {
         try withExtendedLifetime(lock) {
             try RetentionManager.validateDestination(destination)
             let current = try RetentionManager.readBackups(at: destination)
-            let eligible = current.dropFirst().filter { $0.timestamp < cutoff }.map(\.name)
+            let protected = RetentionManager.protectedNames(current, fillWithUnverified: false)
+            let eligible = current.dropFirst().filter { $0.timestamp < cutoff && !protected.contains($0.name) }.map(\.name)
             guard eligible == candidates.map(\.name) else {
                 throw NSError(domain: "SnapshotCleanup", code: 1, userInfo: [
                     NSLocalizedDescriptionKey: "I backup sono cambiati. Ripeti l'anteprima prima di eliminare."

@@ -21,8 +21,24 @@ struct TestRunner {
         let hidden = HiddenDiscoveryTests()
         let tree = TreeSelectionTests()
         let cleanup = SnapshotCleanupTests()
+        let safety = SafetyTests()
+        let restore = RestoreTests()
 
         let suites: [(String, TestClosure)] = [
+            ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
+            ("Safety.copyErrorMakesIncomplete", safety.test_copyErrorMakesSnapshotIncomplete),
+            ("Safety.shrinkWarning", safety.test_shrinkWarningOnEmptiedHome),
+            ("Safety.retentionProtectsComplete", safety.test_retentionProtectsLastCompleteSnapshots),
+            ("Safety.retentionPausesAfterShrink", safety.test_retentionPausesAfterShrink),
+            ("Safety.unpushedCommitsSurvive", safety.test_unpushedCommitsSurviveRestore),
+            ("Safety.sqliteCopied", safety.test_sqliteIsCopiedConsistently),
+            ("Safety.coverageFindsUncovered", safety.test_coverageFindsActiveUncoveredFolder),
+            ("Safety.configRoundTrip", safety.test_configRoundTripNewSections),
+            ("Restore.topicWildcardsAndJunk", restore.test_topicFilesExpandWildcardsAndSkipJunk),
+            ("Restore.configTopics", restore.test_configTopicsOverrideAndExtend),
+            ("Restore.planApplyPerFileUndo", restore.test_planApplyAndPerFileUndo),
+            ("Restore.versions", restore.test_versionsAreDistinctNewestFirst),
+            ("Restore.newMacRepository", restore.test_newMacRebuildsRepository),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

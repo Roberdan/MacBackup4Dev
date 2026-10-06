@@ -1,21 +1,45 @@
 import Foundation
 
+/// Knobs a test needs and the app does not: where "home" is, whether to run the slow
+/// environment capture, git and database safety.
+struct BackupRunOptions {
+    var home: String = FileManager.default.homeDirectoryForCurrentUser.path
+    var captureEnvironment = true
+    var captureGit = true
+    var captureDatabases = true
+    var auditCoverage = true
+    var now: () -> Date = { Date() }
+}
+
+/// What a finished run was worth, for the caller (menu, CLI, notifications).
+struct BackupRunResult {
+    let snapshot: URL
+    let manifest: SnapshotManifest
+}
+
 enum BackupEngine {
     static let STATUS_UPDATE_INTERVAL: Int = 500
     static let DISK_CHECK_INTERVAL: Int = 100
     static let MIN_FREE_SPACE: UInt64 = 1_073_741_824
+    /// How many discovered files may wait for a copy worker. The walker blocks beyond
+    /// this instead of dropping entries.
+    static let QUEUE_LIMIT: Int = 4_096
 
     private static var shouldCancel = false
 
     static func stop() { shouldCancel = true }
 
-    static func run(config: Config, statusWriter: StatusWriter = StatusWriter()) async throws {
+    @discardableResult
+    static func run(config: Config, statusWriter: StatusWriter = StatusWriter(),
+                    options: BackupRunOptions = BackupRunOptions()) async throws -> BackupRunResult? {
         shouldCancel = false
         let destPath = config.destination.path
         let destURL = URL(fileURLWithPath: destPath)
+        let home = options.home
 
         // Validate source paths: skip missing, block forbidden
         var allPaths: [String] = []
+        var missing: [String] = []
         for path in config.source.allExpandedPaths() {
             let contracted = ConfigDiscovery.contract(path)
             if ConfigDiscovery.isForbidden(contracted, allowCloudStorage: config.protection.includeCloudStorage) {
@@ -25,6 +49,7 @@ enum BackupEngine {
             if FileManager.default.fileExists(atPath: path) {
                 allPaths.append(path)
             } else {
+                missing.append(contracted)
                 Log.info("Skipping missing path: \(path)")
             }
         }
@@ -49,6 +74,8 @@ enum BackupEngine {
         try acquireLock(at: lockPath)
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
 
+        let previousComplete = SnapshotCatalog.latestComplete(at: destURL)
+
         if diskFreeSpace(at: destPath) < MIN_FREE_SPACE {
             let _ = try RetentionManager.pruneLockedBackups(at: destURL, policy: config.retention, dryRun: false)
             if diskFreeSpace(at: destPath) < MIN_FREE_SPACE {
@@ -59,23 +86,31 @@ enum BackupEngine {
         let latestBackup = findLatestBackup(at: destURL)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"
-        let timestamp = formatter.string(from: Date())
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let startTime = options.now()
+        var timestamp = formatter.string(from: startTime)
+        // Two runs in the same second (tests, a double click) must not collide.
+        while FileManager.default.fileExists(atPath: destURL.appendingPathComponent(timestamp).path) {
+            timestamp = formatter.string(from: Date(timeInterval: 1, since: formatter.date(from: timestamp)!))
+        }
         let inProgressURL = destURL.appendingPathComponent("in-progress-\(timestamp)")
         try FileManager.default.createDirectory(at: inProgressURL, withIntermediateDirectories: true)
 
         // F-01: clean stale dirs only AFTER acquiring the lock
         cleanStaleInProgress(at: destURL)
 
-        let startTime = Date()
-        var status = BackupStatusFile()
+        var status = statusWriter.read() ?? BackupStatusFile()
         status.state = "running"
         status.phase = "scanning"
         status.startedAt = ISO8601DateFormatter().string(from: startTime)
+        status.filesDone = 0
+        status.filesTotal = 0
+        status.bytesCopied = 0
+        status.errors = 0
         status.currentFile = "Avvio backup..."
         do { try statusWriter.write(status: status) } catch { Log.error("Status write failed at start: \(error)") }
 
         let excludeFilter = ExcludeFilter(patterns: config.exclude.patterns)
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
         let sourceURLs = allPaths.map { URL(fileURLWithPath: $0) }
         // Always use HOME as basePath so snapshot preserves full relative paths:
         // ~/GitHub/MyRepo/file.swift → snapshot/GitHub/MyRepo/file.swift
@@ -90,7 +125,13 @@ enum BackupEngine {
         }
         let counters = Counters()
 
-        let (stream, continuation) = AsyncStream<FileEntry>.makeStream(bufferingPolicy: .bufferingNewest(256))
+        // Scar 2026-10-06: this stream used `.bufferingNewest(256)`, which DROPS the oldest
+        // waiting files whenever the walker runs ahead of the copy workers. Snapshots lost
+        // up to two thirds of their files and were still named as good ones. The stream is
+        // now unbounded and the walker waits on a semaphore instead: nothing is ever dropped,
+        // and memory stays bounded by QUEUE_LIMIT.
+        let (stream, continuation) = AsyncStream<FileEntry>.makeStream(bufferingPolicy: .unbounded)
+        let slots = DispatchSemaphore(value: QUEUE_LIMIT)
 
         let walkerTask = Task.detached(priority: .utility) {
             FileScanner.walk(sources: sourceURLs, basePaths: homeBasePaths,
@@ -99,11 +140,12 @@ enum BackupEngine {
                                counters.traversalErrors.append((path: path, error: error))
                            }) { entry in
                 if shouldCancel { return false }
+                slots.wait()
                 counters.discovered += 1
                 continuation.yield(entry)
                 return true
             }
-            counters.walkerDone = true
+            counters.walkerDone = !shouldCancel
             continuation.finish()
         }
 
@@ -131,81 +173,83 @@ enum BackupEngine {
             }
         }
 
-        // Parallel file processing with bounded TaskGroup (spec: 8 workers).
-        // processFile is safe to parallelize: each call uses a unique destFile path,
-        // createDirectory(withIntermediateDirectories:true) is safe for concurrent calls,
-        // HardLinker uses COPYFILE_ALL (no COPYFILE_CLONE — see HardLinker.swift note).
-        // All shared state (stats, errorList, vanishedCount) is mutated in the main task only.
         var inFlight = 0
-        try await withThrowingTaskGroup(of: (FileResult, FileEntry).self) { group in
-            for await file in stream {
-                if shouldCancel { break }
-                processedCount += 1
+        do {
+            try await withThrowingTaskGroup(of: (FileResult, FileEntry).self) { group in
+                for await file in stream {
+                    slots.signal()
+                    if shouldCancel { break }
+                    processedCount += 1
 
-                // Disk check (every N files, in main task — safe)
-                if processedCount % UInt64(DISK_CHECK_INTERVAL) == 0 {
-                    guard FileManager.default.fileExists(atPath: inProgressURL.path) else {
-                        throw BackupError.diskDisconnected
+                    if processedCount % UInt64(DISK_CHECK_INTERVAL) == 0 {
+                        guard FileManager.default.fileExists(atPath: inProgressURL.path) else {
+                            throw BackupError.diskDisconnected
+                        }
+                    }
+
+                    // Emergency stop: source files vanishing → bird eviction suspected
+                    if vanishedCount >= VANISHED_THRESHOLD {
+                        Log.error("EMERGENCY STOP: \(vanishedCount) source files vanished -- bird eviction suspected")
+                        status.state = "error"
+                        status.currentFile = "STOPPED: source files vanishing (iCloud eviction)"
+                        try? statusWriter.write(status: status)
+                        throw BackupError.sourceFilesVanishing
+                    }
+
+                    let destFile = inProgressURL.appendingPathComponent(file.relativePath).path
+                    let prevFile = latestBackup.map { $0.appendingPathComponent(file.relativePath).path }
+
+                    group.addTask {
+                        (await BackupEngine.processFile(entry: file, destFile: destFile,
+                                                        prevFile: prevFile, protectionGuard: protectionGuard), file)
+                    }
+                    inFlight += 1
+
+                    if inFlight >= maxWorkers {
+                        if let (result, entry) = try await group.next() {
+                            inFlight -= 1
+                            handleResult(result, entry: entry)
+                        }
+                    }
+
+                    if processedCount % UInt64(STATUS_UPDATE_INTERVAL) == 0 {
+                        let elapsed = Date().timeIntervalSince(startTime)
+                        let discovered = UInt64(counters.discovered)
+                        let done = processedCount
+                        status.filesDone = done
+                        status.filesTotal = counters.walkerDone ? discovered : discovered + 5000
+                        status.bytesCopied = stats.bytesCopied
+                        status.bytesPerSec = elapsed > 0 ? UInt64(Double(stats.bytesCopied) / elapsed) : 0
+                        if status.bytesPerSec > 0 && done > 0 {
+                            let remaining = status.filesTotal > done ? status.filesTotal - done : 0
+                            let avgBytesPerFile = stats.bytesCopied / done
+                            status.etaSecs = UInt64(remaining * avgBytesPerFile / status.bytesPerSec)
+                        }
+                        status.errors = UInt64(errorList.count)
+                        status.filesSkipped = stats.filesSkipped
+                        status.currentFile = file.relativePath
+                        status.phase = stats.bytesCopied > 0 ? "copying" : "scanning"
+                        try? statusWriter.write(status: status)
                     }
                 }
 
-                // Emergency stop: source files vanishing → bird eviction suspected
-                if vanishedCount >= VANISHED_THRESHOLD {
-                    Log.error("EMERGENCY STOP: \(vanishedCount) source files vanished -- bird eviction suspected")
-                    status.state = "error"
-                    status.currentFile = "STOPPED: source files vanishing (iCloud eviction)"
-                    try? statusWriter.write(status: status)
-                    throw BackupError.sourceFilesVanishing
-                }
-
-                let destFile = inProgressURL.appendingPathComponent(file.relativePath).path
-                let prevFile = latestBackup.map { $0.appendingPathComponent(file.relativePath).path }
-
-                group.addTask {
-                    (await BackupEngine.processFile(entry: file, destFile: destFile,
-                                                    prevFile: prevFile, protectionGuard: protectionGuard), file)
-                }
-                inFlight += 1
-
-                // Drain oldest result when worker pool is full (backpressure)
-                if inFlight >= maxWorkers {
-                    if let (result, entry) = try await group.next() {
-                        inFlight -= 1
-                        handleResult(result, entry: entry)
-                    }
-                }
-
-                // Status update (uses current stream position as "current file")
-                if processedCount % UInt64(STATUS_UPDATE_INTERVAL) == 0 {
-                    let elapsed = Date().timeIntervalSince(startTime)
-                    let discovered = UInt64(counters.discovered)
-                    let done = processedCount
-                    status.filesDone = done
-                    status.filesTotal = counters.walkerDone ? discovered : discovered + 5000
-                    status.bytesCopied = stats.bytesCopied
-                    status.bytesPerSec = elapsed > 0 ? UInt64(Double(stats.bytesCopied) / elapsed) : 0
-                    if status.bytesPerSec > 0 && done > 0 {
-                        let remaining = status.filesTotal > done ? status.filesTotal - done : 0
-                        let avgBytesPerFile = stats.bytesCopied / done
-                        status.etaSecs = UInt64(remaining * avgBytesPerFile / status.bytesPerSec)
-                    }
-                    status.errors = UInt64(errorList.count)
-                    status.filesSkipped = stats.filesSkipped
-                    status.currentFile = file.relativePath
-                    status.phase = stats.bytesCopied > 0 ? "copying" : "scanning"
-                    try? statusWriter.write(status: status)
+                for try await (result, entry) in group {
+                    handleResult(result, entry: entry)
                 }
             }
-
-            // Drain remaining in-flight tasks after stream ends
-            for try await (result, entry) in group {
-                handleResult(result, entry: entry)
-            }
+        } catch {
+            // Unblock and stop the walker before leaving, or it waits on the semaphore forever.
+            shouldCancel = true
+            for _ in 0..<QUEUE_LIMIT { slots.signal() }
+            walkerTask.cancel()
+            throw error
         }
 
-        walkerTask.cancel()
+        // A cancelled walker may be waiting for a slot: release it, then wait for it to end
+        // so `walkerDone` and the traversal errors are final before they are judged.
+        if shouldCancel { for _ in 0..<QUEUE_LIMIT { slots.signal() } }
+        await walkerTask.value
 
-        // F-08: Merge traversal errors (e.g. permission denied on subtrees) into error list
         errorList.append(contentsOf: counters.traversalErrors)
 
         // F-02: Do NOT rename to final snapshot if cancelled — partial backup must not look valid.
@@ -215,17 +259,58 @@ enum BackupEngine {
             status.phase = "cancelled"
             status.currentFile = "Backup annullato"
             do { try statusWriter.write(status: status) } catch { Log.error("Status write failed on cancel: \(error)") }
-            return
+            return nil
         }
+
+        // Git and database safety: written into the snapshot before it gets its final name.
+        status.phase = "finalizing"
+        status.currentFile = "Salvo i commit non pubblicati e i database…"
+        try? statusWriter.write(status: status)
+        let gitRecords = options.captureGit
+            ? GitSafety.captureAll(sources: allPaths, excludeFilter: excludeFilter, home: home, into: inProgressURL)
+            : []
+        let dbRecords = options.captureDatabases
+            ? DatabaseDumps.captureAll(config: config.databases, home: home, into: inProgressURL)
+            : []
+
+        let traversalCount = counters.traversalErrors.count
+        let copyErrors = errorList.count - traversalCount
+        let shrink = SnapshotManifest.shrinkWarning(processed: Int64(processedCount),
+                                                    previous: previousComplete?.manifest)
+        let (complete, reasons) = SnapshotManifest.evaluate(
+            discovered: counters.discovered, processed: Int64(processedCount),
+            walkerFinished: counters.walkerDone, errors: copyErrors, traversalErrors: traversalCount,
+            gitFailures: gitRecords.compactMap { r in r.error.map { "\(r.relativePath) (\($0))" } },
+            databaseFailures: dbRecords.compactMap { r in r.error.map { "\(r.source) (\($0))" } },
+            shrinkWarning: shrink)
+
+        let manifest = SnapshotManifest(
+            appVersion: appVersionString(), host: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
+            startedAt: ISO8601DateFormatter().string(from: startTime),
+            finishedAt: ISO8601DateFormatter().string(from: options.now()),
+            sources: allPaths.map { ConfigDiscovery.contract($0) }, missingSources: missing,
+            filesDiscovered: counters.discovered, filesProcessed: Int64(processedCount),
+            filesCopied: Int64(stats.filesCopied), filesHardlinked: Int64(stats.filesHardlinked),
+            filesSkipped: Int64(stats.filesSkipped), bytesCopied: stats.bytesCopied,
+            errorCount: copyErrors, traversalErrorCount: traversalCount,
+            git: gitRecords, databases: dbRecords, shrinkWarning: shrink,
+            complete: complete, incompleteReasons: reasons)
+        try manifest.write(to: inProgressURL)
 
         let finalURL = destURL.appendingPathComponent(timestamp)
         try FileManager.default.moveItem(at: inProgressURL, to: finalURL)
+        if complete {
+            Log.info("Snapshot \(timestamp) complete: \(processedCount) files")
+        } else {
+            Log.warn("Snapshot \(timestamp) INCOMPLETE: \(reasons.joined(separator: " | "))")
+        }
 
-        // Capture portable environment snapshot (Brewfile, app list, restore script, app binary)
-        // Run AFTER backup completes, in a non-interactive shell to avoid triggering kaku/dotfile managers
-        Log.info("Capturing environment snapshot...")
-        EnvironmentSnapshot.capture(to: finalURL)
-        Log.info("Environment snapshot complete")
+        if options.captureEnvironment {
+            // Run AFTER backup completes, in a non-interactive shell to avoid triggering kaku/dotfile managers
+            Log.info("Capturing environment snapshot...")
+            EnvironmentSnapshot.capture(to: finalURL)
+            Log.info("Environment snapshot complete")
+        }
 
         if !errorList.isEmpty || !skipList.isEmpty {
             // F-06: Use ErrorReporter for semantic keys (permission_denied, not_found, etc.)
@@ -239,19 +324,36 @@ enum BackupEngine {
             Log.info("\(skipList.count) file(s) excluded by protection preference -- see errors.json")
         }
 
-        let totalFiles = processedCount
-        let duration = Date().timeIntervalSince(startTime)
+        if options.auditCoverage {
+            let gaps = CoverageAuditor.audit(config: config, home: home)
+            try? statusWriter.writeCoverage(CoverageReport(
+                checkedAt: ISO8601DateFormatter().string(from: Date()), gaps: gaps))
+        }
+
+        let duration = options.now().timeIntervalSince(startTime)
         status.state = "idle"
         status.phase = "finalizing"
-        status.filesDone = totalFiles
-        status.filesTotal = totalFiles
-        status.lastCompleted = ISO8601DateFormatter().string(from: Date())
+        status.filesDone = processedCount
+        status.filesTotal = processedCount
+        status.lastCompleted = ISO8601DateFormatter().string(from: options.now())
         status.lastDurationSecs = duration
         status.bytesPerSec = duration > 0 ? UInt64(Double(stats.bytesCopied) / duration) : 0
         status.etaSecs = 0
         status.currentFile = ""
         status.errors = UInt64(errorList.count)
         status.filesSkipped = stats.filesSkipped
+        status.lastResult = complete ? "complete" : "incomplete"
+        status.incompleteReasons = reasons
+        status.lastSnapshot = timestamp
+        if complete { status.lastCompleteAt = status.lastCompleted }
+        else if status.lastCompleteAt == nil, let prev = previousComplete {
+            status.lastCompleteAt = ISO8601DateFormatter().string(from: prev.timestamp)
+        }
         do { try statusWriter.write(status: status) } catch { Log.error("Status write failed at completion: \(error)") }
+        return BackupRunResult(snapshot: finalURL, manifest: manifest)
+    }
+
+    static func appVersionString() -> String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 }

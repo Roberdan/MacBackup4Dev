@@ -65,7 +65,14 @@ enum RetentionManager {
         let backups = try readBackups(at: destination)
         guard backups.count > 1 else { return [] } // Always keep at least one
 
-        var keep = Set<String>()
+        // A Mac that looks new or emptied must not lose its good history to a pruning pass
+        // computed from a near-empty snapshot (scar 2026-10-06).
+        if let newest = backups.first, SnapshotManifest.read(from: newest.url)?.shrinkWarning != nil {
+            Log.warn("Pruning skipped: the newest snapshot looks like a new or emptied Mac")
+            return []
+        }
+
+        var keep = protectedNames(backups)
 
         if let latest = backups.first { keep.insert(latest.name) }
 
@@ -97,6 +104,28 @@ enum RetentionManager {
             return candidates.map(\.name)
         }
         return try deleteBackups(candidates, at: destination)
+    }
+
+    /// Snapshots no pruning may delete: the 3 newest complete ones. For automatic retention,
+    /// when fewer than 3 are complete (history from before 3.0), the newest unverified ones
+    /// fill the gap; a manual cleanup the user previews and confirms protects complete ones only.
+    /// Incomplete snapshots are never protected: they are exactly what may go.
+    static func protectedNames(_ backups: [BackupEntry], keepComplete: Int = 3,
+                               fillWithUnverified: Bool = true) -> Set<String> {
+        var complete: [String] = []
+        var unverified: [String] = []
+        for backup in backups {   // newest first
+            switch SnapshotManifest.read(from: backup.url) {
+            case .some(let m) where m.complete: complete.append(backup.name)
+            case .none: unverified.append(backup.name)
+            default: break
+            }
+        }
+        var names = Array(complete.prefix(keepComplete))
+        if fillWithUnverified, names.count < keepComplete {
+            names += unverified.prefix(keepComplete - names.count)
+        }
+        return Set(names)
     }
 
     static func validateDestination(_ destination: URL) throws {
