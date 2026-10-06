@@ -279,6 +279,10 @@ let baseExcludePatterns: [String] = [
     "*.log",
     // AI models (huge, re-downloadable)
     ".ollama/models", ".lmstudio",
+    // VM/container engine disk images (huge, regenerable via start/up -- see scar 2026-09-27:
+    // a stopped Colima VM disk went from 20GB to 192GB across snapshots and filled the backup
+    // destination because it changes too often for hard-link dedup to help)
+    ".colima", ".lima", ".orbstack",
     // Caches, state and runtime data inside otherwise-config directories.
     // Discovery picks the directories; these keep the data out of them.
     "logs", "log", "sessions", "session-state", "session-store",

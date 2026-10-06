@@ -302,6 +302,9 @@ enum ConfigDiscovery {
         ".lesshst", ".viminfo", ".wget-hsts", ".sudo_as_admin_successful",
         ".DS_Store", ".CFUserTextEncoding", ".Xauthority", ".localized",
         ".Spotlight-V100", ".fseventsd", ".TemporaryItems", ".DocumentRevisions-V100",
+        // VM/container engine disk images (huge, regenerable): never propose these as a
+        // configuration source to back up (scar 2026-09-27, see ConfigManager.baseExcludePatterns)
+        ".colima", ".lima", ".orbstack",
     ]
 
     /// Directory and file names that are never configuration, at any depth.
