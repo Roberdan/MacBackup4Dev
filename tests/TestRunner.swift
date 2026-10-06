@@ -26,6 +26,7 @@ struct TestRunner {
         let protectionSummary = ProtectionSummaryTests()
         let guards = RestoreGuardTests()
         let review = ReviewFixTests()
+        let review2 = ReviewRound2Tests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -52,6 +53,9 @@ struct TestRunner {
             ("Review.M5.safeRelative", review.test_safeRelativeRefusesTricks),
             ("Review.M8.slotPrefersComplete", review.test_retentionSlotPrefersComplete),
             ("Review.shrinkBaseline", review.test_shrinkAgainstUnverifiedBaseline),
+            ("Review.R1.stopMidBackup", review2.test_stopMidBackupDoesNotCrash),
+            ("Review.R2.longOutput", review2.test_longOutputIsComplete),
+            ("Review.R3.bundleHardLinked", review2.test_unchangedBundleIsHardLinked),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

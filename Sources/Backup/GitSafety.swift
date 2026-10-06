@@ -26,14 +26,17 @@ struct GitRepoRecord: Codable, Equatable {
     var error: String?
     /// Things saved only partially (older stashes), shown but not fatal.
     var warnings: [String]? = nil
+    /// What the bundle contains (bundled ref SHAs + published base): an unchanged key lets
+    /// the next snapshot hard-link the previous bundle instead of writing it again.
+    var bundleKey: String? = nil
 }
 
 enum GitSafety {
     static let directoryName = "git"
 
     /// Directories that are git repositories (main checkout: `.git` is a directory) below
-    /// the given sources. Linked worktrees are found through their main repository;
-    /// submodules (`.git` is a file) through their parent.
+    /// the given sources. Linked worktrees are found through their main repository.
+    /// Submodules (`.git` is a file) are not recorded: their commits live in their own remote.
     static func discoverRepositories(sources: [String], excludeFilter: ExcludeFilter,
                                      home: String, maxDepth: Int = 5) -> [URL] {
         var found: [URL] = []
@@ -78,8 +81,10 @@ enum GitSafety {
         var refs: [String] = []
         for remote in remotes.sorted() {
             let head = g(["symbolic-ref", "--quiet", "refs/remotes/\(remote)/HEAD"])
-            if head.ok, !head.stdout.isEmpty {
-                refs.append(head.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+            let target = head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            // origin/HEAD can point at a branch that was pruned since (review R4).
+            if head.ok, !target.isEmpty, g(["rev-parse", "--verify", "--quiet", target]).ok {
+                refs.append(target)
                 continue
             }
             for candidate in ["main", "master", "Development", "develop", "trunk"] {
@@ -91,7 +96,8 @@ enum GitSafety {
     }
 
     /// Record the repository and bundle every commit not reachable from a remote default branch.
-    static func capture(repository: URL, home: String, into directory: URL) -> GitRepoRecord {
+    static func capture(repository: URL, home: String, into directory: URL,
+                        previous: (record: GitRepoRecord, directory: URL)? = nil) -> GitRepoRecord {
         // /var is /private/var on macOS: compare real paths, or a repo looks outside the home.
         let realHome = FileScanner.realPath(home)
         let realRepo = FileScanner.realPath(repository.path)
@@ -104,8 +110,9 @@ enum GitSafety {
             return record
         }
         let path = repository.path
+        // English messages: "The bundle requires…" is parsed below (git ships translations).
         func g(_ args: [String], timeout: TimeInterval = 120) -> Shell.Result {
-            Shell.run(git, ["-C", path] + args, timeout: timeout)
+            Shell.run(git, ["-C", path] + args, timeout: timeout, environment: ["LC_ALL": "C"])
         }
         func fail(_ what: String, _ r: Shell.Result) -> GitRepoRecord {
             var copy = record
@@ -176,6 +183,24 @@ enum GitSafety {
         }
         let name = bundleName(for: rel)
         let target = directory.appendingPathComponent(name).path
+        var keyParts: [String] = []
+        for ref in refsToBundle {
+            keyParts.append(ref + "=" + g(["rev-parse", "--verify", "--quiet", ref]).stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        for ref in published {
+            keyParts.append("base:" + ref + "=" + g(["rev-parse", "--verify", "--quiet", ref]).stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        let key = keyParts.sorted().joined(separator: ";")
+        record.bundleKey = key
+        // Same commits as yesterday: hard-link yesterday's verified bundle (review R3).
+        if let previous, previous.record.bundleKey == key, let oldName = previous.record.bundle {
+            let old = previous.directory.appendingPathComponent(oldName).path
+            if FileManager.default.fileExists(atPath: old),
+               (try? FileManager.default.linkItem(atPath: old, toPath: target)) != nil {
+                record.bundle = name
+                return record
+            }
+        }
         let args = ["bundle", "create", target] + refsToBundle + (published.isEmpty ? [] : ["--not"] + published)
         let bundle = g(args, timeout: 600)
         guard bundle.ok, FileManager.default.fileExists(atPath: target) else {
@@ -210,11 +235,21 @@ enum GitSafety {
     }
 
     static func captureAll(sources: [String], excludeFilter: ExcludeFilter, home: String,
-                           into snapshot: URL) -> [GitRepoRecord] {
+                           into snapshot: URL, previousSnapshot: URL? = nil) -> [GitRepoRecord] {
         let dir = snapshot.appendingPathComponent(SnapshotManifest.directoryName)
             .appendingPathComponent(directoryName)
-        return discoverRepositories(sources: sources, excludeFilter: excludeFilter, home: home)
-            .map { capture(repository: $0, home: home, into: dir) }
+        let prevDir = previousSnapshot?.appendingPathComponent(SnapshotManifest.directoryName)
+            .appendingPathComponent(directoryName)
+        var prevRecords: [String: GitRepoRecord] = [:]
+        for r in previousSnapshot.flatMap({ SnapshotManifest.read(from: $0) })?.git ?? [] {
+            prevRecords[r.relativePath] = r
+        }
+        return discoverRepositories(sources: sources, excludeFilter: excludeFilter, home: home).map { repo in
+            let realHome = FileScanner.realPath(home), realRepo = FileScanner.realPath(repo.path)
+            let rel = realRepo.hasPrefix(realHome + "/") ? String(realRepo.dropFirst(realHome.count + 1)) : realRepo
+            let previous = prevDir.flatMap { d in prevRecords[rel].map { ($0, d) } }
+            return capture(repository: repo, home: home, into: dir, previous: previous)
+        }
     }
 
     /// Put the saved commits back into a clone: every bundled branch becomes a local branch

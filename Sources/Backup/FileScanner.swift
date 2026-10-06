@@ -39,8 +39,10 @@ enum FileScanner {
                     userInfo: [NSLocalizedDescriptionKey: "Cartella sparita durante il backup"]))
                 continue
             }
+            // Outside the home the relative path is the absolute path without its leading "/",
+            // the same shape single-file sources get (review R8).
             let sourceRelativePath = source.path.hasPrefix(basePath)
-                ? String(source.path.dropFirst(basePath.count)) : source.path
+                ? String(source.path.dropFirst(basePath.count)) : String(source.path.drop(while: { $0 == "/" }))
             guard !excludeFilter.isExcluded(relativePath: sourceRelativePath) else { continue }
 
             // Check if source is a single file (not a directory)

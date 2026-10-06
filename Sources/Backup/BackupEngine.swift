@@ -11,6 +11,40 @@ struct BackupRunOptions {
     var now: () -> Date = { Date() }
 }
 
+/// Bounded hand-off between the scanner and the copy workers. Unlike a DispatchSemaphore it
+/// can be opened for good on cancel without ending below its starting value (libdispatch
+/// traps when such a semaphore is released, review R1).
+final class QueueGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private let limit: Int
+    private var inFlight = 0
+    private var isOpen = false
+
+    init(limit: Int) { self.limit = limit }
+
+    func acquire() {
+        condition.lock()
+        while inFlight >= limit && !isOpen { condition.wait() }
+        inFlight += 1
+        condition.unlock()
+    }
+
+    func release() {
+        condition.lock()
+        inFlight = max(0, inFlight - 1)
+        condition.signal()
+        condition.unlock()
+    }
+
+    /// Stop limiting: every waiting or future acquire returns at once.
+    func open() {
+        condition.lock()
+        isOpen = true
+        condition.broadcast()
+        condition.unlock()
+    }
+}
+
 /// What a finished run was worth, for the caller (menu, CLI, notifications).
 struct BackupRunResult {
     let snapshot: URL
@@ -87,8 +121,13 @@ enum BackupEngine {
         let previousComplete = SnapshotCatalog.latestComplete(at: destURL)
         // Without a verified snapshot yet (first 3.0 run), compare with the newest old one,
         // so a wiped Mac is recognised on day one too.
-        let baselineFiles: Int64? = previousComplete == nil
-            ? findLatestBackup(at: destURL).map { countFiles(in: $0) } : nil
+        let baselineFiles: Int64? = {
+            guard previousComplete == nil, let latest = findLatestBackup(at: destURL) else { return nil }
+            // A 3.0 snapshot already knows its size; only a pre-3.0 one is counted (once a
+            // day at most, and never again after the first 3.0 snapshot).
+            if let m = SnapshotManifest.read(from: latest) { return m.filesDiscovered }
+            return countFiles(in: latest)
+        }()
 
         if diskFreeSpace(at: destPath) < MIN_FREE_SPACE {
             let _ = try RetentionManager.pruneLockedBackups(at: destURL, policy: config.retention, dryRun: false)
@@ -145,7 +184,7 @@ enum BackupEngine {
         // now unbounded and the walker waits on a semaphore instead: nothing is ever dropped,
         // and memory stays bounded by QUEUE_LIMIT.
         let (stream, continuation) = AsyncStream<FileEntry>.makeStream(bufferingPolicy: .unbounded)
-        let slots = DispatchSemaphore(value: QUEUE_LIMIT)
+        let slots = QueueGate(limit: QUEUE_LIMIT)
 
         let walkerTask = Task.detached(priority: .utility) {
             FileScanner.walk(sources: sourceURLs, basePaths: homeBasePaths,
@@ -154,7 +193,7 @@ enum BackupEngine {
                                counters.traversalErrors.append((path: path, error: error))
                            }) { entry in
                 if token.isCancelled { return false }
-                slots.wait()
+                slots.acquire()
                 if token.isCancelled { return false }
                 counters.discovered += 1
                 continuation.yield(entry)
@@ -192,7 +231,7 @@ enum BackupEngine {
         do {
             try await withThrowingTaskGroup(of: (FileResult, FileEntry).self) { group in
                 for await file in stream {
-                    slots.signal()
+                    slots.release()
                     if token.isCancelled { break }
                     processedCount += 1
 
@@ -256,7 +295,7 @@ enum BackupEngine {
             // Stop the walker, release it if it waits for a slot, and wait for it to end:
             // nothing of this run may outlive it (review M1/M2).
             token.cancel()
-            for _ in 0..<QUEUE_LIMIT { slots.signal() }
+            slots.open()
             await walkerTask.value
             throw error
         }
@@ -265,7 +304,7 @@ enum BackupEngine {
         if Task.isCancelled { token.cancel() }
         // A cancelled walker may be waiting for a slot: release it, then wait for it to end
         // so `walkerDone` and the traversal errors are final before they are judged.
-        if token.isCancelled { for _ in 0..<QUEUE_LIMIT { slots.signal() } }
+        if token.isCancelled { slots.open() }
         await walkerTask.value
 
         errorList.append(contentsOf: counters.traversalErrors)
@@ -285,7 +324,8 @@ enum BackupEngine {
         status.currentFile = "Salvo i commit non pubblicati e i database…"
         try? statusWriter.write(status: status)
         let gitRecords = options.captureGit
-            ? GitSafety.captureAll(sources: allPaths, excludeFilter: excludeFilter, home: home, into: inProgressURL)
+            ? GitSafety.captureAll(sources: allPaths, excludeFilter: excludeFilter, home: home, into: inProgressURL,
+                                   previousSnapshot: latestBackup)
             : []
         let dbRecords = options.captureDatabases
             ? DatabaseDumps.captureAll(config: config.databases, home: home, into: inProgressURL)
@@ -302,7 +342,8 @@ enum BackupEngine {
         if allPaths.isEmpty { sourceReasons.append("Nessuna delle cartelle da salvare esiste su questo Mac.") }
         if let previous = previousComplete?.manifest {
             for gone in missing where previous.sources.contains(gone) {
-                sourceReasons.append("La cartella \(gone) non esiste più, ma era nell'ultimo backup completo.")
+                sourceReasons.append("La cartella \(gone) non esiste più, ma era nell'ultimo backup completo. "
+                    + "Se non ti serve più, toglila dalle cartelle da salvare.")
             }
         }
         let (complete, reasons) = SnapshotManifest.evaluate(

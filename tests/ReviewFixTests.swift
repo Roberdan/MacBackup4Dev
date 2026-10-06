@@ -136,3 +136,66 @@ final class ReviewFixTests {
                       "a normal day is not")
     }
 }
+
+/// Second review round (R1–R3).
+final class ReviewRound2Tests {
+    let safety = SafetyTests()
+
+    /// R1: stopping while the queue is full must not trap (the old semaphore did).
+    func test_stopMidBackupDoesNotCrash() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        for i in 0..<20_000 { try safety.write("\(i)", to: "\(box.home)/data/d\(i % 50)/f\(i)") }
+        let cfg = safety.config(box, sources: ["data"])
+        let writer = StatusWriter(directory: box.state)
+        let out = ResultBox<BackupRunResult?>()
+        let done = DispatchSemaphore(value: 0)
+        Task {
+            out.value = try? await BackupEngine.run(config: cfg, statusWriter: writer,
+                options: BackupRunOptions(home: box.home, captureEnvironment: false, captureGit: false,
+                                          captureDatabases: false, auditCoverage: false))
+            done.signal()
+        }
+        usleep(150_000)
+        BackupEngine.stop()
+        let finished = done.wait(timeout: .now() + 120)
+        try expect(finished == .success, "the run ends after stop")
+        try expect(out.value ?? nil == nil, "a stopped run produces no snapshot")
+        let leftovers = (try FileManager.default.contentsOfDirectory(atPath: box.dest)).filter { !$0.hasPrefix(".") && $0 != "rustymacbackup.lock" }
+        try expectEqual(leftovers, [], "nothing that looks like a snapshot is left")
+    }
+
+    /// R2: long output is never cut.
+    func test_longOutputIsComplete() throws {
+        let r = Shell.run("/usr/bin/seq", ["1", "200000"])
+        try expect(r.ok, "seq ran")
+        let lines = r.stdout.split(separator: "\n")
+        try expectEqual(lines.count, 200_000, "all lines captured")
+        try expectEqual(lines.last.map(String.init), "200000", "last line present")
+    }
+
+    /// R3: an unchanged set of unpublished commits is hard-linked, not written again.
+    func test_unchangedBundleIsHardLinked() throws {
+        guard Shell.git != nil else { return }
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let origin = box.root.appendingPathComponent("origin.git").path
+        _ = try safety.git(["init", "-q", "--bare", "-b", "main", origin], box.root.path)
+        let repo = box.home + "/GitHub/app"
+        _ = try safety.git(["clone", "-q", origin, repo], box.root.path)
+        try safety.write("1", to: repo + "/a.txt")
+        _ = try safety.git(["add", "."], repo); _ = try safety.git(["commit", "-q", "-m", "base"], repo)
+        _ = try safety.git(["push", "-q", "origin", "HEAD:main"], repo)
+        try safety.write("2", to: repo + "/b.txt")
+        _ = try safety.git(["add", "."], repo); _ = try safety.git(["commit", "-q", "-m", "local"], repo)
+        let cfg = safety.config(box, sources: ["GitHub"])
+        let first = try safety.runEngine(cfg, box, git: true)
+        let second = try safety.runEngine(cfg, box, git: true)
+        func bundlePath(_ r: BackupRunResult) -> String? {
+            r.manifest.git.first?.bundle.map { r.snapshot.appendingPathComponent(SnapshotManifest.directoryName)
+                .appendingPathComponent(GitSafety.directoryName).appendingPathComponent($0).path }
+        }
+        guard let a = bundlePath(first), let b = bundlePath(second) else { throw TestFailure.failed("bundles missing") }
+        let inodeA = (try FileManager.default.attributesOfItem(atPath: a))[.systemFileNumber] as? Int
+        let inodeB = (try FileManager.default.attributesOfItem(atPath: b))[.systemFileNumber] as? Int
+        try expectEqual(inodeA, inodeB, "second snapshot hard-links the same bundle")
+    }
+}

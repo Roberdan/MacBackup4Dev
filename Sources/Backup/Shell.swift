@@ -18,12 +18,10 @@ enum Shell {
         process.arguments = arguments
         if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
         var env = ProcessInfo.processInfo.environment
-        // Never let git open an editor, ask for a password or page its output, and keep
-        // messages in English: the code parses some of them ("The bundle requires…").
+        // Never let git open an editor, ask for a password or page its output.
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_PAGER"] = "cat"
         env["GIT_EDITOR"] = "true"
-        env["LC_ALL"] = "C"
         for (key, value) in environment ?? [:] { env[key] = value }
         process.environment = env
 
@@ -35,9 +33,9 @@ enum Shell {
         // Drain both pipes while the process runs: a full pipe would block it forever.
         // Handlers run serially per handle, so chunks keep their order.
         final class Buffer: @unchecked Sendable {
-            var data = Data(); let lock = NSLock(); var lastWrite = Date()
-            func append(_ d: Data) { lock.lock(); data.append(d); lastWrite = Date(); lock.unlock() }
-            func snapshot() -> (Data, Date) { lock.lock(); defer { lock.unlock() }; return (data, lastWrite) }
+            var data = Data(); let lock = NSLock()
+            func append(_ d: Data) { lock.lock(); data.append(d); lock.unlock() }
+            func snapshot() -> (Data, Date) { lock.lock(); defer { lock.unlock() }; return (data, Date()) }
         }
         let out = Buffer(), err = Buffer()
         outPipe.fileHandleForReading.readabilityHandler = { h in
@@ -67,22 +65,30 @@ enum Shell {
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         }
         process.waitUntilExit()
-        // Let the handlers collect what is still in the pipes, without a blocking read: a
-        // grandchild (ssh ControlMaster, git daemon) may keep the pipe open forever.
-        usleep(100_000)  // output written just before exit is still on its way to the handlers
-        let settle = Date().addingTimeInterval(1)
-        while Date() < settle {
-            let quietOut = Date().timeIntervalSince(out.snapshot().1) > 0.1
-            let quietErr = Date().timeIntervalSince(err.snapshot().1) > 0.1
-            if quietOut && quietErr { break }
-            usleep(20_000)
-        }
+        // The writer has exited, so everything it wrote is already in the pipe buffers.
+        // Stop the handlers, let an in-flight one finish, then drain each pipe without
+        // blocking (a grandchild such as an ssh ControlMaster may keep the pipe open):
+        // nothing is cut by a timing guess (review R2).
         outPipe.fileHandleForReading.readabilityHandler = nil
         errPipe.fileHandleForReading.readabilityHandler = nil
+        usleep(30_000)
+        drainNonBlocking(outPipe.fileHandleForReading.fileDescriptor, into: out.append)
+        drainNonBlocking(errPipe.fileHandleForReading.fileDescriptor, into: err.append)
         let stderr = String(decoding: err.snapshot().0, as: UTF8.self)
         return Result(status: timedOut ? -2 : process.terminationStatus,
                       stdout: String(decoding: out.snapshot().0, as: UTF8.self),
                       stderr: timedOut ? "timeout dopo \(Int(timeout))s. \(stderr)" : stderr)
+    }
+
+    private static func drainNonBlocking(_ fd: Int32, into sink: (Data) -> Void) {
+        let flags = fcntl(fd, F_GETFL)
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        while true {
+            let n = read(fd, &buffer, buffer.count)
+            if n > 0 { sink(Data(buffer[0..<n])); continue }
+            break   // 0 = EOF, -1 = EAGAIN (nothing left) or error
+        }
     }
 
     /// First existing executable among the candidates (Homebrew first: /usr/bin/git is a

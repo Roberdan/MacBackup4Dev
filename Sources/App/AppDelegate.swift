@@ -581,10 +581,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let undoDir = latestUndoDir() {
             popover.performClose(nil)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let result = (try? SelectiveRestore.undo(undoDir)) ?? RestoreResult(failed: 1)
+                let outcome = (try? SelectiveRestore.undoDetailed(undoDir)) ?? UndoOutcome(failed: 1)
                 DispatchQueue.main.async {
-                    self?.sendNotification(title: "Ripristino annullato",
-                                           body: "\(result.restored) file rimessi com'erano, \(result.failed) non riusciti.")
+                    var body = "\(outcome.restored) file rimessi com'erano"
+                    if !outcome.keptBecauseChanged.isEmpty {
+                        body += ", \(outcome.keptBecauseChanged.count) lasciati perché modificati dopo il ripristino"
+                    }
+                    if outcome.failed > 0 { body += ", \(outcome.failed) non riusciti" }
+                    self?.sendNotification(title: "Ripristino annullato", body: body + ".")
                     self?.pollStatus()
                 }
             }
