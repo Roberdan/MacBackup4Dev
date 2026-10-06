@@ -100,21 +100,14 @@ enum NewMacRestore {
             report.log("== \(Step.config.title)", sink)
             let tops = ((try? FileManager.default.contentsOfDirectory(atPath: snapshot.path)) ?? [])
                 .filter { !SelectiveRestore.internalDirectories.contains($0) && $0 != ".DS_Store" }
-            var paths: [String] = []
-            for top in tops.sorted() {
-                // Repositories are rebuilt by the repos step, not copied file by file.
-                if repoPaths.contains(where: { $0 == top || $0.hasPrefix(top + "/") }) {
-                    let children = ((try? FileManager.default.contentsOfDirectory(atPath: snapshot.appendingPathComponent(top).path)) ?? [])
-                    for child in children where !repoPaths.contains(where: { $0 == top + "/" + child || $0.hasPrefix(top + "/" + child + "/") }) {
-                        paths.append(top + "/" + child)
-                    }
-                } else {
-                    paths.append(top)
-                }
+            let plan = SelectiveRestore.plan(snapshot: snapshot, paths: tops.sorted(), destinationRoot: home)
+            // Repositories are rebuilt by the repos step; only their own folders are left out,
+            // loose files and plain folders next to them still come back (review M7).
+            func insideRepo(_ rel: String) -> Bool {
+                repoPaths.contains { rel == $0 || rel.hasPrefix($0 + "/") }
             }
-            let plan = SelectiveRestore.plan(snapshot: snapshot, paths: paths, destinationRoot: home)
             let onlyNew = RestorePlan(snapshot: snapshot, destinationRoot: home,
-                                      items: plan.items.filter { $0.action == .create })
+                                      items: plan.items.filter { $0.action == .create && !insideRepo($0.relativePath) })
             report.log("  \(onlyNew.items.count) file da aggiungere, \(plan.toReplace) già presenti e diversi (lasciati come sono)", sink)
             if !dryRun, !onlyNew.items.isEmpty {
                 do {

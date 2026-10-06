@@ -315,6 +315,29 @@ that specific file/folder if it doesn't need to be in the backup at all.
 
 ---
 
+## Safety net (3.0)
+
+- **Verified snapshots**: `_rustymacbackup/manifest.json` in every snapshot says whether it is
+  complete. Incomplete ones are never the restore default and never count as "protected".
+- **Unpublished commits**: a `git bundle` per repository with only the commits not on a remote.
+- **Databases**: list them in config; they are copied consistently.
+
+```toml
+[databases]
+sqlite = ["~/GitHub/MyApp/runtime/history.db"]
+postgres = ["my_app_db"]
+
+[coverage]
+ignore = ["~/Scratch"]          # never report this folder as "not backed up"
+
+[topics]
+"My project" = ["~/GitHub/my-project", "~/.config/my-project"]
+```
+
+- **Coverage audit**: active folders and databases outside the backup are shown in the menu.
+- **Retention**: the 3 newest complete snapshots are never deleted; nothing is pruned while the
+  Mac looks new or emptied.
+
 ## Menu Bar App
 
 Launch the app (no arguments) to get the menu-bar popover:
@@ -424,20 +447,27 @@ Tests cover: `ExcludeFilter`, `RetentionManager`, `Config` parsing + round-trip,
 
 ## Restore & Undo
 
+Three ways, in the menu (**Ripristina…**) and in the CLI. Each one previews first and can be
+undone file by file (`undo`, or *Annulla l'ultimo ripristino* in the menu).
+
 ```bash
-# List available snapshots
-rustyback list
-
-# Restore a specific file from a snapshot
-rustyback restore 2026-03-20T14:32:00 .zshrc --to ~/.zshrc
-
-# Restore everything from a snapshot
-rustyback restore 2026-03-20T14:32:00 --to ~/
+RustyMacBackup snapshots                    # completo / incompleto / non verificato
+RustyMacBackup topics                       # Warp, Terminale e shell, Claude Code, …
+RustyMacBackup restore-topic warp           # preview; add --yes to restore
+RustyMacBackup versions ~/.zshrc            # every distinct version of one file
+RustyMacBackup restore-file ~/.zshrc --snapshot 2026-10-04_190948 --yes
+RustyMacBackup new-mac                      # checklist + preview of a whole new Mac
+RustyMacBackup new-mac --steps config,repos,databases --yes
 ```
 
-Before overwriting, the restore engine writes a `manifest.json` to a pre-restore backup dir (`~/.rustybackup-pre-restore/`). The **Undo Last Restore** button in the popover uses this manifest to restore exact paths — not a best-effort directory scan.
+**Nuovo Mac** restores configuration files that are missing (never overwriting), clones each
+repository on the branch and commit it had, puts unpublished commits back from the saved
+bundle and the uncommitted files on top (so `git status` shows exactly what was local),
+restores SQLite files and recreates absent Postgres databases. A half-restored folder in the
+way is moved to `~/RustyMacBackup-copie-parziali`, never deleted.
 
----
+Only complete snapshots are offered by default. Restoring from an incomplete one requires
+naming it with `--snapshot` and prints a warning.
 
 ## Auto-Update
 

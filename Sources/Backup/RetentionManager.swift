@@ -172,12 +172,22 @@ enum RetentionManager {
         slotKey: (BackupEntry) -> DateComponents
     ) {
         guard count > 0 else { return }
-        var seen: [DateComponents: String] = [:]
-        for backup in backups {
-            let slot = slotKey(backup)
-            if seen[slot] == nil {
-                seen[slot] = backup.name
+        // Each slot's representative: the newest COMPLETE snapshot of that slot; only when
+        // the slot has none, the newest unverified, then the newest at all (review M8: a
+        // late incomplete run must not push the complete one of the same day out).
+        func rank(_ b: BackupEntry) -> Int {
+            switch SnapshotManifest.read(from: b.url) {
+            case .some(let m) where m.complete: return 0
+            case .none: return 1
+            default: return 2
             }
+        }
+        var seen: [DateComponents: (name: String, rank: Int)] = [:]
+        for backup in backups {   // newest first
+            let slot = slotKey(backup)
+            let r = rank(backup)
+            if let current = seen[slot], current.rank <= r { continue }
+            seen[slot] = (backup.name, r)
         }
 
         var slotsKept = 0
@@ -187,7 +197,7 @@ enum RetentionManager {
             let slot = slotKey(backup)
             if !seenSlots.contains(slot) {
                 seenSlots.insert(slot)
-                if let name = seen[slot] { keep.insert(name) }
+                if let entry = seen[slot] { keep.insert(entry.name) }
                 slotsKept += 1
             }
         }

@@ -33,7 +33,12 @@ enum FileScanner {
             // Always use HOME as base — ensures snapshot preserves full relative paths
             // e.g. ~/GitHub/MyRepo/file.swift → "GitHub/MyRepo/file.swift" (not "file.swift")
             let basePath = basePaths[index].hasSuffix("/") ? basePaths[index] : basePaths[index] + "/"
-            guard FileManager.default.fileExists(atPath: source.path) else { continue }
+            // The source existed when the backup started: gone now means data not saved.
+            guard FileManager.default.fileExists(atPath: source.path) else {
+                onTraversalError?(source.path, NSError(domain: NSCocoaErrorDomain, code: NSFileNoSuchFileError,
+                    userInfo: [NSLocalizedDescriptionKey: "Cartella sparita durante il backup"]))
+                continue
+            }
             let sourceRelativePath = source.path.hasPrefix(basePath)
                 ? String(source.path.dropFirst(basePath.count)) : source.path
             guard !excludeFilter.isExcluded(relativePath: sourceRelativePath) else { continue }
@@ -51,7 +56,8 @@ enum FileScanner {
                 if source.path.hasPrefix(basePath) {
                     rel = String(source.path.dropFirst(basePath.count))
                 } else {
-                    rel = source.lastPathComponent
+                    // Outside the home: keep the whole path, never only the name (collisions).
+                    rel = String(source.path.drop(while: { $0 == "/" }))
                 }
                 let entry = FileEntry(
                     relativePath: rel,
@@ -73,7 +79,11 @@ enum FileScanner {
                     onTraversalError?(url.path, error)
                     return true  // continue traversal past unreadable entries
                 }
-            ) else { continue }
+            ) else {
+                onTraversalError?(source.path, NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError,
+                    userInfo: [NSLocalizedDescriptionKey: "Cartella non leggibile"]))
+                continue
+            }
 
             // The enumerator may hand back resolved paths (/private/var for /var, a symlinked
             // parent folder). Never fall back to the bare file name: two files with the same
@@ -99,7 +109,15 @@ enum FileScanner {
                     continue
                 }
 
-                guard let values = try? url.resourceValues(forKeys: keySet) else { continue }
+                let values: URLResourceValues
+                do {
+                    values = try url.resourceValues(forKeys: keySet)
+                } catch {
+                    // A temp file deleted between listing and reading is normal; anything
+                    // else that cannot be read is data not saved (review H3).
+                    if FileManager.default.fileExists(atPath: fullPath) { onTraversalError?(fullPath, error) }
+                    continue
+                }
                 let isDirectory = values.isDirectory == true
 
                 // `skipDescendants()` must only ever be called for a directory. Calling it

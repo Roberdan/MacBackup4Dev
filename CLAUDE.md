@@ -10,7 +10,7 @@ Native macOS backup app (Swift, AppKit/SwiftUI). Single `.app` binary that acts 
 
 ```bash
 ./build.sh              # compile + sign → build/RustyMacBackup.app
-./run-tests.sh          # 55 unit tests → build/RustyMacBackupTests
+./run-tests.sh          # 79 tests → build/RustyMacBackupTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -22,11 +22,13 @@ Version is set in one place: `VERSION` default in `build.sh`. `build-pkg.sh` rea
 Sources/
   App/          AppDelegate, main, StatusManager, AutoUpdater, IconManager, MenuBuilder
   Backup/       BackupEngine(+Helpers), HardLinker, FileScanner, RestoreEngine,
-                RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes
+                RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
+                SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
+                SelectiveRestore (+Topics, FileVersions), NewMacRestore, ProtectionSummary, Shell
   Config/       ConfigManager, ConfigDiscovery, ScheduleManager
-  CLI/          CLIHandler, PruneOptions
+  CLI/          CLIHandler, CLIRestore (3.0 commands), PruneOptions
   Diagnostics/  Log, ErrorReporter, DiskDiagnostics, FDACheck
-  UI/           PopoverView, TreeView, AppUIState, SpeedometerView, ProgressBarView,
+  UI/           PopoverView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
                 SnapshotPickerView, DesignTokens, TreeWindowController, PopoverViewController
 ```
 
@@ -54,7 +56,26 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 - **Config**: `~/.config/rusty-mac-backup/config.toml`
 - **Lock file**: `<destination>/rustymacbackup.lock` (PID-based, stale detection via `kill(pid, 0)`).
 
+## 3.0 invariants (scar 2026-10-06 — do not weaken)
+
+- **A snapshot is good only if its manifest says `complete: true`.** `SnapshotCatalog` is the
+  single source for "which snapshot is good": restore defaults, retention protection and the
+  menu all ask it. Never pick "the newest directory" anywhere else.
+- **The scanner → copy queue must never drop entries.** `AsyncStream` stays `.unbounded`,
+  bounded by the `QUEUE_LIMIT` semaphore. `bufferingNewest`/`bufferingOldest` drop silently.
+- **Never fall back to the bare file name for a relative path** (`FileScanner`): use
+  `realPath` (realpath(3)); `resolvingSymlinksInPath` strips `/private` and breaks prefixes.
+- **Retention never deletes the 3 newest complete snapshots** and does nothing when the newest
+  snapshot has a `shrinkWarning` (new or emptied Mac).
+- **Restore writes beside the target and renames into place; undo.json lists replaced AND
+  created files.** Tests must pass a temp `undoRoot`/`home`: never write into the real home.
+- Tests run the real engine with `BackupRunOptions(home:)` and `StatusWriter(directory:)`
+  pointed at a sandbox: never the user's status file.
+
 ## Known Critical Issues (from 2026-03-20 audit)
+
+Status 2026-10-06: P0.1, P0.2, P0.3, P0.5, P0.6 fixed (F-01…F-06); P0.4 mitigated (codesign
+verify + rsync rollback; identity pinning still missing because CI releases are ad-hoc signed).
 
 ### P0 — Must fix before wide distribution
 
@@ -98,5 +119,6 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh`. No SPM/Xcode project — raw `swiftc` compilation.
-Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration.
+Tests live in `tests/`. Run via `./run-tests.sh` (79 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
+and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.

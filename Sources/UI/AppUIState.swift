@@ -34,6 +34,14 @@ final class AppUIState: ObservableObject {
     /// Non-nil when an update version was dismissed by user.
     @Published var dismissedUpdateVersion: String?
 
+    // MARK: - 3.0: protection and coverage (computed by AppDelegate, never while rendering)
+    @Published var protection: ProtectionSummary?
+    @Published var coverageGaps: [CoverageGap] = []
+    var onAddCoverage: ((CoverageGap) -> Void)?
+    var onIgnoreCoverage: ((CoverageGap) -> Void)?
+    var onRequestAdvancedRestore: (() -> Void)?
+    var onRequestShowSnapshot: (() -> Void)?
+
     // MARK: - Restore result (F-18)
     @Published var restoreResult: RestoreResultSummary?
 

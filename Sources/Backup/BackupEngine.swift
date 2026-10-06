@@ -25,14 +25,24 @@ enum BackupEngine {
     /// this instead of dropping entries.
     static let QUEUE_LIMIT: Int = 4_096
 
-    private static var shouldCancel = false
+    /// One token per run: a stale walker from a run that threw can never see the next
+    /// run's flag reset and keep going (review M2).
+    final class CancelToken: @unchecked Sendable {
+        private let lock = NSLock()
+        private var flag = false
+        var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return flag }
+        func cancel() { lock.lock(); flag = true; lock.unlock() }
+    }
+    private static let currentLock = NSLock()
+    nonisolated(unsafe) private static var current: CancelToken?
 
-    static func stop() { shouldCancel = true }
+    static func stop() { currentLock.lock(); current?.cancel(); currentLock.unlock() }
 
     @discardableResult
     static func run(config: Config, statusWriter: StatusWriter = StatusWriter(),
                     options: BackupRunOptions = BackupRunOptions()) async throws -> BackupRunResult? {
-        shouldCancel = false
+        let token = CancelToken()
+        currentLock.lock(); current = token; currentLock.unlock()
         let destPath = config.destination.path
         let destURL = URL(fileURLWithPath: destPath)
         let home = options.home
@@ -75,6 +85,10 @@ enum BackupEngine {
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
 
         let previousComplete = SnapshotCatalog.latestComplete(at: destURL)
+        // Without a verified snapshot yet (first 3.0 run), compare with the newest old one,
+        // so a wiped Mac is recognised on day one too.
+        let baselineFiles: Int64? = previousComplete == nil
+            ? findLatestBackup(at: destURL).map { countFiles(in: $0) } : nil
 
         if diskFreeSpace(at: destPath) < MIN_FREE_SPACE {
             let _ = try RetentionManager.pruneLockedBackups(at: destURL, policy: config.retention, dryRun: false)
@@ -139,13 +153,14 @@ enum BackupEngine {
                            onTraversalError: { path, error in
                                counters.traversalErrors.append((path: path, error: error))
                            }) { entry in
-                if shouldCancel { return false }
+                if token.isCancelled { return false }
                 slots.wait()
+                if token.isCancelled { return false }
                 counters.discovered += 1
                 continuation.yield(entry)
                 return true
             }
-            counters.walkerDone = !shouldCancel
+            counters.walkerDone = !token.isCancelled
             continuation.finish()
         }
 
@@ -178,7 +193,7 @@ enum BackupEngine {
             try await withThrowingTaskGroup(of: (FileResult, FileEntry).self) { group in
                 for await file in stream {
                     slots.signal()
-                    if shouldCancel { break }
+                    if token.isCancelled { break }
                     processedCount += 1
 
                     if processedCount % UInt64(DISK_CHECK_INTERVAL) == 0 {
@@ -238,22 +253,25 @@ enum BackupEngine {
                 }
             }
         } catch {
-            // Unblock and stop the walker before leaving, or it waits on the semaphore forever.
-            shouldCancel = true
+            // Stop the walker, release it if it waits for a slot, and wait for it to end:
+            // nothing of this run may outlive it (review M1/M2).
+            token.cancel()
             for _ in 0..<QUEUE_LIMIT { slots.signal() }
-            walkerTask.cancel()
+            await walkerTask.value
             throw error
         }
 
+        // `for await` also ends silently when the Swift task is cancelled.
+        if Task.isCancelled { token.cancel() }
         // A cancelled walker may be waiting for a slot: release it, then wait for it to end
         // so `walkerDone` and the traversal errors are final before they are judged.
-        if shouldCancel { for _ in 0..<QUEUE_LIMIT { slots.signal() } }
+        if token.isCancelled { for _ in 0..<QUEUE_LIMIT { slots.signal() } }
         await walkerTask.value
 
         errorList.append(contentsOf: counters.traversalErrors)
 
         // F-02: Do NOT rename to final snapshot if cancelled — partial backup must not look valid.
-        if shouldCancel {
+        if token.isCancelled {
             try? FileManager.default.removeItem(at: inProgressURL)
             status.state = "cancelled"
             status.phase = "cancelled"
@@ -276,13 +294,23 @@ enum BackupEngine {
         let traversalCount = counters.traversalErrors.count
         let copyErrors = errorList.count - traversalCount
         let shrink = SnapshotManifest.shrinkWarning(processed: Int64(processedCount),
-                                                    previous: previousComplete?.manifest)
+                                                    previous: previousComplete?.manifest,
+                                                    baselineFiles: baselineFiles)
+        // A folder that was in the last complete snapshot and is gone now is not a normal
+        // day either (an unmounted volume, a moved project): say it (review H3).
+        var sourceReasons: [String] = []
+        if allPaths.isEmpty { sourceReasons.append("Nessuna delle cartelle da salvare esiste su questo Mac.") }
+        if let previous = previousComplete?.manifest {
+            for gone in missing where previous.sources.contains(gone) {
+                sourceReasons.append("La cartella \(gone) non esiste più, ma era nell'ultimo backup completo.")
+            }
+        }
         let (complete, reasons) = SnapshotManifest.evaluate(
             discovered: counters.discovered, processed: Int64(processedCount),
             walkerFinished: counters.walkerDone, errors: copyErrors, traversalErrors: traversalCount,
             gitFailures: gitRecords.compactMap { r in r.error.map { "\(r.relativePath) (\($0))" } },
             databaseFailures: dbRecords.compactMap { r in r.error.map { "\(r.source) (\($0))" } },
-            shrinkWarning: shrink)
+            shrinkWarning: shrink, otherReasons: sourceReasons)
 
         let manifest = SnapshotManifest(
             appVersion: appVersionString(), host: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
@@ -351,6 +379,21 @@ enum BackupEngine {
         }
         do { try statusWriter.write(status: status) } catch { Log.error("Status write failed at completion: \(error)") }
         return BackupRunResult(snapshot: finalURL, manifest: manifest)
+    }
+
+    /// Bounded count of the files in a snapshot (old snapshots have no manifest).
+    static func countFiles(in snapshot: URL, limit: Int64 = 3_000_000) -> Int64 {
+        guard let e = FileManager.default.enumerator(at: snapshot, includingPropertiesForKeys: [.isRegularFileKey],
+                                                     options: []) else { return 0 }
+        var n: Int64 = 0
+        for case let url as URL in e {
+            if url.lastPathComponent == "_environment" || url.lastPathComponent == SnapshotManifest.directoryName {
+                e.skipDescendants(); continue
+            }
+            if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true { n += 1 }
+            if n >= limit { break }
+        }
+        return n
     }
 
     static func appVersionString() -> String {

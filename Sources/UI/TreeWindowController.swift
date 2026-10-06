@@ -41,9 +41,9 @@ class TreeWindowController: NSWindowController {
 
         switch mode {
         case .backup:
-            window.title = "Backup — Select Sources"
+            window.title = "Backup — scegli cosa salvare"
         case .restore(let url):
-            window.title = "Restore — \(url.lastPathComponent)"
+            window.title = "Ripristina — \(url.lastPathComponent)"
         }
 
         super.init(window: window)

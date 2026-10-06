@@ -55,8 +55,9 @@ struct SnapshotManifest: Codable, Equatable {
     /// Decide completeness from the counts. Kept pure so the rule is testable on its own.
     static func evaluate(discovered: Int64, processed: Int64, walkerFinished: Bool,
                          errors: Int, traversalErrors: Int, gitFailures: [String],
-                         databaseFailures: [String], shrinkWarning: String?) -> (Bool, [String]) {
-        var reasons: [String] = []
+                         databaseFailures: [String], shrinkWarning: String?,
+                         otherReasons: [String] = []) -> (Bool, [String]) {
+        var reasons: [String] = otherReasons
         if !walkerFinished {
             reasons.append("La scansione delle cartelle non è arrivata in fondo.")
         }
@@ -83,12 +84,16 @@ struct SnapshotManifest: Codable, Equatable {
 
     /// A home with less than 30% of the files of the last complete snapshot is not a normal
     /// day: it is a new Mac, a wiped home or a broken mount. Small trees are ignored.
-    static func shrinkWarning(processed: Int64, previous: SnapshotManifest?) -> String? {
-        guard let previous, previous.complete, previous.filesProcessed >= 1_000 else { return nil }
-        guard Double(processed) < Double(previous.filesProcessed) * 0.3 else { return nil }
-        return "Questo Mac ha molti meno file dell'ultimo backup completo "
-            + "(\(processed) contro \(previous.filesProcessed)): sembra nuovo o svuotato. "
-            + "Lo snapshot non sostituisce quello completo."
+    static func shrinkWarning(processed: Int64, previous: SnapshotManifest?,
+                              baselineFiles: Int64? = nil) -> String? {
+        let reference: Int64
+        if let previous, previous.complete { reference = previous.filesProcessed }
+        else if let baselineFiles { reference = baselineFiles }   // newest pre-3.0 snapshot
+        else { return nil }
+        guard reference >= 1_000, Double(processed) < Double(reference) * 0.3 else { return nil }
+        return "Questo Mac ha molti meno file dell'ultimo backup "
+            + "(\(processed) contro \(reference)): sembra nuovo o svuotato. "
+            + "Lo snapshot non sostituisce quello buono e la pulizia è in pausa."
     }
 }
 

@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import UserNotifications
 
 enum CLIHandler {
     static var version: String {
@@ -105,6 +106,19 @@ enum CLIHandler {
         """)
     }
 
+    /// Scheduled backups run this CLI, not the menu app: without this a failed night is silent.
+    static func notify(title: String, body: String) {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let done = DispatchSemaphore(value: 0)
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)) { _ in done.signal() }
+        _ = done.wait(timeout: .now() + 3)
+    }
+
     static func printError(_ message: String) {
         FileHandle.standardError.write(Data("\(red("Error")): \(message)\n".utf8))
     }
@@ -192,10 +206,14 @@ enum CLIHandler {
                     } else {
                         print(yellow("Backup INCOMPLETO: \(r.snapshot.lastPathComponent)"))
                         for reason in r.manifest.incompleteReasons { print("  - \(reason)") }
+                        notify(title: "Backup incompleto", body: r.manifest.incompleteReasons.first ?? "Apri il menu per i dettagli.")
                     }
                 }
             }
-            catch { box.error = error }
+            catch {
+                box.error = error
+                notify(title: "Backup non riuscito", body: error.localizedDescription)
+            }
             sem.signal()
         }
         sem.wait()

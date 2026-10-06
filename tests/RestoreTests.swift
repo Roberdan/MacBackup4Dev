@@ -113,3 +113,60 @@ final class RestoreTests {
                         "partial", "partial copy moved aside, not deleted")
     }
 }
+
+/// The menu's first line: protected, attention, or a Mac that looks new.
+final class ProtectionSummaryTests {
+    let safety = SafetyTests()
+
+    func name(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd_HHmmss"; f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: date)
+    }
+
+    func test_levels() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let dest = URL(fileURLWithPath: box.dest)
+        let now = Date()
+        try expectEqual(ProtectionSummary.build(destination: dest, now: now).headline, "Nessun backup", "empty disk")
+
+        try safety.makeSnapshot(dest, name(now.addingTimeInterval(-3 * 86_400)), complete: nil)  // pre-3.0
+        var s = ProtectionSummary.build(destination: dest, now: now)
+        try expectEqual(s.level, .attention, "only unverified snapshots: attention")
+
+        try safety.makeSnapshot(dest, name(now.addingTimeInterval(-7_200)), complete: true)
+        s = ProtectionSummary.build(destination: dest, now: now)
+        try expectEqual(s.level, .protected, "recent complete snapshot: protected")
+        try expect(s.headline.contains("2 ore fa"), "headline says how long ago: \(s.headline)")
+        try expectEqual(s.days.count, 14, "14-day strip")
+        try expectEqual(s.days.last, .complete, "today is green")
+
+        try safety.makeSnapshot(dest, name(now.addingTimeInterval(-600)), complete: false)
+        s = ProtectionSummary.build(destination: dest, now: now)
+        try expectEqual(s.level, .attention, "latest incomplete: attention")
+        try expect(s.latestIsIncomplete, "flag set")
+
+        try safety.makeSnapshot(dest, name(now.addingTimeInterval(-60)), complete: false, shrink: "nuovo")
+        s = ProtectionSummary.build(destination: dest, now: now)
+        try expectEqual(s.level, .unprotected, "new Mac: red")
+        try expect(s.looksLikeNewMac, "new Mac detected")
+    }
+}
+
+final class RestoreGuardTests {
+    let safety = SafetyTests()
+
+    func test_symlinksAndDotDotAreLeftAlone() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let snap = URL(fileURLWithPath: box.dest).appendingPathComponent("2026-10-05_000000")
+        try safety.write("from backup", to: snap.path + "/.claude/agents/twin.md")
+        try safety.write("canon", to: box.root.path + "/canon/twin.md")
+        try FileManager.default.createDirectory(atPath: box.home + "/.claude/agents", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: box.home + "/.claude/agents/twin.md",
+                                                   withDestinationPath: box.root.path + "/canon/twin.md")
+        let plan = SelectiveRestore.plan(snapshot: snap, paths: [".claude", "../outside", "a/../../x"], destinationRoot: box.home)
+        try expectEqual(plan.items.map(\.action), [.keepLink], "only the link, kept: \(plan.items)")
+        _ = try SelectiveRestore.apply(plan, undoRoot: box.root.appendingPathComponent("undo"))
+        try expectEqual(try FileManager.default.destinationOfSymbolicLink(atPath: box.home + "/.claude/agents/twin.md"),
+                        box.root.path + "/canon/twin.md", "symlink untouched")
+    }
+}

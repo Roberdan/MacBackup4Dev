@@ -23,6 +23,9 @@ struct TestRunner {
         let cleanup = SnapshotCleanupTests()
         let safety = SafetyTests()
         let restore = RestoreTests()
+        let protectionSummary = ProtectionSummaryTests()
+        let guards = RestoreGuardTests()
+        let review = ReviewFixTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -39,6 +42,16 @@ struct TestRunner {
             ("Restore.planApplyPerFileUndo", restore.test_planApplyAndPerFileUndo),
             ("Restore.versions", restore.test_versionsAreDistinctNewestFirst),
             ("Restore.newMacRepository", restore.test_newMacRebuildsRepository),
+            ("Protection.levels", protectionSummary.test_levels),
+            ("Restore.symlinksAndDotDot", guards.test_symlinksAndDotDotAreLeftAlone),
+            ("Review.H1.undoKeepsChanged", review.test_undoKeepsFilesChangedAfterRestore),
+            ("Review.H2.unreadableRepo", review.test_unreadableRepositoryMakesSnapshotIncomplete),
+            ("Review.H3.missingSource", review.test_missingSourceAfterCompleteSnapshotIsIncomplete),
+            ("Review.H4.deletedRemoteBranch", review.test_bundleAppliesWhenRemoteBranchWasDeleted),
+            ("Review.M4.typeConflict", review.test_typeConflictIsLeftAlone),
+            ("Review.M5.safeRelative", review.test_safeRelativeRefusesTricks),
+            ("Review.M8.slotPrefersComplete", review.test_retentionSlotPrefersComplete),
+            ("Review.shrinkBaseline", review.test_shrinkAgainstUnverifiedBaseline),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

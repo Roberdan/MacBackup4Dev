@@ -118,7 +118,13 @@ enum FileVersions {
 // MARK: - Selective restore with preview and per-file undo
 
 struct RestorePlanItem: Equatable {
-    enum Action: String { case create = "nuovo", replace = "sostituito", same = "uguale" }
+    enum Action: String {
+        case create = "nuovo", replace = "sostituito", same = "uguale"
+        /// The target is a symbolic link (e.g. ~/.claude/agents/*.md → roberdan-os): left alone.
+        case keepLink = "collegamento, lasciato"
+        /// A folder (or file) of another type is where the file would go: left alone.
+        case conflict = "tipo diverso, lasciato"
+    }
     let relativePath: String
     let action: Action
     let size: UInt64
@@ -132,21 +138,38 @@ struct RestorePlan {
     var toCreate: Int { items.filter { $0.action == .create }.count }
     var toReplace: Int { items.filter { $0.action == .replace }.count }
     var unchanged: Int { items.filter { $0.action == .same }.count }
-    var bytes: UInt64 { items.filter { $0.action != .same }.reduce(0) { $0 + $1.size } }
+    var links: Int { items.filter { $0.action == .keepLink }.count }
+    var conflicts: Int { items.filter { $0.action == .conflict }.count }
+    var bytes: UInt64 { items.filter { $0.action == .create || $0.action == .replace }.reduce(0) { $0 + $1.size } }
 
     var summary: String {
         "\(toReplace) da sostituire, \(toCreate) nuovi, \(unchanged) già uguali, 0 da cancellare"
+            + (links > 0 ? ", \(links) collegamenti lasciati come sono" : "")
+            + (conflicts > 0 ? ", \(conflicts) lasciati perché lì c'è una cartella" : "")
     }
 }
 
-/// Undo record v2: lists files the restore REPLACED (their old version is kept) and files it
-/// CREATED (undo removes them). The old format only knew replacements, so an undo left
-/// every newly restored file behind.
+/// Undo record v3: what the restore REPLACED (old version kept), what it CREATED, and the
+/// size and modification time of what it wrote. Undo touches a file only if it is still
+/// exactly what the restore wrote: a week of edits after a restore is never thrown away
+/// (review H1). Earlier versions only knew replacements, so an undo left created files behind.
 struct UndoManifest: Codable {
-    var version = 2
+    struct Stamp: Codable, Equatable {
+        var size: UInt64
+        var mtime: Double
+    }
+    var version = 3
     var destinationRoot: String
     var replaced: [String]
     var created: [String]
+    var written: [String: Stamp]? = [:]
+}
+
+struct UndoOutcome {
+    var restored = 0
+    var failed = 0
+    /// Changed after the restore: left as they are.
+    var keptBecauseChanged: [String] = []
 }
 
 enum SelectiveRestore {
@@ -170,28 +193,52 @@ enum SelectiveRestore {
         return out
     }
 
+    /// Normalise a requested path: no "..", no ".", no absolute path, nothing internal.
+    static func safeRelative(_ path: String) -> String? {
+        let comps = Topics.normalize(path).split(separator: "/").map(String.init).filter { $0 != "." && !$0.isEmpty }
+        guard !comps.isEmpty, !comps.contains(".."), !path.hasPrefix("/") || path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path),
+              !internalDirectories.contains(comps[0]) else { return nil }
+        return comps.joined(separator: "/")
+    }
+
+    /// True when any folder between the destination root and the file is a symbolic link:
+    /// writing there would go somewhere else entirely.
+    static func crossesLink(_ rel: String, root: String) -> Bool {
+        let fm = FileManager.default
+        var current = root
+        for comp in rel.split(separator: "/").dropLast() {
+            current += "/" + comp
+            if (try? fm.destinationOfSymbolicLink(atPath: current)) != nil { return true }
+        }
+        return false
+    }
+
     /// Compare each file with what is at the destination today. Nothing is written.
     static func plan(snapshot: URL, paths: [String],
                      destinationRoot: String = FileManager.default.homeDirectoryForCurrentUser.path) -> RestorePlan {
         let fm = FileManager.default
         var files: [String] = []
         for p in paths {
-            let rel = Topics.normalize(p)
-            guard let first = rel.split(separator: "/").first.map(String.init),
-                  !internalDirectories.contains(first) else { continue }
+            guard let rel = safeRelative(p) else { continue }
             files.append(contentsOf: filesBelow(rel, in: snapshot))
         }
         var items: [RestorePlanItem] = []
         for rel in Array(Set(files)).sorted() {
             let src = snapshot.appendingPathComponent(rel).path
             let dst = destinationRoot + "/" + rel
-            let srcAttrs = try? fm.attributesOfItem(atPath: src)
-            let size = srcAttrs?[.size] as? UInt64 ?? 0
+            let size = (try? fm.attributesOfItem(atPath: src))?[.size] as? UInt64 ?? 0
             let action: RestorePlanItem.Action
-            if let dstAttrs = try? fm.attributesOfItem(atPath: dst) {
-                let same = (dstAttrs[.size] as? UInt64) == size
-                    && fm.contentsEqual(atPath: src, andPath: dst)
-                action = same ? .same : .replace
+            var isDir: ObjCBool = false
+            if (try? fm.destinationOfSymbolicLink(atPath: dst)) != nil || crossesLink(rel, root: destinationRoot) {
+                action = .keepLink
+            } else if fm.fileExists(atPath: dst, isDirectory: &isDir) {
+                if isDir.boolValue {
+                    action = .conflict
+                } else {
+                    let same = (try? fm.attributesOfItem(atPath: dst))?[.size] as? UInt64 == size
+                        && fm.contentsEqual(atPath: src, andPath: dst)
+                    action = same ? .same : .replace
+                }
             } else {
                 action = .create
             }
@@ -200,23 +247,39 @@ enum SelectiveRestore {
         return RestorePlan(snapshot: snapshot, destinationRoot: destinationRoot, items: items)
     }
 
+    static func stamp(_ path: String) -> UndoManifest.Stamp? {
+        guard let a = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
+        return UndoManifest.Stamp(size: a[.size] as? UInt64 ?? 0,
+                                  mtime: (a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
+    }
+
+    private static func writeManifest(_ manifest: UndoManifest, to dir: URL) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(manifest).write(to: dir.appendingPathComponent("undo.json"), options: .atomic)
+    }
+
     /// Apply a plan. Each file is written next to its target and renamed into place, so a
-    /// half-written file never replaces a good one. Replaced files are kept for undo.
+    /// half-written file never replaces a good one. Replaced files are kept for undo, and
+    /// the undo record is saved as the restore goes, not only at the end.
     static func apply(_ plan: RestorePlan, undoRoot: URL = RestoreEngine.preRestoreBaseURL) throws -> (result: RestoreResult, undoDir: URL?) {
         let fm = FileManager.default
         var result = RestoreResult()
-        let stamp = DateFormatter()
-        stamp.dateFormat = "yyyyMMdd_HHmmss"
-        stamp.locale = Locale(identifier: "en_US_POSIX")
-        var undoDir = undoRoot.appendingPathComponent(stamp.string(from: Date()))
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        var undoDir = undoRoot.appendingPathComponent(formatter.string(from: Date()))
         var n = 1
         while fm.fileExists(atPath: undoDir.path) {
-            undoDir = undoRoot.appendingPathComponent(stamp.string(from: Date()) + "-\(n)"); n += 1
+            undoDir = undoRoot.appendingPathComponent(formatter.string(from: Date()) + "-\(n)"); n += 1
         }
         var manifest = UndoManifest(destinationRoot: plan.destinationRoot, replaced: [], created: [])
-        for item in plan.items where item.action != .same {
+        var sinceSave = 0
+        for item in plan.items where item.action == .create || item.action == .replace {
             let src = plan.snapshot.appendingPathComponent(item.relativePath)
             let dst = URL(fileURLWithPath: plan.destinationRoot + "/" + item.relativePath)
+            let temp = dst.deletingLastPathComponent().appendingPathComponent(".rmb-restore-\(UUID().uuidString)")
             do {
                 try fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if item.action == .replace {
@@ -224,46 +287,66 @@ enum SelectiveRestore {
                     try fm.createDirectory(at: keep.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try fm.copyItem(at: dst, to: keep)
                 }
-                let temp = dst.deletingLastPathComponent()
-                    .appendingPathComponent(".rmb-restore-\(UUID().uuidString)")
                 try HardLinker.copyFile(from: src.path, to: temp.path)
                 if item.action == .replace {
                     _ = try fm.replaceItemAt(dst, withItemAt: temp)
                     manifest.replaced.append(item.relativePath)
                     result.overwritten += 1
                 } else {
-                    try fm.moveItem(at: temp, to: dst)
+                    try fm.moveItem(at: temp, to: dst)   // fails if something appeared there meanwhile
                     manifest.created.append(item.relativePath)
                 }
+                manifest.written?[item.relativePath] = stamp(dst.path)
                 result.restored += 1
             } catch {
+                try? fm.removeItem(at: temp)
                 Log.error("Restore failed for \(item.relativePath): \(error.localizedDescription)")
                 result.failed += 1
             }
+            sinceSave += 1
+            if sinceSave >= 100 { try? writeManifest(manifest, to: undoDir); sinceSave = 0 }
         }
-        guard !manifest.replaced.isEmpty || !manifest.created.isEmpty else { return (result, nil) }
-        try fm.createDirectory(at: undoDir, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(manifest).write(to: undoDir.appendingPathComponent("undo.json"), options: .atomic)
+        guard !manifest.replaced.isEmpty || !manifest.created.isEmpty else {
+            try? fm.removeItem(at: undoDir)
+            return (result, nil)
+        }
+        try writeManifest(manifest, to: undoDir)
         result.backedUpTo = undoDir.path
         return (result, undoDir)
     }
 
-    /// Undo exactly what `apply` did: put replaced files back, remove created ones.
-    /// `only` limits the undo to some files (per-file undo).
+    /// Undo exactly what `apply` did: put replaced files back, remove created ones, but only
+    /// where the file is still what the restore wrote. `only` limits the undo to some files.
+    @discardableResult
     static func undo(_ undoDir: URL, only: Set<String>? = nil) throws -> RestoreResult {
+        let outcome = try undoDetailed(undoDir, only: only)
+        var r = RestoreResult()
+        r.restored = outcome.restored
+        r.failed = outcome.failed + outcome.keptBecauseChanged.count
+        return r
+    }
+
+    static func undoDetailed(_ undoDir: URL, only: Set<String>? = nil) throws -> UndoOutcome {
         let fm = FileManager.default
         let data = try Data(contentsOf: undoDir.appendingPathComponent("undo.json"))
         var manifest = try JSONDecoder().decode(UndoManifest.self, from: data)
-        var result = RestoreResult()
+        var outcome = UndoOutcome()
+        var done = Set<String>()
+        func unchanged(_ rel: String, _ path: String) -> Bool {
+            guard let written = manifest.written?[rel] else { return true }   // older record
+            guard let now = stamp(path) else { return true }                  // already gone
+            return now.size == written.size && abs(now.mtime - written.mtime) < 0.001
+        }
         for rel in manifest.created where only?.contains(rel) ?? true {
             let dst = manifest.destinationRoot + "/" + rel
-            do { try fm.removeItem(atPath: dst); result.restored += 1 } catch { result.failed += 1 }
+            guard fm.fileExists(atPath: dst) else { done.insert(rel); continue }
+            guard unchanged(rel, dst) else { outcome.keptBecauseChanged.append(rel); continue }
+            do { try fm.removeItem(atPath: dst); outcome.restored += 1; done.insert(rel) } catch { outcome.failed += 1 }
         }
         for rel in manifest.replaced where only?.contains(rel) ?? true {
             let keep = undoDir.appendingPathComponent(rel)
             let dst = URL(fileURLWithPath: manifest.destinationRoot + "/" + rel)
+            guard unchanged(rel, dst.path) else { outcome.keptBecauseChanged.append(rel); continue }
             do {
                 if fm.fileExists(atPath: dst.path) {
                     _ = try fm.replaceItemAt(dst, withItemAt: keep)
@@ -271,20 +354,19 @@ enum SelectiveRestore {
                     try fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try fm.moveItem(at: keep, to: dst)
                 }
-                result.restored += 1
-            } catch { result.failed += 1 }
+                outcome.restored += 1
+                done.insert(rel)
+            } catch { outcome.failed += 1 }
         }
-        if let only {
-            manifest.created.removeAll { only.contains($0) }
-            manifest.replaced.removeAll { only.contains($0) }
-        } else {
-            manifest.created = []; manifest.replaced = []
-        }
-        if manifest.created.isEmpty && manifest.replaced.isEmpty && result.failed == 0 {
+        // Only what succeeded leaves the record: a failure can be retried (review M3).
+        manifest.created.removeAll { done.contains($0) }
+        manifest.replaced.removeAll { done.contains($0) }
+        for rel in done { manifest.written?[rel] = nil }
+        if manifest.created.isEmpty && manifest.replaced.isEmpty {
             try? fm.removeItem(at: undoDir)
         } else {
-            try JSONEncoder().encode(manifest).write(to: undoDir.appendingPathComponent("undo.json"), options: .atomic)
+            try writeManifest(manifest, to: undoDir)
         }
-        return result
+        return outcome
     }
 }

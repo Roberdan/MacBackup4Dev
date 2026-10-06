@@ -1,5 +1,63 @@
 # Changelog
 
+## [3.0.0] - 2026-10-06
+
+Rewritten after a real reinstall on 2026-10-06, where restoring a Mac from these backups
+took a whole day and lost data. Every item below fixes something that happened that day.
+
+### Added
+- **Verified snapshots.** Every snapshot carries `_rustymacbackup/manifest.json`: files
+  found vs copied, copy errors, unreadable folders, saved commits and databases. A snapshot
+  with any of these problems is marked **incomplete**: it is never the default for a
+  restore and never counted as "protected". Older snapshots show as *non verificato*.
+- **Unpublished commits survive.** For every git repository in the backed-up folders a
+  `git bundle` keeps exactly the commits not on any remote (plus the stash), with branches,
+  upstreams and worktrees recorded. `.git/objects` is still not copied.
+- **Databases.** `[databases] sqlite = [...]` are copied with SQLite's online backup API;
+  `[databases] postgres = [...]` are dumped with `pg_dump -Fc`.
+- **Coverage audit.** After each backup (and with `coverage`), folders changed in the last
+  30 days that no source covers, and SQLite files that are not copied, are reported in the
+  menu with *Aggiungi* / *Ignora*. `[coverage] ignore = [...]` silences one for good.
+- **Restore by topic** (Warp, Terminale e shell, Claude Code, Copilot, Git e SSH, Editor,
+  Font, …; more via `[topics]`), **by file** with every distinct version across snapshots,
+  and **Nuovo Mac**: login/app checklist, configuration (only missing files), repositories
+  cloned on the same branch and commit with unpublished commits and local edits back,
+  databases, Homebrew, chosen LaunchAgents. Everything previews first, writes each file next
+  to its target and renames it into place, and can be undone file by file (created files
+  included).
+- New window **Ripristina** (Argomento / File / Nuovo Mac) and CLI commands `snapshots`,
+  `coverage`, `versions`, `find`, `topics`, `restore-topic`, `restore-file`, `undo`,
+  `new-mac` (all preview without `--yes`).
+- Notifications say *Backup completo* or *Backup incompleto* (with the reason), also for
+  scheduled runs.
+
+### Changed
+- **Menu redesigned, all in Italian.** First line: protected or not, counting only complete
+  snapshots ("Protetto · ultimo completo 2 ore fa"); then problems with the button that fixes
+  them; a 14-day strip; *Esegui ora* / *Ripristina…*. Speedometer removed.
+- **Retention never deletes the 3 newest complete snapshots**, and pauses entirely when the
+  newest snapshot looks like a new or emptied Mac (far fewer files than the last complete
+  one). The manual cleanup protects complete snapshots too.
+- Build scripts use the full Xcode when the Command Line Tools lack the SwiftUI macro plugin.
+
+### Fixed
+- The file queue between scanner and copy workers used `bufferingNewest(256)`, which drops
+  waiting files when scanning runs ahead of copying. It now never drops (bounded by a
+  semaphore). The 6 October snapshot was missing ~80% of its files, evenly across folders.
+- Paths under a symlinked parent (`/var` → `/private/var`) were stored flat by file name:
+  files with the same name could overwrite each other inside a snapshot.
+- Restore skipped nothing internal: `_rustymacbackup` and Finder litter are no longer offered.
+- Undo removes the files a restore created, not only the ones it replaced.
+- `brew bundle --no-lock` (removed from Homebrew) no longer breaks the Homebrew restore.
+- VM/container disk images (`.colima`, `.lima`, `.orbstack`) excluded (recovered change).
+- Pre-release review: undo never deletes or overwrites a file changed after the restore;
+  a repository git cannot read, a folder that disappeared, or an unreadable folder make
+  the snapshot incomplete; unpublished commits are judged against each remote's default
+  branch, so their bundle applies to a fresh clone even after a squash-merge deleted the
+  branch; detached HEAD saved; retention keeps the complete snapshot of each slot; restore
+  leaves symlinks and folders of another type alone; `--to` and `.`/`..` paths normalised;
+  external commands cannot hang (SIGKILL after the grace period, no blocking final read).
+
 ## [2.6.0] - 2026-09-24
 
 ### Added

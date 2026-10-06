@@ -124,7 +124,7 @@ extension CLIHandler {
 
     static func printPlan(_ plan: RestorePlan) {
         print("  \(plan.summary) · \(BackupEngine.formatBytes(plan.bytes)) da scrivere")
-        for item in plan.items where item.action != .same {
+        for item in plan.items where item.action == .create || item.action == .replace {
             print("    \(item.action == .create ? "+" : "~") ~/\(item.relativePath)")
         }
     }
@@ -152,7 +152,8 @@ extension CLIHandler {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var root = home
         if let to = flags.values["--to"] {
-            let expanded = expandPath(to)
+            // Normalise first: "~/../../etc" must not pass the home check (review M5).
+            let expanded = URL(fileURLWithPath: expandPath(to)).standardizedFileURL.path
             guard expanded == home || expanded.hasPrefix(home + "/") else { throw err("La destinazione deve stare nella tua home") }
             root = expanded
         }
@@ -185,8 +186,12 @@ extension CLIHandler {
             dir = base.appendingPathComponent(last)
         }
         let only = flags.values["--file"].map { Set([Topics.normalize(expandPath($0))]) }
-        let r = try SelectiveRestore.undo(dir, only: only)
+        let r = try SelectiveRestore.undoDetailed(dir, only: only)
         print(green("Annullato: \(r.restored) file rimessi com'erano, \(r.failed) non riusciti."))
+        if !r.keptBecauseChanged.isEmpty {
+            print(yellow("Lasciati come sono perché li hai modificati dopo il ripristino:"))
+            for f in r.keptBecauseChanged { print("  ~/\(f)") }
+        }
     }
 
     static func runNewMac(subArgs: [String], configPath: String?) throws {

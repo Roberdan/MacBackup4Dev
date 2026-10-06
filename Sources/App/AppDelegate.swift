@@ -19,6 +19,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var popoverVC: PopoverViewController!
     private var treeWindowController: TreeWindowController?
     private var snapshotPickerWC: SnapshotPickerWindowController?
+    private var restoreCenterWC: RestoreCenterWindowController?
+    private var lastProtectionRefresh = Date.distantPast
 
     func setInitialConfig(_ config: Config?) {
         self.config = config
@@ -57,7 +59,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func wireCallbacks() {
         uiState.onRequestBackup = { [weak self] in self?.handleRequestBackup() }
-        uiState.onRequestRestore = { [weak self] in self?.handleRequestRestore() }
+        uiState.onRequestRestore = { [weak self] in self?.handleOpenRestoreCenter() }
+        uiState.onRequestAdvancedRestore = { [weak self] in self?.handleRequestRestore() }
+        uiState.onAddCoverage = { [weak self] gap in self?.handleCoverage(gap, ignore: false) }
+        uiState.onIgnoreCoverage = { [weak self] gap in self?.handleCoverage(gap, ignore: true) }
         uiState.onRequestStop = { [weak self] in self?.handleStop() }
         uiState.onRequestEject = { [weak self] in self?.handleEject() }
         uiState.onRequestOpenFolder = { [weak self] in self?.handleOpenFolder() }
@@ -397,19 +402,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task.detached {
             do {
-                try await BackupEngine.run(config: config)
+                let result = try await BackupEngine.run(config: config)
                 await MainActor.run {
-                    Log.info("Backup completed successfully")
-                    self.sendNotification(title: "Backup completed",
-                                          body: "Backup finished successfully")
-                    self.pollStatus()
+                    if let m = result?.manifest {
+                        if m.complete {
+                            Log.info("Backup completed: complete")
+                            self.sendNotification(title: "Backup completo",
+                                                  body: "\(m.filesProcessed) file salvati, 0 errori.")
+                        } else {
+                            Log.warn("Backup completed: INCOMPLETE")
+                            self.sendNotification(title: "Backup incompleto",
+                                                  body: m.incompleteReasons.first ?? "Apri il menu per i dettagli.")
+                        }
+                    }
+                    self.pollStatus(forceProtection: true)
                 }
             } catch {
                 await MainActor.run {
                     Log.error("Backup failed: \(error.localizedDescription)")
                     self.iconManager.setState(.error)
                     self.uiState.appState = .error
-                    self.sendNotification(title: "Backup failed",
+                    self.sendNotification(title: "Backup non riuscito",
                                           body: error.localizedDescription)
                 }
             }
@@ -438,7 +451,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if success {
                     Log.info("Disk ejected: \(volumeName)")
-                    self.sendNotification(title: "Disk ejected",
+                    self.sendNotification(title: "Disco espulso",
                                           body: "\(volumeName) safely removed")
                     self.iconManager.setState(.diskAbsent)
                     self.pollStatus()
@@ -461,7 +474,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
         } catch {
-            sendNotification(title: "Error", body: "Cannot create backup folder: \(error.localizedDescription)")
+            sendNotification(title: "Errore", body: "Non riesco a creare la cartella di backup: \(error.localizedDescription)")
             return
         }
 
@@ -470,7 +483,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             try newConfig.save(to: Config.defaultPath)
             config = try Config.load(from: Config.defaultPath)
         } catch {
-            sendNotification(title: "Error", body: "Cannot save config: \(error.localizedDescription)")
+            sendNotification(title: "Errore", body: "Non riesco a salvare la configurazione: \(error.localizedDescription)")
             return
         }
 
@@ -498,7 +511,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         iconManager.setState(.running)
         uiState.appState = .restoring  // F-14: distinct state from backup .running
         Log.info("Restore started: \(items.count) items from \(snapshotURL.lastPathComponent)")
-        sendNotification(title: "Restore avviato",
+        sendNotification(title: "Ripristino avviato",
                          body: "Ripristino \(items.count) elementi da \(snapshotURL.lastPathComponent)…")
 
         // Reopen popover so user can see progress bar
@@ -511,8 +524,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             var brewOK = true
             if brewInstall {
                 DispatchQueue.main.async {
-                    self?.sendNotification(title: "Homebrew packages…",
-                                           body: "Installing packages (may take a few minutes)…")
+                    self?.sendNotification(title: "Programmi Homebrew…",
+                                           body: "Installazione in corso (qualche minuto)…")
                     if var s = self?.uiState.status {
                         s.currentFile = "Installing Homebrew packages…"
                         self?.uiState.status = s
@@ -538,12 +551,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             DispatchQueue.main.async {
                 self?.iconManager.setState(.idle)
-                let brewMsg = brewInstall ? (brewOK ? "\nHomebrew packages restored." : "\nHomebrew restore had errors.") : ""
-                let backupMsg = result.backedUpTo.isEmpty ? "" : "\nOriginals saved to ~/.rustybackup-pre-restore/"
+                let brewMsg = brewInstall ? (brewOK ? "\nProgrammi Homebrew installati." : "\nHomebrew con errori.") : ""
+                let backupMsg = result.backedUpTo.isEmpty ? "" : "\nLe versioni precedenti sono annullabili dal menu."
                 Log.info("Restore complete: \(result.restored) restored, \(result.overwritten) overwritten, \(result.failed) failed")
                 self?.sendNotification(
-                    title: "Restore complete",
-                    body: "\(result.restored) restored, \(result.overwritten) overwritten, \(result.failed) failed\(brewMsg)\(backupMsg)")
+                    title: "Ripristino completato",
+                    body: "\(result.restored) ripristinati, \(result.overwritten) sostituiti, \(result.failed) non riusciti\(brewMsg)\(backupMsg)")
 
                 // F-18: Show restore result card for 60s
                 self?.uiState.restoreResult = RestoreResultSummary(
@@ -563,11 +576,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleUndoRestore() {
+        // 3.0 restores keep an exact record (undo.json): use it, it also removes files the
+        // restore created. Older pre-restore folders keep the previous behaviour.
+        if let undoDir = latestUndoDir() {
+            popover.performClose(nil)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let result = (try? SelectiveRestore.undo(undoDir)) ?? RestoreResult(failed: 1)
+                DispatchQueue.main.async {
+                    self?.sendNotification(title: "Ripristino annullato",
+                                           body: "\(result.restored) file rimessi com'erano, \(result.failed) non riusciti.")
+                    self?.pollStatus()
+                }
+            }
+            return
+        }
         guard let backupDir = RestoreEngine.latestPreRestoreBackup() else { return }
         popover.performClose(nil)
         iconManager.setState(.running)
         uiState.appState = .running
-        sendNotification(title: "Undoing restore…", body: "Restoring original files")
+        sendNotification(title: "Annullo il ripristino…", body: "Rimetto i file originali")
         Log.info("Undo restore started from \(backupDir.lastPathComponent)")
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -576,8 +603,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.iconManager.setState(.idle)
                 Log.info("Undo complete: \(result.restored) restored, \(result.failed) failed")
                 self?.sendNotification(
-                    title: "Undo restore complete",
-                    body: "\(result.restored) files restored to original state, \(result.failed) failed")
+                    title: "Ripristino annullato",
+                    body: "\(result.restored) file rimessi com'erano, \(result.failed) non riusciti")
                 self?.pollStatus()
             }
         }
@@ -615,7 +642,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Status polling
 
-    private func pollStatus() {
+    private func pollStatus(forceProtection: Bool = false) {
         let newState = statusManager.poll(config: config)
         // F-14: don't clobber .stopping/.restoring set by action handlers
         if newState != .running || (uiState.appState != .stopping && uiState.appState != .restoring) {
@@ -626,7 +653,85 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.config = config
         // F-19: update cached disk-state values (disk I/O here, not in SwiftUI render)
         uiState.cachedHasBackups = config != nil && !RestoreEngine.findBackupSnapshots().isEmpty
-        uiState.cachedCanUndo = RestoreEngine.hasPreRestoreBackup()
+        uiState.cachedCanUndo = RestoreEngine.hasPreRestoreBackup() || latestUndoDir() != nil
+        refreshProtection(force: forceProtection)
+    }
+
+    /// Snapshot manifests live on the backup disk: read them at most every 20 s (or right
+    /// after a backup), never from SwiftUI's render path.
+    private func refreshProtection(force: Bool) {
+        guard let config, force || Date().timeIntervalSince(lastProtectionRefresh) > 20 else { return }
+        lastProtectionRefresh = Date()
+        let dest = URL(fileURLWithPath: config.destination.path)
+        let cfg = config
+        DispatchQueue.global(qos: .utility).async {
+            let summary = FileManager.default.fileExists(atPath: dest.path) ? ProtectionSummary.build(destination: dest) : nil
+            let sources = Set(cfg.source.paths.map { ConfigDiscovery.expand($0) })
+            let ignored = Set(cfg.coverage.ignore.map { ConfigDiscovery.expand($0) })
+            let dbs = Set(cfg.databases.sqlite.map { ConfigDiscovery.expand($0) })
+            let gaps = (StatusWriter().readCoverage()?.gaps ?? []).filter { gap in
+                let p = ConfigDiscovery.expand(gap.path)
+                return !sources.contains(p) && !ignored.contains(where: { p == $0 || p.hasPrefix($0 + "/") }) && !dbs.contains(p)
+            }
+            DispatchQueue.main.async {
+                if let summary { self.uiState.protection = summary }
+                self.uiState.coverageGaps = gaps
+            }
+        }
+    }
+
+    private func latestUndoDir() -> URL? {
+        let base = RestoreEngine.preRestoreBaseURL
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []).sorted()
+        return names.reversed().map { base.appendingPathComponent($0) }
+            .first { FileManager.default.fileExists(atPath: $0.appendingPathComponent("undo.json").path) }
+    }
+
+    // MARK: - 3.0: restore center and coverage
+
+    private func handleOpenRestoreCenter() {
+        guard let config else { return }
+        popover.performClose(nil)
+        if let wc = restoreCenterWC, wc.window?.isVisible == true {
+            wc.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let model = RestoreCenterModel(destination: URL(fileURLWithPath: config.destination.path), config: config)
+        model.onAdvanced = { [weak self] in
+            self?.restoreCenterWC?.window?.close()
+            self?.handleRequestRestore()
+        }
+        model.onDone = { [weak self] r in
+            self?.uiState.restoreResult = RestoreResultSummary(restored: r.restored, overwritten: r.overwritten,
+                                                               failed: r.failed, backedUpTo: r.backedUpTo)
+            self?.pollStatus()
+        }
+        let wc = RestoreCenterWindowController(model: model)
+        wc.showWindow(nil)
+        wc.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        restoreCenterWC = wc
+    }
+
+    private func handleCoverage(_ gap: CoverageGap, ignore: Bool) {
+        guard var pending = config else { return }
+        if ignore {
+            if !pending.coverage.ignore.contains(gap.path) { pending.coverage.ignore.append(gap.path) }
+        } else if gap.kind == .database {
+            if !pending.databases.sqlite.contains(gap.path) { pending.databases.sqlite.append(gap.path) }
+        } else if !pending.source.paths.contains(gap.path) {
+            pending.source.paths.append(gap.path)
+        }
+        do {
+            try pending.save(to: Config.defaultPath)
+            config = pending
+            uiState.config = pending
+            uiState.coverageGaps.removeAll { $0.path == gap.path }
+            Log.info("Coverage: \(ignore ? "ignored" : "added") \(gap.path)")
+        } catch {
+            Log.error("Cannot save coverage change: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Helpers
