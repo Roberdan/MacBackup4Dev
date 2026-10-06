@@ -24,11 +24,22 @@ enum HardLinker {
     static func copyFile(from source: String, to destination: String) throws {
         // COPYFILE_ALL = DATA|XATTR|STAT|ACL = 0x0F (NO CLONE!)
         let flags = copyfile_flags_t(UInt32(0x0F))
-        let result = Darwin.copyfile(source, destination, nil, flags)
-        if result != 0 {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
-                          userInfo: [NSLocalizedDescriptionKey: "copyfile failed: \(String(cString: strerror(errno)))"])
+        if Darwin.copyfile(source, destination, nil, flags) == 0 { return }
+        let firstError = errno
+        // macOS sometimes refuses to copy an ACL or a protected extended attribute
+        // (com.apple.provenance) while the data itself is readable: seen on 2026-10-06 for six
+        // Copilot plugin icons, every night. Save the data and dates rather than nothing.
+        if firstError == EPERM || firstError == EACCES {
+            unlink(destination)
+            // COPYFILE_DATA | COPYFILE_STAT = 0x0A (still NO CLONE!)
+            if Darwin.copyfile(source, destination, nil, copyfile_flags_t(UInt32(0x0A))) == 0 {
+                Log.warn("Copied without extended attributes/ACL (system refused them): \(source)")
+                return
+            }
+            unlink(destination)
         }
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(firstError),
+                      userInfo: [NSLocalizedDescriptionKey: "copyfile failed: \(String(cString: strerror(firstError)))"])
     }
 
     /// Preserve modification time on a copied file.

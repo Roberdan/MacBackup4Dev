@@ -27,6 +27,7 @@ struct TestRunner {
         let guards = RestoreGuardTests()
         let review = ReviewFixTests()
         let review2 = ReviewRound2Tests()
+        let realRun = RealRunTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -56,6 +57,8 @@ struct TestRunner {
             ("Review.R1.stopMidBackup", review2.test_stopMidBackupDoesNotCrash),
             ("Review.R2.longOutput", review2.test_longOutputIsComplete),
             ("Review.R3.bundleHardLinked", review2.test_unchangedBundleIsHardLinked),
+            ("RealRun.objectlessGit", realRun.test_objectlessGitIsAWarning),
+            ("RealRun.walDatabase", realRun.test_walDatabaseIsCopied),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

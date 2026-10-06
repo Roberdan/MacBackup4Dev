@@ -120,6 +120,16 @@ enum GitSafety {
             return copy
         }
 
+        // A `.git` folder without its object store is a copy restored from a backup (objects
+        // are never copied), not a repository: nothing in it can be lost. Say so, but do not
+        // call the snapshot incomplete for it (seen on the first real 3.0 run, 2026-10-06).
+        let objects = repository.appendingPathComponent(".git/objects")
+        let hasObjects = ((try? FileManager.default.contentsOfDirectory(atPath: objects.path)) ?? [])
+            .contains { $0 == "pack" || $0.count == 2 }
+        if !hasObjects {
+            record.warnings = ["cartella .git senza cronologia (copia da un backup): niente da salvare, ma non è un repository funzionante"]
+            return record
+        }
         let remotes = g(["remote", "-v"])
         guard remotes.ok else { return fail("git non legge il repository", remotes) }
         for line in remotes.stdout.split(separator: "\n") where line.hasSuffix("(fetch)") {

@@ -199,3 +199,37 @@ final class ReviewRound2Tests {
         try expectEqual(inodeA, inodeB, "second snapshot hard-links the same bundle")
     }
 }
+
+/// First real 3.0 run on the user's disk (2026-10-06).
+final class RealRunTests {
+    let safety = SafetyTests()
+
+    /// A `.git` restored from a backup has no objects: a warning, not an incomplete snapshot.
+    func test_objectlessGitIsAWarning() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        try safety.write("ref: refs/heads/main\n", to: box.home + "/GitHub/copy/.git/HEAD")
+        try safety.write("[core]\n", to: box.home + "/GitHub/copy/.git/config")
+        try safety.write("x", to: box.home + "/GitHub/copy/a.txt")
+        let result = try safety.runEngine(safety.config(box, sources: ["GitHub"]), box, git: true)
+        let record = result.manifest.git.first { $0.relativePath == "GitHub/copy" }
+        try expectNil(record?.error, "no error for an objectless copy")
+        try expectNotNil(record?.warnings, "but a warning")
+        try expect(result.manifest.complete, "snapshot complete: \(result.manifest.incompleteReasons)")
+    }
+
+    /// A WAL database is copied (read-only open used to fail with "unable to open").
+    func test_walDatabaseIsCopied() throws {
+        guard let sqlite = DatabaseDumps.sqlite3 else { return }
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let db = box.home + "/app/history.db"
+        try FileManager.default.createDirectory(atPath: box.home + "/app", withIntermediateDirectories: true)
+        let made = Shell.run(sqlite, [db, "pragma journal_mode=wal; create table t(x); insert into t values (1),(2);"])
+        try expect(made.ok, "fixture: \(made.stderr)")
+        var cfg = safety.config(box, sources: ["app"])
+        cfg.databases.sqlite = [db]
+        let result = try safety.runEngine(cfg, box)
+        let record = result.manifest.databases.first
+        try expectNil(record?.error, "WAL database copied: \(String(describing: record))")
+        try expect(result.manifest.complete, "complete: \(result.manifest.incompleteReasons)")
+    }
+}

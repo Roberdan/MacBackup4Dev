@@ -72,7 +72,9 @@ enum DatabaseDumps {
         }
         // `.backup` uses SQLite's online backup API: consistent even while the app writes.
         let escaped = target.path.replacingOccurrences(of: "'", with: "''")
-        let result = Shell.run(sqlite3, ["-readonly", expanded, ".timeout 10000", ".backup '\(escaped)'"],
+        // No -readonly: a WAL database opened read-only cannot create its -shm file and fails
+        // with "unable to open database file". `.backup` only reads the source anyway.
+        let result = Shell.run(sqlite3, [expanded, ".timeout 10000", ".backup '\(escaped)'"],
                                timeout: 600)
         if result.ok, let size = fileSize(target) {
             record.file = relative(target, to: snapshot)

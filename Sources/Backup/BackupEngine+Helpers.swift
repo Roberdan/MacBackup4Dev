@@ -160,6 +160,8 @@ extension BackupEngine {
             stats.filesSkipped += 1
             skips.append((path: path, reason: reason))
         case .error(let path, let err):
+            // The exact reason per file: "permesso negato" alone cannot be acted upon.
+            if errors.count < 200 { Log.warn("Not copied: \(path): \(err.localizedDescription)") }
             errors.append((path: path, error: err))
         }
     }
