@@ -15,8 +15,8 @@ bundle identifier (update continuity, notification permission), everything on th
 ## Build & Test
 
 ```bash
-./build.sh              # compile + sign → build/RustyMacBackup.app
-./run-tests.sh          # 137 tests → build/RustyMacBackupTests
+./build.sh              # compile + sign → build/MacBackup4Dev.app
+./run-tests.sh          # 137 tests → build/MacBackup4DevTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -58,9 +58,13 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 - **Hard links for deduplication**: `HardLinker.shouldHardLink()` checks size + mtime delta < 1.0s. Files identical to previous snapshot get hard-linked (zero space cost).
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
 - **8 parallel workers**: `TaskGroup` bounded to 8 concurrent `processFile` tasks.
-- **Status file**: `~/.local/share/rusty-mac-backup/status.json` — updated every 500 files.
-- **Config**: `~/.config/rusty-mac-backup/config.toml`
+- **Status file**: `~/.local/share/macbackup4dev/status.json` — updated every 500 files.
+- **Config**: `~/.config/macbackup4dev/config.toml` (3.x paths are links to these, see `AppIdentity`)
 - **Lock file**: `<destination>/rustymacbackup.lock` (PID-based, stale detection via `kill(pid, 0)`).
+  "Interrompi" sends SIGTERM to that PID when the backup runs in its own process (scheduled);
+  the CLI turns SIGTERM into `BackupEngine.stop()` (`CLIHandler.stopOnSIGTERM`).
+- **Recovery copy:** the installed app copies itself, unencrypted, to the top of the physical
+  backup disk (`Config.diskURL`) when the version differs.
 
 ## 3.0 invariants (scar 2026-10-06 — do not weaken)
 
@@ -82,7 +86,7 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   never selects `sensitive` items. "Esegui ora" never opens the picker.
 - **The popover's controller is the NSHostingController itself** (`sizingOptions =
   .preferredContentSize`). Never wrap it in another view controller: NSPopover then stays at
-  320×320 and clips. Check layout changes with `RustyMacBackup measure-menu` (real popover),
+  320×320 and clips. Check layout changes with `MacBackup4Dev measure-menu` (real popover),
   not only `render-menu` (content only).
 - **Nothing that starts at login is restored by a file restore** (scar 2026-10-06):
   `NewMacRestore.isLoginSensitive` (LaunchAgents/Daemons, login items, `com.apple.*` and

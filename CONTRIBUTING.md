@@ -10,7 +10,7 @@ Read [`CLAUDE.md`](CLAUDE.md). It contains the architecture overview, critical t
 
 **Bug reports** — open an issue with:
 - macOS version + disk filesystem (APFS / ExFAT / HFS+)
-- Relevant lines from `~/.config/rusty-mac-backup/logs/`
+- Relevant lines from `~/.local/share/macbackup4dev/` (app.log, backup.log)
 - Steps to reproduce
 
 **Feature requests** — open an issue first. Describe the problem, not the solution. I'll let you know if it fits the scope.
