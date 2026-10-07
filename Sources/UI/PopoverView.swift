@@ -335,6 +335,8 @@ struct PopoverView: View {
             if state.canUndo {
                 row("Annulla l'ultimo ripristino", icon: "arrow.uturn.backward") { state.onRequestUndoRestore?() }
             }
+            row("Scegli cosa salvare…", icon: "checklist") { state.onRequestChooseSources?() }
+                .disabled(state.isRunning || state.config == nil)
             if state.onRequestScheduleMenu != nil {
                 row("Pianificazione: \(state.scheduleLabel)", icon: "clock") { state.onRequestScheduleMenu?() }
             }

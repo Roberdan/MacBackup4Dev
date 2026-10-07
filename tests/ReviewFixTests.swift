@@ -233,3 +233,51 @@ final class RealRunTests {
         try expect(result.manifest.complete, "complete: \(result.manifest.incompleteReasons)")
     }
 }
+
+/// Feedback 2026-10-07: "Aggiungi" on every suggestion added secrets, parked copies and
+/// browser-profile databases. None of these may be suggested.
+final class CoverageNoiseTests {
+    let safety = SafetyTests()
+
+    func test_noSecretsParkedCopiesOrToolDatabases() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        try safety.write("token", to: box.home + "/.azure/msal_token_cache.json")
+        try safety.write("x", to: box.home + "/GitHub/_copia-parziale/a.txt")
+        try safety.write("x", to: box.home + "/GitHub/real-project/a.txt")
+        try safety.write("x", to: box.home + "/.tool/state.db")
+        try safety.write("x", to: box.home + "/.scout/m-playwright-profiles/p/Default/load.db")
+        try safety.write("x", to: box.home + "/work/app/runtime/history.db")
+        let cfg = safety.config(box, sources: [".tool", ".scout", "work"])
+        let paths = Set(CoverageAuditor.audit(config: cfg, home: box.home).map(\.path))
+        try expect(paths.contains { $0.hasSuffix("/GitHub/real-project") }, "real project suggested: \(paths)")
+        try expect(paths.contains { $0.hasSuffix("/work/app/runtime/history.db") }, "project database suggested: \(paths)")
+        for noise in ["/.azure", "/_copia-parziale", "/.tool/state.db", "/load.db"] {
+            try expect(!paths.contains { $0.hasSuffix(noise) }, "\(noise) must not be suggested: \(paths)")
+        }
+    }
+}
+
+/// 2026-10-07: confirming the picker dropped ~/Obsidian and ~/actions-runners and "Tutti"
+/// added the SSH private key.
+final class PickerTests {
+    func test_configuredFoldersSurviveThePicker() throws {
+        try MainActor.assumeIsolated {
+            let enabled: Set<String> = ["~/Obsidian", "~/actions-runners", "~/.zshrc"]
+            let model = TreeSelectionModel(mode: .backup, enabledPaths: enabled)
+            let selected = Set(model.selectedPaths)
+            try expect(selected.contains("~/Obsidian"), "Obsidian kept: \(selected.sorted().prefix(20))")
+            try expect(selected.contains("~/actions-runners"), "actions-runners kept")
+        }
+    }
+
+    func test_selectAllSkipsCredentials() throws {
+        try MainActor.assumeIsolated {
+            let model = TreeSelectionModel(mode: .backup, enabledPaths: ["~/.zshrc"])
+            model.selectAll()
+            let sensitive = model.categories.flatMap(\.items).filter(\.sensitive).flatMap(\.paths)
+            for path in sensitive {
+                try expect(!model.checkedPaths.contains(path), "\(path) must not be selected by Tutti")
+            }
+        }
+    }
+}

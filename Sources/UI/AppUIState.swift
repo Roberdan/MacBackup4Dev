@@ -41,6 +41,7 @@ final class AppUIState: ObservableObject {
     var onIgnoreCoverage: ((CoverageGap) -> Void)?
     var onRequestAdvancedRestore: (() -> Void)?
     var onRequestShowSnapshot: (() -> Void)?
+    var onRequestChooseSources: (() -> Void)?
 
     // MARK: - Restore result (F-18)
     @Published var restoreResult: RestoreResultSummary?

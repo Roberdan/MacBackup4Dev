@@ -26,6 +26,15 @@ enum CoverageAuditor {
         "Library", "Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music",
         "Applications", "Public", ".Trash",
     ]
+    /// Never suggested (feedback 2026-10-07, after "Aggiungi" on every suggestion added
+    /// credentials, a parked copy and browser-profile databases): folders holding secrets
+    /// (backed up only by explicit choice), parked folders ("_name"), caches and profiles.
+    static func isNoise(_ name: String) -> Bool {
+        if name.hasPrefix("_") { return true }
+        if ConfigDiscovery.secretBearingDotEntries.contains(name) { return true }
+        return ConfigDiscovery.isDeniedName(name)
+    }
+
     /// Folders whose children are projects: each child is judged on its own.
     static let projectContainers: [String] = ["GitHub", "Developer", "Projects", "Code", "src"]
 
@@ -53,13 +62,13 @@ enum CoverageAuditor {
         var candidates: [String] = []
         let top = (try? fm.contentsOfDirectory(atPath: home)) ?? []
         for name in top.sorted() {
-            guard !protectedTopLevel.contains(name) else { continue }
+            guard !protectedTopLevel.contains(name), !isNoise(name) else { continue }
             let full = home + "/" + name
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: full, isDirectory: &isDir), isDir.boolValue else { continue }
             if (try? URL(fileURLWithPath: full).resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true { continue }
             if projectContainers.contains(name) {
-                for child in ((try? fm.contentsOfDirectory(atPath: full)) ?? []).sorted() where !child.hasPrefix(".") {
+                for child in ((try? fm.contentsOfDirectory(atPath: full)) ?? []).sorted() where !child.hasPrefix(".") && !isNoise(child) {
                     let c = full + "/" + child
                     var d: ObjCBool = false
                     if fm.fileExists(atPath: c, isDirectory: &d), d.boolValue { candidates.append(c) }
@@ -111,6 +120,11 @@ enum CoverageAuditor {
                     continue
                 }
                 guard extensions.contains(url.pathExtension.lowercased()), !listed.contains(url.path) else { continue }
+                // Only project data: a database inside a tool's own hidden folder (~/.codex,
+                // ~/.local/share/atuin, a browser profile) is that tool's state, not yours.
+                let rel = url.path.hasPrefix(home + "/") ? String(url.path.dropFirst(home.count + 1)) : url.path
+                let comps = rel.split(separator: "/").map(String.init)
+                if comps.dropLast().contains(where: { $0.hasPrefix(".") || isNoise($0) }) { continue }
                 let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isSymbolicLinkKey])
                 guard values?.isSymbolicLink != true,
                       let modified = values?.contentModificationDate, modified > cutoff,
