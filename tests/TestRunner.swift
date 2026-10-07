@@ -31,6 +31,7 @@ struct TestRunner {
         let coverageNoise = CoverageNoiseTests()
         let picker = PickerTests()
         let updater = UpdaterTests()
+        let power = PowerGateTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -70,6 +71,11 @@ struct TestRunner {
             ("Updater.validateRejectsWrongBuilds", updater.test_validateRejectsWrongBuilds),
             ("Updater.swapWhole", updater.test_swapReplacesTheAppWholeAndLeavesNothingBehind),
             ("Updater.failedSwapKeepsOld", updater.test_failedSwapKeepsTheOldApp),
+            ("Power.acAllowed", power.test_acAllowsScheduled),
+            ("Power.batteryBlocks", power.test_batteryBlocksScheduled),
+            ("Power.unknownBlocks", power.test_unknownBlocksScheduled),
+            ("Power.plistPassesFlag", power.test_plistsPassScheduledFlag),
+            ("Power.liveReaderSane", power.test_liveReaderReturnsAValue),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),
