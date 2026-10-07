@@ -65,7 +65,7 @@ struct SnapshotManifest: Codable, Equatable {
             reasons.append("\(discovered - processed) file trovati ma non copiati.")
         }
         if errors > 0 {
-            reasons.append("\(errors) file non copiati per errore (dettagli in errors.json).")
+            reasons.append("\(errors) file non copiati per errore.")
         }
         if traversalErrors > 0 {
             reasons.append("\(traversalErrors) cartelle non leggibili.")

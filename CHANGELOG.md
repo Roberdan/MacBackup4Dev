@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.0.2] - 2026-10-07
+
+### Fixed
+- **The menu popover was clipped** (header and last rows cut) once a backup started: it kept
+  the size it had when it opened. It now follows its content.
+- More breathing room: 16 pt margins, aligned menu rows, visible problem cards, "Ultimo
+  completo: …" while a backup runs, no misleading copy speed (most files are hard-linked).
+- Incomplete reasons no longer mention internal files.
+
+### Added
+- `render-menu <dir>` (debug): draws the popover in its main states to PNG files, to check
+  the layout without clicking the menu bar.
+
 ## [3.0.1] - 2026-10-07
 
 Found on the first morning of real use.
