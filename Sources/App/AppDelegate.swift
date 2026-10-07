@@ -239,6 +239,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         startUpdateSchedule()
         migrateLegacyScheduleWhenIdle()
+        refreshRecoveryAppOnDisk()
         // Only when there is no config file at all: an unreadable one is reported, never
         // replaced by the first-launch setup.
         if config == nil {
@@ -675,6 +676,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.appState = .stopping
         iconManager.setState(.stopping)
         BackupEngine.stop()
+        // A scheduled backup runs in its own process: ask it to stop too (it finishes the
+        // snapshot as incomplete). Before 4.1.2 the menu waited for it forever.
+        if let config, let content = try? String(contentsOfFile: config.destination.path + "/rustymacbackup.lock", encoding: .utf8),
+           let pid = Int32(content.split(separator: "\n").first.map(String.init) ?? ""),
+           pid != ProcessInfo.processInfo.processIdentifier, kill(pid, 0) == 0 {
+            Log.info("Stopping the scheduled backup (pid \(pid))")
+            kill(pid, SIGTERM)
+        }
         pollStatus()
     }
 
@@ -698,7 +707,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let store = config.encryption.setup
         DispatchQueue.global(qos: .userInitiated).async {
             // The encrypted store lives on the disk: close it first, or the disk stays busy.
-            let indexers: Set<String> = ["mds", "mds_stores", "mdworker_shared", "fseventsd"]
+            // Read-only scanners: Spotlight and antivirus (Microsoft Defender held the store
+            // open on 2026-10-07). Forcing them off loses nothing.
+            let indexers: Set<String> = ["mds", "mds_stores", "mdworker_shared", "fseventsd",
+                                         "wdavdaemon", "wdavdaemon_enterprise", "wdavdaemon_unprivileged"]
             var holders = ""
             // Same rule as the disk: forced only when nothing but system indexers holds it.
             if let store, !EncryptedStore.close(store) {
@@ -1039,7 +1051,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Volume notifications
 
-    @objc private func volumeChanged() { pollStatus() }
+    @objc private func volumeChanged() {
+        pollStatus()
+        refreshRecoveryAppOnDisk()
+    }
+
+    /// The installed version, unencrypted, at the top of the backup disk: a just-updated app
+    /// copies itself there as soon as the disk is attached (only the installed copy does).
+    private func refreshRecoveryAppOnDisk() {
+        guard AutoUpdater.isInstalledCopy, let disk = config?.diskURL,
+              FileManager.default.fileExists(atPath: disk.path) else { return }
+        DispatchQueue.global(qos: .utility).async { EnvironmentSnapshot.refreshRecoveryApp(onDisk: disk) }
+    }
 
     // MARK: - Status polling
 

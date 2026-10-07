@@ -208,6 +208,19 @@ enum CLIHandler {
         print("File: \(url.path)")
     }
 
+    /// SIGTERM ("Interrompi" in the menu, `stop`) cancels the running backup instead of
+    /// killing the process mid-file. Returns the source; cancel it when the backup is over.
+    static func stopOnSIGTERM() -> DispatchSourceSignal {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+        source.setEventHandler {
+            Log.info("Stop requested (SIGTERM): finishing the snapshot as incomplete")
+            BackupEngine.stop()
+        }
+        source.resume()
+        return source
+    }
+
     private static func runBackup(configPath: String?, scheduled: Bool = false) throws {
         // Scheduled (launchd) runs only on wall power; manual runs are never gated.
         if scheduled && !PowerGate.scheduledBackupAllowed() {
@@ -216,6 +229,11 @@ enum CLIHandler {
             return
         }
         let cfg = try loadConfig(configPath: configPath)
+        // "Interrompi" in the menu (or `stop`) sends SIGTERM: stop like the in-app backup does,
+        // closing the snapshot as incomplete, instead of dying mid-file (seen 2026-10-07: the
+        // menu waited forever for a scheduled backup it could not reach).
+        let stopSource = stopOnSIGTERM()
+        defer { stopSource.cancel() }
         let sem = DispatchSemaphore(value: 0)
         final class ErrorBox: @unchecked Sendable { var error: Error? }
         let box = ErrorBox()

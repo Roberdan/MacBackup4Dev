@@ -28,12 +28,14 @@ enum EnvironmentSnapshot {
         copyAppBinary(to: envDir)
         generateRestoreScript(to: envDir)
 
-        // Also keep the app at the top of the backup folder, so a new Mac can run it straight
-        // from the disk. Kept current: it used to be copied once and never again (the disk
-        // still offered RustyMacBackup 2.7.2 on 2026-10-07).
-        if let appURL = findAppBundle() {
-            refreshRecoveryApp(from: appURL, in: destURL.deletingLastPathComponent())
-        }
+    }
+
+    /// The app at the top of the physical backup disk, NOT encrypted, so a new Mac can
+    /// reinstall it straight from the disk (decided 2026-10-07). Called at launch, when the
+    /// disk is attached and after each backup; copies only when the version differs.
+    static func refreshRecoveryApp(onDisk disk: URL) {
+        guard let appURL = findAppBundle(), FileManager.default.isWritableFile(atPath: disk.path) else { return }
+        refreshRecoveryApp(from: appURL, in: disk)
     }
 
     /// Puts the running app at `<backup folder>/MacBackup4Dev.app` when that copy is missing or

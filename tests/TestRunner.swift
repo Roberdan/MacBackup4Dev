@@ -106,6 +106,7 @@ struct TestRunner {
             ("Encryption.compaction", encryption.test_compactionGivesSpaceBack),
             ("Encryption.pulledOutChecked", encryption.test_pulledOutStoreIsCheckedOnReopen),
             ("Encryption.freedFlag", encryption.test_freedSpaceIsFlaggedOnlyForStores),
+            ("Stop.sigtermStopsBackup", encryption.test_sigtermStopsARunningBackupQuickly),
             ("NewUser.wholeComponents", homeRewrite.test_onlyWholePathComponentsAreReplaced),
             ("NewUser.textAndPlist", homeRewrite.test_textAndBinaryPlistAreRewrittenOthersLeftAlone),
             ("NewUser.restoreRewrites", homeRewrite.test_newUserGetsRewrittenConfigOnRestore),

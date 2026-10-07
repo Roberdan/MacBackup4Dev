@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.1.2] - 2026-10-07
+
+### Fixed
+- **"Interrompi" now stops a scheduled backup too.** A backup started by the schedule runs in
+  its own process, which the menu never reached: the panel stayed on "Interrompo il backup…"
+  for minutes. The menu now sends it SIGTERM, and the backup handles it like the in-app stop
+  (snapshot closed as incomplete within seconds). Checked with a real 20 000-file run.
+- **The encrypted store is detached, not only unmounted,** when closed (`hdiutil detach`): it
+  no longer stays attached to the system after an eject.
+- **Eject is no longer blocked by the antivirus**: Microsoft Defender scanning the store is
+  treated like Spotlight (read-only, safe to close).
+- **Compaction on stores made by `diskutil image`**: `hdiutil compact` does not support them;
+  closing and reopening the store gives the freed space back, so that is what happens there.
+
+### Changed
+- **The installed app is copied, unencrypted, to the top of the backup disk** (at launch, when
+  the disk is attached and after each backup, only when the version changed), ready to be
+  reinstalled on a new Mac. Before, with an encrypted store it ended up inside the store.
+
 ## [4.1.1] - 2026-10-07
 
 ### Added

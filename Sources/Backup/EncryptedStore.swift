@@ -190,9 +190,13 @@ enum EncryptedStore {
         defer { try? FileManager.default.removeItem(atPath: compactingLock) }
         let before = allocatedSize(setup.container)
         guard close(setup) else { throw StoreError.tool("in uso: non lo compatto ora") }
+        // Images made by `diskutil image` give freed space back by themselves when closed;
+        // `hdiutil compact` does not support them ("Function not implemented") but does the
+        // job on images made by hdiutil. Either way: closed, compacted if possible, reopened.
         let r = Shell.run("/usr/bin/hdiutil", ["compact", "-stdinpass", setup.container], timeout: 7200, stdin: password)
         try open(setup, password: password)
-        guard r.ok else { throw StoreError.tool("compattazione non riuscita: \(r.stderr.suffix(160))") }
+        let unsupported = (r.stderr + r.stdout).contains("not implemented")
+        guard r.ok || unsupported else { throw StoreError.tool("compattazione non riuscita: \(r.stderr.suffix(160))") }
         try? FileManager.default.removeItem(atPath: compactFlag(volume: setup.volume))
         let after = allocatedSize(setup.container)
         return before > after ? before - after : 0
@@ -207,10 +211,12 @@ enum EncryptedStore {
     @discardableResult
     static func close(_ setup: Setup, force: Bool = false) -> Bool {
         guard isOpen(setup) else { return true }
-        var args = ["eject", setup.mountPoint]
-        if force { args = ["unmount", "force", setup.mountPoint] }
-        let r = Shell.run("/usr/sbin/diskutil", args, timeout: 60)
-        if force && r.ok { _ = Shell.run("/usr/sbin/diskutil", ["eject", setup.mountPoint], timeout: 60) }
+        // hdiutil detach: unmounts AND detaches the image (diskutil eject on the mount point
+        // left the image attached, 34 of them after the tests on 2026-10-07).
+        var r = Shell.run("/usr/bin/hdiutil", force ? ["detach", "-force", setup.mountPoint] : ["detach", setup.mountPoint], timeout: 120)
+        if !r.ok && force {
+            r = Shell.run("/usr/sbin/diskutil", ["unmount", "force", setup.mountPoint], timeout: 60)
+        }
         let closed = r.ok || !isOpen(setup)
         if closed { try? FileManager.default.removeItem(atPath: openMarker(setup)) }   // closed by us: clean
         return closed
