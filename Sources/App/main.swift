@@ -1,6 +1,8 @@
 import Cocoa
 
 let args = ProcessInfo.processInfo.arguments
+// 4.0 rename: config and data move to the new folders (a link stays at the old place).
+AppIdentity.migrateFolders()
 if args.count > 1 {
     let cliArgs = Array(args.dropFirst())
     let command = cliArgs.first ?? ""

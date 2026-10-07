@@ -84,7 +84,7 @@ struct PopoverView: View {
                     .foregroundColor(.white)
             }
             VStack(alignment: .leading, spacing: 0) {
-                Text("RustyMacBackup").font(.system(size: 14, weight: .semibold)).foregroundColor(Look.text)
+                Text(AppIdentity.name).font(.system(size: 14, weight: .semibold)).foregroundColor(Look.text)
                 Text("v\(appVersion)").font(.system(size: 10)).foregroundColor(Look.tertiaryText)
             }
             Spacer()

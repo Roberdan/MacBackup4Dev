@@ -6,13 +6,13 @@ labels: bug
 
 **macOS version:**  
 **Disk filesystem (APFS / ExFAT / HFS+):**  
-**RustyMacBackup version** (`rustyback --version`):  
+**MacBackup4Dev version** (`MacBackup4Dev --version`):  
 
 **What happened:**
 
 **Steps to reproduce:**
 
-**Relevant log lines** (`~/.config/rusty-mac-backup/logs/`):
+**Relevant log lines** (`~/.local/share/macbackup4dev/`):
 ```
 paste here
 ```

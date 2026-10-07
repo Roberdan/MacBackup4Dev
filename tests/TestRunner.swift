@@ -71,6 +71,8 @@ struct TestRunner {
             ("Updater.validateRejectsWrongBuilds", updater.test_validateRejectsWrongBuilds),
             ("Updater.swapWhole", updater.test_swapReplacesTheAppWholeAndLeavesNothingBehind),
             ("Updater.failedSwapKeepsOld", updater.test_failedSwapKeepsTheOldApp),
+            ("Updater.swapFromLegacyName", updater.test_swapFromLegacyNameLeavesOnlyTheNewApp),
+            ("Rename.foldersMove", updater.test_foldersMoveAndOldPlacesStillWork),
             ("NewMac.loginItemsNeverInFilePhase", stages.test_loginItemsAreNeverInAFilePhase),
             ("NewMac.brokenShellUndoes", stages.test_brokenShellUndoesItsPhase),
             ("NewMac.realShellCheck", stages.test_realShellCheckCatchesExitAndPassesHealthy),
@@ -144,7 +146,7 @@ struct TestRunner {
             ("FileScanner.multipleExcludedFiles", scanner.test_multipleExcludedFilesBeforeDirectory)
         ]
 
-        print("🧪 Running RustyMacBackup tests (\(suites.count) total)...")
+        print("🧪 Running MacBackup4Dev tests (\(suites.count) total)...")
         for (name, test) in suites {
             do {
                 try test()

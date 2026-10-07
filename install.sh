@@ -1,11 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# RustyMacBackup — In-place installer
-# Updates /Applications/RustyMacBackup.app WITHOUT removing it,
+# MacBackup4Dev — In-place installer
+# Updates /Applications/MacBackup4Dev.app WITHOUT removing it,
 # so macOS FDA (Full Disk Access) permission is preserved.
 
-APP_NAME="RustyMacBackup"
+APP_NAME="MacBackup4Dev"
 INSTALL_PATH="/Applications/$APP_NAME.app"
 BUILD_PATH="build/$APP_NAME.app"
 
@@ -44,7 +44,7 @@ fi
 echo "  ✅ Installato: $INSTALL_PATH"
 
 # Sync .app + .pkg to backup disk so the app is recoverable from the backup itself
-BACKUP_DEST_DIR=$(awk -F'"' '/^path *=/{print $2}' ~/.config/rusty-mac-backup/config.toml 2>/dev/null || true)
+BACKUP_DEST_DIR=$(awk -F'"' '/^path *=/{print $2}' ~/.config/macbackup4dev/config.toml 2>/dev/null || true)
 if [ -n "$BACKUP_DEST_DIR" ] && [ -d "$BACKUP_DEST_DIR" ]; then
     echo "  Aggiorno disco di backup: $BACKUP_DEST_DIR..."
     rsync -a --delete "$BUILD_PATH/Contents/" "$BACKUP_DEST_DIR/$APP_NAME.app/Contents/"

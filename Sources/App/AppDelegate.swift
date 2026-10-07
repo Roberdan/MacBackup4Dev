@@ -36,6 +36,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ProcessInfo.processInfo.disableAutomaticTermination("Menu bar app must stay alive")
         ProcessInfo.processInfo.disableSuddenTermination()
         Log.info("App launched")
+        // Installed by a 3.x updater under the old name: rename and relaunch.
+        if AutoUpdater.relocateFromLegacyName() { return }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         iconManager = IconManager(statusItem: statusItem)
@@ -168,6 +170,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pollStatus()
 
         startUpdateSchedule()
+        migrateLegacyScheduleWhenIdle()
+    }
+
+    /// Moves the 3.x LaunchAgent to the new label once no backup is running (bootout would
+    /// stop it). Retried at every status poll until done.
+    private func migrateLegacyScheduleWhenIdle() {
+        let legacy = AppIdentity.home + "/Library/LaunchAgents/\(AppIdentity.legacyLaunchAgentLabel).plist"
+        guard FileManager.default.fileExists(atPath: legacy) else { return }
+        guard !isBusyForUpdate else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.migrateLegacyScheduleWhenIdle() }
+            return
+        }
+        if let done = ScheduleManager.migrateLegacyAgent() {
+            Log.info("Legacy schedule migrated: \(done)")
+            refreshScheduleLabel()
+        }
     }
 
     // MARK: - Popover
@@ -512,7 +530,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleSelectDisk(_ volumeURL: URL) {
-        let backupDir = volumeURL.appendingPathComponent("RustyMacBackup")
+        let backupDir = AppIdentity.backupFolder(on: volumeURL)
         do {
             try FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
         } catch {
@@ -662,7 +680,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// `AutoUpdater.checkInterval`. A found update installs on its own when nothing is running.
     private func startUpdateSchedule() {
         if let previous = AutoUpdater.consumeUpdatedFrom() {
-            sendNotification(title: "RustyMacBackup aggiornato",
+            sendNotification(title: "\(AppIdentity.name) aggiornato",
                              body: "Dalla \(previous) alla \(AutoUpdater.currentVersion). Le novità sono nelle note di rilascio su GitHub.")
         }
         uiState.autoInstallUpdates = AutoUpdater.autoInstall

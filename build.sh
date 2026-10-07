@@ -13,8 +13,8 @@ if [ -z "${DEVELOPER_DIR:-}" ] && [[ "$(xcode-select -p 2>/dev/null)" == *Comman
     if [ -n "$XCODE_APP" ]; then export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"; fi
 fi
 
-APP_NAME="RustyMacBackup"
-VERSION="${VERSION:-3.3.0}"
+APP_NAME="MacBackup4Dev"
+VERSION="${VERSION:-4.0.0}"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 BINARY="$BUILD_DIR/$APP_NAME"

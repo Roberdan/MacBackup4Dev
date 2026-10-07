@@ -74,7 +74,7 @@ struct ErrorCategoryInfo: Codable {
 
 final class StatusWriter {
     private static let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
-    static let directory = "\(home)/.local/share/rusty-mac-backup"
+    static let directory = "\(home)/.local/share/macbackup4dev"
     static let statusPath = "\(directory)/status.json"
     static let errorPath = "\(directory)/errors.json"
     static let coveragePath = "\(directory)/coverage.json"

@@ -30,7 +30,7 @@ struct PruneOptions {
     }
 
     private static func invalidArguments() -> NSError {
-        NSError(domain: "RustyMacBackup", code: 1, userInfo: [
+        NSError(domain: AppIdentity.name, code: 1, userInfo: [
             NSLocalizedDescriptionKey: "Usage: prune [--older-than 1m|6m|1y] [--dry-run | --yes]"
         ])
     }

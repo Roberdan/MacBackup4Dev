@@ -26,7 +26,7 @@ enum EnvironmentSnapshot {
 
         // Also copy app to backup ROOT (one level up) so it's visible when you plug in the disk
         let backupRoot = destURL.deletingLastPathComponent()
-        let rootApp = backupRoot.appendingPathComponent("RustyMacBackup.app")
+        let rootApp = backupRoot.appendingPathComponent("\(AppIdentity.name).app")
         if let appURL = findAppBundle() {
             // Only copy if not already there or newer
             let fm = FileManager.default
@@ -185,7 +185,7 @@ enum EnvironmentSnapshot {
     private static func copyAppBinary(to dir: URL) {
         guard let appURL = findAppBundle(),
               FileManager.default.fileExists(atPath: appURL.path) else { return }
-        let destApp = dir.appendingPathComponent("RustyMacBackup.app")
+        let destApp = dir.appendingPathComponent("\(AppIdentity.name).app")
         try? FileManager.default.removeItem(at: destApp)
         try? FileManager.default.copyItem(at: appURL, to: destApp)
     }
@@ -195,7 +195,7 @@ enum EnvironmentSnapshot {
         #!/bin/bash
         set -euo pipefail
 
-        # RustyMacBackup Environment Restore Script
+        # MacBackup4Dev Environment Restore Script
         # Run this on a fresh Mac to restore your dev environment.
         #
         # Usage: bash restore.sh [backup-snapshot-path]
@@ -203,7 +203,7 @@ enum EnvironmentSnapshot {
         SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
         SNAPSHOT="${1:-$(dirname "$SCRIPT_DIR")}"
 
-        echo "=== RustyMacBackup Environment Restore ==="
+        echo "=== MacBackup4Dev Environment Restore ==="
         echo "Snapshot: $SNAPSHOT"
         echo "Environment: $SCRIPT_DIR"
         echo ""
@@ -287,11 +287,11 @@ enum EnvironmentSnapshot {
         fi
 
         # 7. Install the backup app itself
-        if [ -d "$SCRIPT_DIR/RustyMacBackup.app" ]; then
+        if [ -d "$SCRIPT_DIR/MacBackup4Dev.app" ]; then
             echo ""
-            echo "Installing RustyMacBackup.app..."
-            cp -R "$SCRIPT_DIR/RustyMacBackup.app" /Applications/ 2>/dev/null \\
-                && echo "[ok] RustyMacBackup.app installed" \\
+            echo "Installing MacBackup4Dev.app..."
+            cp -R "$SCRIPT_DIR/MacBackup4Dev.app" /Applications/ 2>/dev/null \\
+                && echo "[ok] MacBackup4Dev.app installed" \\
                 || echo "[fail] Could not install (try: sudo cp -R)"
         fi
 
@@ -303,7 +303,7 @@ enum EnvironmentSnapshot {
         echo "  - Config files (shell, git, ssh, editors, AI tools)"
         echo "  - VS Code / Cursor extensions"
         echo "  - Git repos (re-fetched from remote)"
-        echo "  - RustyMacBackup.app"
+        echo "  - MacBackup4Dev.app"
         echo ""
         echo "Manual steps needed:"
         echo "  - Sign into iCloud, GitHub, Azure, etc."

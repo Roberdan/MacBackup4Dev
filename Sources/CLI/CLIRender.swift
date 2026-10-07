@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Debug-only: `RustyMacBackup render-menu <out-dir>` draws the menu popover in its main
+/// Debug-only: `MacBackup4Dev render-menu <out-dir>` draws the menu popover in its main
 /// states to PNG files, so its layout can be checked without clicking the menu bar.
 extension CLIHandler {
     @MainActor

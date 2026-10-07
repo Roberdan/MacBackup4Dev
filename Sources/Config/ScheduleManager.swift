@@ -7,13 +7,13 @@ struct ScheduleStatus {
 }
 
 enum ScheduleManager {
-    static let label = "com.roberdan.rusty-mac-backup"
+    static let label = AppIdentity.launchAgentLabel
     static var binaryPath: String {
         // Use actual bundle path if available, fall back to /Applications
         if let bundlePath = Bundle.main.executablePath {
             return bundlePath
         }
-        return "/Applications/RustyMacBackup.app/Contents/MacOS/RustyMacBackup"
+        return "/Applications/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev"
     }
 
     static var plistPath: URL {
@@ -23,12 +23,12 @@ enum ScheduleManager {
 
     private static var logPath: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/share/rusty-mac-backup/backup.log")
+            .appendingPathComponent(".local/share/macbackup4dev/backup.log")
     }
 
     private static var errorLogPath: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/share/rusty-mac-backup/backup-error.log")
+            .appendingPathComponent(".local/share/macbackup4dev/backup-error.log")
     }
 
     static func generatePlist(intervalSeconds: Int) -> String {
@@ -130,6 +130,31 @@ enum ScheduleManager {
         </dict>
         </plist>
         """
+    }
+
+    /// 4.0 rename: replaces the 3.x LaunchAgent (com.roberdan.rusty-mac-backup) with the new
+    /// one, keeping the same schedule and pointing at this binary. Returns what it did.
+    /// The caller makes sure no backup is running: bootout stops the job's processes.
+    static func migrateLegacyAgent(home: String = AppIdentity.home) -> String? {
+        let legacy = home + "/Library/LaunchAgents/\(AppIdentity.legacyLaunchAgentLabel).plist"
+        guard let dict = NSDictionary(contentsOfFile: legacy) as? [String: Any] else { return nil }
+        let interval = dict["StartInterval"] as? Int
+        let hour = (dict["StartCalendarInterval"] as? [String: Any])?["Hour"] as? Int
+        _ = runLaunchctl(arguments: ["bootout", "gui/\(getuid())/\(AppIdentity.legacyLaunchAgentLabel)"])
+        try? FileManager.default.removeItem(atPath: legacy)
+        do {
+            if let interval {
+                try installSchedule(plistContent: generatePlist(intervalSeconds: interval))
+                return "pianificazione spostata: ogni \(interval / 60) min"
+            } else if let hour {
+                try installSchedule(plistContent: generatePlistDaily(hour: hour))
+                return "pianificazione spostata: ogni giorno alle \(hour)"
+            }
+            return "vecchia pianificazione rimossa"
+        } catch {
+            Log.error("Schedule migration failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     private static func runLaunchctl(arguments: [String]) -> (status: Int32, stdout: String, stderr: String) {

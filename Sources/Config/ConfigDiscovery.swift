@@ -81,7 +81,7 @@ enum ConfigDiscovery {
     // MARK: - Custom discovery (user-defined, synced across machines)
 
     static var customDiscoveryPath: URL {
-        URL(fileURLWithPath: ("~/.config/rusty-mac-backup/discovery-custom.toml" as NSString).expandingTildeInPath)
+        URL(fileURLWithPath: AppIdentity.configDir + "/discovery-custom.toml")
     }
 
     /// Load custom discovery entries from discovery-custom.toml
@@ -134,7 +134,7 @@ enum ConfigDiscovery {
     /// Generate a starter discovery-custom.toml with examples
     static func generateCustomTemplate() -> String {
         """
-        # RustyMacBackup Custom Discovery
+        # MacBackup4Dev Custom Discovery
         # Add your own tools here. This file is backed up and works on any Mac.
         # Each [section] is a tool name. Paths use ~ for home directory.
         #

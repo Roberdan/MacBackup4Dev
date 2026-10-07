@@ -75,7 +75,7 @@ enum RestoreEngine {
 
         var results: [(volume: String, backupDir: URL, snapshots: [String])] = []
         for vol in volumes {
-            let backupDir = vol.appendingPathComponent("RustyMacBackup")
+            let backupDir = AppIdentity.backupFolder(on: vol)
             guard fm.fileExists(atPath: backupDir.path) else { continue }
             let snapshots = RetentionManager.listBackups(at: backupDir)
             if !snapshots.isEmpty {

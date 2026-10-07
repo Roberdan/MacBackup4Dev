@@ -39,7 +39,7 @@ enum NewMacRestore {
         mutating func log(_ s: String, _ sink: ((String) -> Void)?) { lines.append(s); sink?(s) }
     }
 
-    static func movedAsideRoot(home: String) -> String { home + "/RustyMacBackup-copie-parziali" }
+    static func movedAsideRoot(home: String) -> String { home + "/MacBackup4Dev-copie-parziali" }
 
     // MARK: - Checklist (read-only)
 

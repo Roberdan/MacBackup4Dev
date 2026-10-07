@@ -2,7 +2,7 @@ import Foundation
 import os.log
 
 /// Simple file + os_log logger for debugging and telemetry.
-/// Log file: ~/.local/share/rusty-mac-backup/app.log
+/// Log file: ~/.local/share/macbackup4dev/app.log
 /// Rotated at 1 MB.
 enum Log {
     private static let osLog = OSLog(subsystem: "com.roberdan.rusty-mac-backup", category: "app")
@@ -11,7 +11,7 @@ enum Log {
     /// Overridable so tests never write fake entries into the user's real log.
     static var logURL: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/share/rusty-mac-backup")
+            .appendingPathComponent(".local/share/macbackup4dev")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("app.log")
     }()

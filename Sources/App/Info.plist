@@ -5,9 +5,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.roberdan.rusty-mac-backup</string>
     <key>CFBundleName</key>
-    <string>RustyMacBackup</string>
+    <string>MacBackup4Dev</string>
     <key>CFBundleDisplayName</key>
-    <string>RustyMacBackup</string>
+    <string>MacBackup4Dev</string>
     <key>CFBundleVersion</key>
     <string>2.0.0</string>
     <key>CFBundleShortVersionString</key>
@@ -15,7 +15,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>RustyMacBackup</string>
+    <string>MacBackup4Dev</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSUIElement</key>

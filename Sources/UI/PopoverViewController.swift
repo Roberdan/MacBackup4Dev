@@ -6,7 +6,7 @@ import SwiftUI
 /// sync with the SwiftUI layout. The previous wrapper (a plain NSViewController around a
 /// child hosting controller) never passed the size on, so the popover stayed at macOS's
 /// default 320×320 and clipped the content on every side (seen 2026-10-07, measured with
-/// `RustyMacBackup measure-menu`).
+/// `MacBackup4Dev measure-menu`).
 final class PopoverViewController: NSHostingController<AnyView> {
     init(uiState: AppUIState) {
         super.init(rootView: AnyView(PopoverView().environmentObject(uiState)))

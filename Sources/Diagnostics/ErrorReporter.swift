@@ -91,7 +91,7 @@ enum ErrorReporter {
     static func suggestedAction(for category: String) -> String {
         switch category {
         case "permission_denied":
-            return "Apri Impostazioni → Privacy → Accesso completo al disco e verifica che RustyMacBackup sia abilitato."
+            return "Apri Impostazioni → Privacy → Accesso completo al disco e verifica che MacBackup4Dev sia abilitato."
         case "not_found":
             return "Alcuni file sono stati spostati o eliminati durante il backup."
         case "no_space":
@@ -111,7 +111,7 @@ enum ErrorReporter {
 
     static var logURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/share/rusty-mac-backup/backup.log")
+            .appendingPathComponent(".local/share/macbackup4dev/backup.log")
     }
 
     static func formatActionableMessage(error: BackupErrorFile) -> String {

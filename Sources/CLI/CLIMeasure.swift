@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Debug-only: `RustyMacBackup measure-menu` opens the real popover (same controller the app
+/// Debug-only: `MacBackup4Dev measure-menu` opens the real popover (same controller the app
 /// uses) next to a small window, lets it lay out, and prints the popover size against the
 /// size its content needs. A popover smaller than its content clips it.
 extension CLIHandler {

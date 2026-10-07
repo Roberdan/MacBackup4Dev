@@ -13,7 +13,7 @@ import AppKit
 ///   signed .pkg and opens it in Installer instead: one password, after which updates are
 ///   automatic again (the pkg hands the app to the logged-in user).
 enum AutoUpdater {
-    static let repoSlug = "roberdan/RustyMacBackup"
+    static let repoSlug = AppIdentity.repoSlug
     static let checkInterval: TimeInterval = 6 * 3600
 
     private static let autoInstallKey = "autoInstallUpdates"
@@ -66,7 +66,7 @@ enum AutoUpdater {
         var request = URLRequest(url: apiURL, timeoutInterval: 15)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-        request.setValue("RustyMacBackup/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("\(AppIdentity.name)/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
@@ -106,11 +106,11 @@ enum AutoUpdater {
                         onPhase: ((UpdatePhase) -> Void)? = nil) async throws -> URL {
         onPhase?(.downloading)
         Log.info("Downloading update \(version)…")
-        let zip = try await downloadSigned("RustyMacBackup-\(version).app.zip", version: version, into: dir)
+        let zip = try await downloadSigned("\(AppIdentity.name)-\(version).app.zip", version: version, into: dir)
 
         onPhase?(.verifying)
         let unpack = Shell.run("/usr/bin/ditto", ["-x", "-k", zip.path, dir.path], timeout: 120)
-        let newApp = dir.appendingPathComponent("RustyMacBackup.app")
+        let newApp = dir.appendingPathComponent("\(AppIdentity.name).app")
         guard unpack.status == 0, FileManager.default.fileExists(atPath: newApp.path) else { throw UpdateError.badZip }
         try validate(newApp: newApp, expectedVersion: version,
                      currentVersion: currentVersion, currentBundleID: Bundle.main.bundleIdentifier)
@@ -145,12 +145,15 @@ enum AutoUpdater {
 
     /// Replaces `current` with `newApp`: copy beside it, then two renames in the same folder.
     /// If the second rename fails the old app is put back. Processes running the old binary
-    /// (a backup) keep running: a rename never touches open files.
-    static func swap(newApp: URL, into current: URL) throws {
+    /// (a backup) keep running: a rename never touches open files. `target` is where the new
+    /// app goes (default: where the current one is); a 3.x "RustyMacBackup.app" is replaced by
+    /// "MacBackup4Dev.app" and leaves nothing behind.
+    static func swap(newApp: URL, into current: URL, as target: URL? = nil) throws {
         let fm = FileManager.default
         let parent = current.deletingLastPathComponent()
-        let staged = parent.appendingPathComponent(".RustyMacBackup-update.app")
-        let old = parent.appendingPathComponent(".RustyMacBackup-old-\(UUID().uuidString.prefix(8)).app")
+        let destination = target ?? current
+        let staged = parent.appendingPathComponent(".\(AppIdentity.name)-update.app")
+        let old = parent.appendingPathComponent(".\(AppIdentity.name)-old-\(UUID().uuidString.prefix(8)).app")
         try? fm.removeItem(at: staged)
         try fm.copyItem(at: newApp, to: staged)
         do {
@@ -160,7 +163,7 @@ enum AutoUpdater {
             throw error
         }
         do {
-            try fm.moveItem(at: staged, to: current)
+            try fm.moveItem(at: staged, to: destination)
         } catch {
             try? fm.moveItem(at: old, to: current)
             try? fm.removeItem(at: staged)
@@ -173,13 +176,13 @@ enum AutoUpdater {
     /// Throws `.needsInstaller(pkg)` when the app is not ours to replace: the caller opens it.
     static func install(version: String, onPhase: ((UpdatePhase) -> Void)? = nil) async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("RustyMacBackup-update-\(UUID().uuidString)")
+            .appendingPathComponent("\(AppIdentity.name)-update-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
         guard canReplaceInPlace() else {
             onPhase?(.downloading)
-            let pkg = try await downloadSigned("RustyMacBackup-\(version)-arm64.pkg", version: version,
+            let pkg = try await downloadSigned("\(AppIdentity.name)-\(version)-arm64.pkg", version: version,
                                                into: FileManager.default.homeDirectoryForCurrentUser
                                                    .appendingPathComponent("Downloads"))
             throw UpdateError.needsInstaller(pkg)
@@ -187,15 +190,35 @@ enum AutoUpdater {
         let newApp = try await prepare(version: version, in: dir, onPhase: onPhase)
         onPhase?(.installing)
         Log.info("Installing \(version) over \(Bundle.main.bundleURL.path)…")
-        try swap(newApp: newApp, into: Bundle.main.bundleURL)
+        let target = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("\(AppIdentity.name).app")
+        try swap(newApp: newApp, into: Bundle.main.bundleURL, as: target)
         Log.info("Update installed — relaunching")
-        relaunch()
+        relaunch(target)
+    }
+
+    /// 4.0 rename: a 3.x updater installs 4.x under the old name "RustyMacBackup.app".
+    /// On first launch the app renames itself and relaunches. Returns true when it did.
+    static func relocateFromLegacyName() -> Bool {
+        let current = Bundle.main.bundleURL
+        guard current.lastPathComponent == "\(AppIdentity.legacyName).app", isInstalledCopy,
+              canReplaceInPlace(current) else { return false }
+        let target = current.deletingLastPathComponent().appendingPathComponent("\(AppIdentity.name).app")
+        guard !FileManager.default.fileExists(atPath: target.path) else { return false }
+        do {
+            try FileManager.default.moveItem(at: current, to: target)
+        } catch {
+            Log.error("Rename to \(target.path) failed: \(error.localizedDescription)")
+            return false
+        }
+        Log.info("Renamed \(current.lastPathComponent) → \(target.lastPathComponent)")
+        relaunch(target)
+        return true
     }
 
     /// Starts the new copy once this process has exited, then quits.
-    static func relaunch() {
+    static func relaunch(_ appURL: URL = Bundle.main.bundleURL) {
         let pid = ProcessInfo.processInfo.processIdentifier
-        let app = Bundle.main.bundleURL.path
+        let app = appURL.path
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         p.arguments = ["-c", "while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"", app]
