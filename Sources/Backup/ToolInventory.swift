@@ -162,8 +162,16 @@ enum ToolInventory {
         p.kind == .vscode ? installed.contains("vscode:" + p.name.lowercased()) : installed.contains(p.id)
     }
 
+    /// VS Code's command-line tool, wherever the app is (also in a folder of Applications).
     static var codeCLI: String? {
-        Shell.find(["/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code", "/opt/homebrew/bin/code", "/usr/local/bin/code"])
+        let bundled = "Visual Studio Code.app/Contents/Resources/app/bin/code"
+        var candidates = ["/Applications/" + bundled]
+        let fm = FileManager.default
+        for dir in (try? fm.contentsOfDirectory(atPath: "/Applications")) ?? [] where !dir.hasSuffix(".app") {
+            candidates.append("/Applications/\(dir)/" + bundled)
+        }
+        candidates += ["/opt/homebrew/bin/code", "/usr/local/bin/code", NSHomeDirectory() + "/.local/bin/code"]
+        return Shell.find(candidates)
     }
 
     /// The command that installs one package, or nil (with the reason) when its tool is missing.

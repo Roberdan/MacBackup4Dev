@@ -94,6 +94,7 @@ struct TestRunner {
             ("Onboarding.configFromChoices", onboarding.test_configFromChoicesKeepsOnlyWhatWasChosen),
             ("Rename.scheduleKeepsWrapper", onboarding.test_legacyScheduleKeepsWrapperAndFlags),
             ("Onboarding.credentialFolder", onboarding.test_folderWithACredentialIsACredential),
+            ("Recovery.appKeptCurrent", onboarding.test_recoveryAppIsKeptCurrent),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

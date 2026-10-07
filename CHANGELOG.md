@@ -1,5 +1,20 @@
 # Changelog
 
+## [4.0.3] - 2026-10-07
+
+### Fixed
+- **The app on the backup disk is kept current.** It was copied to the top of the backup
+  folder once and never again (a real disk still offered RustyMacBackup 2.7.2 next to 4.0.0).
+  Now it is replaced whenever its version differs (copy beside, then rename), and this app's
+  older copies and installers are removed from that folder.
+- VS Code extensions are listed also when VS Code lives in a folder of Applications
+  (`/Applications/Dev`) or its command is in `~/.local/bin`; global npm packages are listed
+  even when `npm ls` exits with a warning.
+
+### Docs
+- README: release badge always shows the latest version; where the app copies on the backup
+  disk are and what they are for.
+
 ## [4.0.2] - 2026-10-07
 
 ### Fixed
