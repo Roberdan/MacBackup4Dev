@@ -13,7 +13,7 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 0) {
             headerSection
             updateBanner
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 14) {
                 if state.appState == .needsSetup {
                     diskSetupSection
                 } else {
@@ -26,19 +26,21 @@ struct PopoverView: View {
                     if let p = state.protection, state.appState != .diskAbsent { timeline(p) }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 14)
             Divider()
             primaryActions
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
                 .disabled(state.isCleaning)
             Divider()
             secondaryActions
                 .disabled(state.isCleaning)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
         }
-        .frame(width: 340)
+        .frame(width: 360)
+        .fixedSize(horizontal: false, vertical: true)
         .onAppear { if state.appState == .needsSetup { refreshVolumes() } }
         .onChange(of: state.appState) { _, newState in
             if newState == .needsSetup { refreshVolumes() }
@@ -60,9 +62,9 @@ struct PopoverView: View {
             if let c = state.config { diskLabel(c) }
             Text("v\(appVersion)").font(.caption2).foregroundColor(.secondary)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -111,10 +113,10 @@ struct PopoverView: View {
         switch state.appState {
         case .diskAbsent: return "Collega il disco: il backup riparte da solo all'orario previsto."
         case .error: return state.protection?.lastCompleteDate.map { "Ultimo completo: \(ProtectionSummary.dateLabel($0))" } ?? ""
+        case .running, .stopping, .restoring:
+            return state.protection?.lastCompleteDate.map { "Ultimo completo: \(ProtectionSummary.dateLabel($0))" } ?? ""
         default:
-            var parts: [String] = []
-            if let d = state.protection?.detail, !d.isEmpty { parts.append(d) }
-            return parts.joined(separator: " · ")
+            return state.protection?.detail ?? ""
         }
     }
 
@@ -135,7 +137,7 @@ struct PopoverView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
+        .padding(12)
         .background(levelColor.opacity(0.12))
         .cornerRadius(10)
         .accessibilityElement(children: .combine)
@@ -197,8 +199,8 @@ struct PopoverView: View {
                                 .controlSize(.small)
                         }
                     }
-                    .padding(8)
-                    .background(Color(.controlBackgroundColor))
+                    .padding(10)
+                    .background(Color.primary.opacity(0.06))
                     .cornerRadius(8)
                 }
                 if all.count > 3 {
@@ -235,7 +237,6 @@ struct PopoverView: View {
             HStack(spacing: 8) {
                 Text("\(Fmt.formatFileCount(s.filesDone)) file").font(.caption.monospacedDigit()).foregroundColor(.secondary)
                 Spacer()
-                if s.bytesPerSec > 0 { Text(Fmt.formatBytes(s.bytesPerSec) + "/s").font(.caption).foregroundColor(.secondary) }
                 if s.etaSecs > 0 { Text("ancora \(Fmt.formatDuration(Double(s.etaSecs)))").font(.caption).foregroundColor(.secondary) }
             }
             if !s.currentFile.isEmpty {
@@ -352,12 +353,16 @@ struct PopoverView: View {
 
     private func row(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading)
-                .foregroundColor(Color(.labelColor))
+            HStack(spacing: 10) {
+                Image(systemName: icon).frame(width: 20, alignment: .center)
+                Text(title)
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(Color(.labelColor))
         }
         .buttonStyle(.plain)
         .modifier(DimWhenDisabled())
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 16)
         .padding(.vertical, 5)
         .contentShape(Rectangle())
     }
@@ -391,8 +396,8 @@ struct PopoverView: View {
                     .accessibilityLabel("Ignora aggiornamento \(version)")
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
             .background(Color.mlInfo.opacity(0.08))
         }
     }

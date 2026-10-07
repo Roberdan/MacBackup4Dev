@@ -26,6 +26,19 @@ class PopoverViewController: NSViewController {
         view = hosting.view
     }
 
+    /// The popover sizes itself from THIS controller's preferredContentSize, not the hosted
+    /// child's: forward every change, or the popover keeps the size it had when it opened and
+    /// clips the content when a backup starts (seen 2026-10-07: header and last rows cut).
+    override func preferredContentSizeDidChange(for viewController: NSViewController) {
+        super.preferredContentSizeDidChange(for: viewController)
+        preferredContentSize = viewController.preferredContentSize
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        if let hosting = hostingController { preferredContentSize = hosting.view.fittingSize }
+    }
+
     /// Called by AppDelegate after updating uiState — SwiftUI observes changes automatically.
     func refresh() {
         // No manual refresh needed; SwiftUI reacts to @Published properties on uiState.
