@@ -37,14 +37,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ProcessInfo.processInfo.disableAutomaticTermination("Menu bar app must stay alive")
         ProcessInfo.processInfo.disableSuddenTermination()
         Log.info("App launched")
-        // After an update (or a double launch) only the newest copy stays: ask any other
-        // running instance to quit. A polite request: a backup running from the command
-        // line has no event loop and is never touched.
-        for other in NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
-            where other.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-            Log.info("Another instance (pid \(other.processIdentifier)) asked to quit")
-            other.terminate()
-        }
+        announceNewInstance()
         // Installed by a 3.x updater under the old name: rename and relaunch.
         if AutoUpdater.relocateFromLegacyName() { return }
 
@@ -191,6 +184,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 showOnboarding()
             }
         }
+    }
+
+    // MARK: - One copy at a time
+
+    private static let newInstanceNote = Notification.Name("com.roberdan.macbackup4dev.new-instance")
+    private static let stayNote = Notification.Name("com.roberdan.macbackup4dev.older-instance-busy")
+
+    /// After an update (or a double launch) only one menu-bar copy may stay. The new copy
+    /// says so with a distributed notification (NSRunningApplication.terminate is an Apple
+    /// event that macOS can silently block, seen 2026-10-07). An older copy that is idle
+    /// quits; one that is in the middle of a backup, restore or cleanup answers "busy" and
+    /// the new copy quits instead. A backup running from the command line never listens.
+    /// Registered with `.deliverImmediately`: AppKit suspends distributed notifications for
+    /// apps that are not frontmost, which a menu-bar app never is (measured 2026-10-07).
+    private func announceNewInstance() {
+        let center = DistributedNotificationCenter.default()
+        center.addObserver(self, selector: #selector(newerInstanceStarted(_:)), name: Self.newInstanceNote,
+                           object: nil, suspensionBehavior: .deliverImmediately)
+        center.addObserver(self, selector: #selector(olderInstanceBusy(_:)), name: Self.stayNote,
+                           object: Self.myPID, suspensionBehavior: .deliverImmediately)
+        center.postNotificationName(Self.newInstanceNote, object: Self.myPID, userInfo: nil, deliverImmediately: true)
+    }
+
+    private static let myPID = String(ProcessInfo.processInfo.processIdentifier)
+
+    @objc private func newerInstanceStarted(_ note: Notification) {
+        guard let sender = note.object as? String, sender != Self.myPID else { return }
+        if isBusyForUpdate {
+            Log.info("Newer copy (pid \(sender)) started while busy: it will quit")
+            DistributedNotificationCenter.default().postNotificationName(Self.stayNote, object: sender, userInfo: nil, deliverImmediately: true)
+        } else {
+            Log.info("Newer copy (pid \(sender)) started: quitting this one")
+            NSApp.terminate(nil)
+        }
+    }
+
+    @objc private func olderInstanceBusy(_ note: Notification) {
+        Log.info("An older copy is busy: this one quits")
+        NSApp.terminate(nil)
     }
 
     // MARK: - First launch

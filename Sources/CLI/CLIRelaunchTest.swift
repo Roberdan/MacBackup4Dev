@@ -22,9 +22,9 @@ extension CLIHandler {
         }
         let deadline = Date().addingTimeInterval(20)
         while !done && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
-        RunLoop.main.run(until: Date().addingTimeInterval(6))
+        RunLoop.main.run(until: Date().addingTimeInterval(8))
         let after = NSRunningApplication.runningApplications(withBundleIdentifier: AppIdentity.bundleID)
             .filter { !$0.isTerminated }.map(\.processIdentifier).filter { $0 != me }
-        print("dopo: \(after) → \(after.count == 1 && !before.contains(after[0]) ? "OK: una sola copia, quella nuova" : "DA CONTROLLARE")")
+        print("dopo: \(after) → \(after.count == 1 ? (before.contains(after[0]) ? "OK: una sola copia (la vecchia era al lavoro)" : "OK: una sola copia, quella nuova") : "DA CONTROLLARE: \(after.count) copie")")
     }
 }
