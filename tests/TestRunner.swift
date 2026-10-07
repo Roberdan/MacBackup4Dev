@@ -92,6 +92,8 @@ struct TestRunner {
             ("Onboarding.scanProtectsSecrets", onboarding.test_scanGroupsAndProtectsSecrets),
             ("Onboarding.projectRootsSkipCloud", onboarding.test_projectRootsSkipCloudFoldersAndLinks),
             ("Onboarding.configFromChoices", onboarding.test_configFromChoicesKeepsOnlyWhatWasChosen),
+            ("Rename.scheduleKeepsWrapper", onboarding.test_legacyScheduleKeepsWrapperAndFlags),
+            ("Onboarding.credentialFolder", onboarding.test_folderWithACredentialIsACredential),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

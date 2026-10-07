@@ -173,7 +173,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         startUpdateSchedule()
         migrateLegacyScheduleWhenIdle()
-        if config == nil { showOnboarding() }
+        // Only when there is no config file at all: an unreadable one is reported, never
+        // replaced by the first-launch setup.
+        if config == nil {
+            if FileManager.default.fileExists(atPath: Config.defaultPath.path) {
+                sendNotification(title: "Configurazione non leggibile",
+                                 body: "Controlla \(Config.defaultPath.path): non la sovrascrivo.")
+            } else {
+                showOnboarding()
+            }
+        }
     }
 
     // MARK: - First launch
@@ -199,6 +208,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func finishOnboarding(_ newConfig: Config, schedule: Int??) {
         do {
             try FileManager.default.createDirectory(atPath: AppIdentity.configDir, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: Config.defaultPath.path) {
+                let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+                try FileManager.default.copyItem(atPath: Config.defaultPath.path, toPath: Config.defaultPath.path + ".bak-" + stamp)
+            }
             try newConfig.save(to: Config.defaultPath)
             config = try Config.load(from: Config.defaultPath)
         } catch {

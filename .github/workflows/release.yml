@@ -33,7 +33,7 @@ jobs:
         run: |
           VER="${{ steps.version.outputs.VERSION }}"
           PUB=$(sed -n 's/.*publicKeyBase64 = "\(.*\)"/\1/p' Sources/App/UpdateSignature.swift)
-          for f in "MacBackup4Dev-${VER}.app.zip" "MacBackup4Dev-${VER}-arm64.pkg" "RustyMacBackup-${VER}.app.zip"; do
+          for f in "MacBackup4Dev-${VER}.app.zip" "MacBackup4Dev-${VER}-arm64.pkg" "RustyMacBackup-${VER}.app.zip" "RustyMacBackup-${VER}-arm64.pkg"; do
             swift tools/sign-update.swift "$f" "$PUB"
           done
           shasum -a 256 "MacBackup4Dev-${VER}.app.zip" "MacBackup4Dev-${VER}-arm64.pkg" "RustyMacBackup-${VER}.app.zip" > SHA256SUMS.txt
@@ -43,7 +43,8 @@ jobs:
           VER="${{ steps.version.outputs.VERSION }}"
           for f in "MacBackup4Dev-${VER}-arm64.pkg" "MacBackup4Dev-${VER}.app.zip" \
                    "MacBackup4Dev-${VER}-arm64.pkg.sig" "MacBackup4Dev-${VER}.app.zip.sig" \
-                   "RustyMacBackup-${VER}.app.zip" "RustyMacBackup-${VER}.app.zip.sig" SHA256SUMS.txt; do
+                   "RustyMacBackup-${VER}.app.zip" "RustyMacBackup-${VER}.app.zip.sig" \
+                   "RustyMacBackup-${VER}-arm64.pkg" "RustyMacBackup-${VER}-arm64.pkg.sig" SHA256SUMS.txt; do
             test -s "$f" || { echo "❌ $f missing"; exit 1; }
             echo "✅ $f ($(du -sh "$f" | cut -f1))"
           done
@@ -67,4 +68,6 @@ jobs:
             MacBackup4Dev-${{ steps.version.outputs.VERSION }}.app.zip.sig
             RustyMacBackup-${{ steps.version.outputs.VERSION }}.app.zip
             RustyMacBackup-${{ steps.version.outputs.VERSION }}.app.zip.sig
+            RustyMacBackup-${{ steps.version.outputs.VERSION }}-arm64.pkg
+            RustyMacBackup-${{ steps.version.outputs.VERSION }}-arm64.pkg.sig
             SHA256SUMS.txt

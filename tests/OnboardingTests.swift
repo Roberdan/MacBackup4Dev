@@ -95,4 +95,31 @@ struct OnboardingTests {
         try expect(config.source.paths.contains("~/.config/macbackup4dev"), "own settings always saved")
         try expectEqual(config.databases.postgres, ["app"], "chosen database dumped")
     }
+
+    /// Review 4.0 #1: the real 3.x plist of this Mac (with the on-ac wrapper) must survive.
+    func test_legacyScheduleKeepsWrapperAndFlags() throws {
+        let old: [String: Any] = [
+            "Label": "com.roberdan.rusty-mac-backup", "LowPriorityIO": true, "Nice": 10, "RunAtLoad": true,
+            "ProgramArguments": ["/Users/u/.local/bin/on-ac", "/Applications/RustyMacBackup.app/Contents/MacOS/RustyMacBackup", "backup"],
+            "StandardOutPath": "/Users/u/.local/share/rusty-mac-backup/backup.log",
+            "StandardErrorPath": "/Users/u/.local/share/rusty-mac-backup/backup-error.log",
+            "StartInterval": 3600,
+        ]
+        let new = ScheduleManager.migratedPlist(from: old, binary: "/Applications/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev")
+        try expectEqual(new["Label"] as? String, "com.roberdan.macbackup4dev", "new label")
+        try expectEqual(new["ProgramArguments"] as? [String],
+                        ["/Users/u/.local/bin/on-ac", "/Applications/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev", "backup", "--scheduled"],
+                        "wrapper kept, binary swapped, battery gate on")
+        try expectEqual(new["StartInterval"] as? Int, 3600, "same interval")
+        try expectEqual(new["StandardOutPath"] as? String, "/Users/u/.local/share/macbackup4dev/backup.log", "logs in the new folder")
+        try expectEqual(new["Nice"] as? Int, 10, "other keys kept")
+    }
+
+    /// Review 4.0 #4: a folder holding a credential file is a credential.
+    func test_folderWithACredentialIsACredential() throws {
+        try expect(ConfigDiscovery.discover().first { $0.label == "Stripe config" }.map(\.sensitive) ?? true,
+                   "Stripe config (API keys) is never proposed")
+        try expectNil(ToolInventory.command(for: ToolInventory.Package(kind: .npm, name: "--global-style")),
+                      "a package name that looks like an option is refused")
+    }
 }

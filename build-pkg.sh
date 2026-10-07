@@ -49,7 +49,8 @@ if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ "$CONSOLE_USER" 
     # The menu-bar app runs with no arguments; a running backup ("… backup") is left alone.
     for pid in $(pgrep -U "$USER_ID" -fx "$BIN"); do kill "$pid" 2>/dev/null; done
     # 4.0 rename: the 3.x app (same bundle id) goes away, after its menu-bar process.
-    if [ -d "$LEGACY_APP" ] && [ "$(defaults read "$LEGACY_APP/Contents/Info" CFBundleIdentifier 2>/dev/null)" = "com.roberdan.rusty-mac-backup" ]; then
+    # Only once the new app is really in place (never delete the only copy).
+    if [ -x "$BIN" ] && [ -d "$LEGACY_APP" ] && [ "$(defaults read "$LEGACY_APP/Contents/Info" CFBundleIdentifier 2>/dev/null)" = "com.roberdan.rusty-mac-backup" ]; then
         for pid in $(pgrep -U "$USER_ID" -fx "$LEGACY_APP/Contents/MacOS/RustyMacBackup"); do kill "$pid" 2>/dev/null; done
         rm -rf "$LEGACY_APP"
     fi
@@ -60,14 +61,22 @@ exit 0
 POSTINSTALL
 chmod +x "$SCRIPTS_DIR/postinstall"
 
-# Step 5: Build .pkg
+# Step 5: Build .pkg. Not relocatable: with the same bundle id, Installer would otherwise
+# "upgrade" /Applications/RustyMacBackup.app in place instead of installing MacBackup4Dev.app.
+COMPONENT_PLIST=$(mktemp -t component).plist
+pkgbuild --analyze --root "$PKG_ROOT" "$COMPONENT_PLIST" >/dev/null
+plutil -replace 0.BundleIsRelocatable -bool NO "$COMPONENT_PLIST"
 pkgbuild \
     --root "$PKG_ROOT" \
+    --component-plist "$COMPONENT_PLIST" \
     --identifier "$PKG_ID" \
     --version "$VERSION" \
     --install-location "/" \
     --scripts "$SCRIPTS_DIR" \
     "$APP_NAME-$VERSION-arm64.pkg"
+
+# 3.x installed by an administrator asks for "RustyMacBackup-<v>-arm64.pkg": same package.
+cp "$APP_NAME-$VERSION-arm64.pkg" "$LEGACY_NAME-$VERSION-arm64.pkg"
 
 echo ""
 echo "🎉 Artifacts:"

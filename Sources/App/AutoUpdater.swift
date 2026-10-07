@@ -203,7 +203,15 @@ enum AutoUpdater {
         guard current.lastPathComponent == "\(AppIdentity.legacyName).app", isInstalledCopy,
               canReplaceInPlace(current) else { return false }
         let target = current.deletingLastPathComponent().appendingPathComponent("\(AppIdentity.name).app")
-        guard !FileManager.default.fileExists(atPath: target.path) else { return false }
+        if FileManager.default.fileExists(atPath: target.path) {
+            // A MacBackup4Dev.app is already there (e.g. installed by the pkg): run that one and
+            // put this old-named copy in the Trash (recoverable), so updates never fight it.
+            guard Bundle(url: target)?.bundleIdentifier == Bundle.main.bundleIdentifier else { return false }
+            try? FileManager.default.trashItem(at: current, resultingItemURL: nil)
+            Log.info("\(target.lastPathComponent) already installed: old copy moved to the Trash")
+            relaunch(target)
+            return true
+        }
         do {
             try FileManager.default.moveItem(at: current, to: target)
         } catch {

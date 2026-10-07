@@ -262,7 +262,7 @@ enum ConfigDiscovery {
         ("Cloud", "AWS config", ["~/.aws/config"], false),
         ("Cloud", "GCP config", ["~/.config/gcloud/properties"], false),
         ("Cloud", "Azure config", ["~/.azure/config"], false),
-        ("Cloud", "Stripe config", ["~/.config/stripe"], false),
+        ("Cloud", "Stripe config", ["~/.config/stripe"], true),
         ("Cloud", "Tailscale prefs", ["~/Library/Preferences/io.tailscale.ipn.macos.plist",
                                        "~/Library/Application Support/Tailscale"], false),
 

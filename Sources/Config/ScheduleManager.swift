@@ -133,29 +133,59 @@ enum ScheduleManager {
         """
     }
 
-    /// 4.0 rename: replaces the 3.x LaunchAgent (com.roberdan.rusty-mac-backup) with the new
-    /// one, keeping the same schedule and pointing at this binary. Returns what it did.
-    /// The caller makes sure no backup is running: bootout stops the job's processes.
+    /// 4.0 rename, pure: the new LaunchAgent from a 3.x one. Everything the user had is kept
+    /// (a wrapper such as `on-ac`, extra flags, interval or daily time, priority); only the
+    /// label, the binary path and the log folder change, and the backup is marked
+    /// `--scheduled` so the battery gate applies.
+    static func migratedPlist(from old: [String: Any], binary: String) -> [String: Any] {
+        var new = old
+        new["Label"] = AppIdentity.launchAgentLabel
+        if var args = old["ProgramArguments"] as? [String] {
+            args = args.map { arg in
+                arg.hasSuffix("/\(AppIdentity.legacyName).app/Contents/MacOS/\(AppIdentity.legacyName)")
+                    || arg.hasSuffix("/\(AppIdentity.name).app/Contents/MacOS/\(AppIdentity.name)") ? binary : arg
+            }
+            if args.contains("backup") && !args.contains("--scheduled") { args.append("--scheduled") }
+            new["ProgramArguments"] = args
+        }
+        for key in ["StandardOutPath", "StandardErrorPath"] {
+            if let path = old[key] as? String {
+                new[key] = path.replacingOccurrences(of: "/.local/share/rusty-mac-backup/", with: "/.local/share/macbackup4dev/")
+            }
+        }
+        return new
+    }
+
+    /// 4.0 rename: replaces the 3.x LaunchAgent with the new one. The new one is installed and
+    /// started FIRST; the old one is removed only if that worked, so a failure never leaves
+    /// the Mac without a schedule. The caller makes sure no backup is running (bootout stops
+    /// the job's processes).
     static func migrateLegacyAgent(home: String = AppIdentity.home) -> String? {
         let legacy = home + "/Library/LaunchAgents/\(AppIdentity.legacyLaunchAgentLabel).plist"
         guard let dict = NSDictionary(contentsOfFile: legacy) as? [String: Any] else { return nil }
-        let interval = dict["StartInterval"] as? Int
-        let hour = (dict["StartCalendarInterval"] as? [String: Any])?["Hour"] as? Int
-        _ = runLaunchctl(arguments: ["bootout", "gui/\(getuid())/\(AppIdentity.legacyLaunchAgentLabel)"])
-        try? FileManager.default.removeItem(atPath: legacy)
+        let target = home + "/Library/LaunchAgents/\(AppIdentity.launchAgentLabel).plist"
+        let newDict = migratedPlist(from: dict, binary: binaryPath)
+        let domain = "gui/\(getuid())"
         do {
-            if let interval {
-                try installSchedule(plistContent: generatePlist(intervalSeconds: interval))
-                return "pianificazione spostata: ogni \(interval / 60) min"
-            } else if let hour {
-                try installSchedule(plistContent: generatePlistDaily(hour: hour))
-                return "pianificazione spostata: ogni giorno alle \(hour)"
-            }
-            return "vecchia pianificazione rimossa"
+            try FileManager.default.createDirectory(atPath: AppIdentity.dataDir, withIntermediateDirectories: true)
+            let data = try PropertyListSerialization.data(fromPropertyList: newDict, format: .xml, options: 0)
+            try data.write(to: URL(fileURLWithPath: target), options: .atomic)
         } catch {
-            Log.error("Schedule migration failed: \(error.localizedDescription)")
+            Log.error("Schedule migration: cannot write \(target): \(error.localizedDescription)")
             return nil
         }
+        _ = runLaunchctl(arguments: ["bootout", "\(domain)/\(AppIdentity.launchAgentLabel)"])
+        let started = runLaunchctl(arguments: ["bootstrap", domain, target])
+        guard started.status == 0 else {
+            Log.error("Schedule migration: new agent did not start (\(started.stderr)); old one kept")
+            try? FileManager.default.removeItem(atPath: target)
+            return nil
+        }
+        _ = runLaunchctl(arguments: ["bootout", "\(domain)/\(AppIdentity.legacyLaunchAgentLabel)"])
+        try? FileManager.default.removeItem(atPath: legacy)
+        if let seconds = dict["StartInterval"] as? Int { return "pianificazione spostata: ogni \(seconds / 60) min" }
+        if let hour = (dict["StartCalendarInterval"] as? [String: Any])?["Hour"] as? Int { return "pianificazione spostata: ogni giorno alle \(hour)" }
+        return "pianificazione spostata"
     }
 
     private static func runLaunchctl(arguments: [String]) -> (status: Int32, stdout: String, stderr: String) {

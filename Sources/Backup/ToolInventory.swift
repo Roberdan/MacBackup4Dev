@@ -169,6 +169,8 @@ enum ToolInventory {
     /// The command that installs one package, or nil (with the reason) when its tool is missing.
     static func command(for p: Package) -> (exe: String, args: [String])? {
         let home = NSHomeDirectory()
+        // A name read from a file is never allowed to look like an option.
+        guard !p.name.hasPrefix("-"), !p.name.isEmpty else { return nil }
         switch p.kind {
         case .tap: return brew.map { ($0, ["tap", p.name]) }
         case .brew: return brew.map { ($0, ["install", p.name]) }

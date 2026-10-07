@@ -76,6 +76,10 @@ enum DevEnvironment {
         }
         // Whole hidden folders (".claude") make the curated sub-items ("Claude CLI agents")
         // redundant; a dotfile listed by the curated catalog is not listed twice either.
+        // A folder that contains a credential file is itself a credential (Stripe's config.toml
+        // holds the API keys): the safe flag must not depend on which entry came first.
+        let secretPaths = expanded.filter(\.sensitive).flatMap(\.paths)
+        func holdsSecret(_ path: String) -> Bool { secretPaths.contains { $0 == path || $0.hasPrefix(path + "/") } }
         let wholeDirs = expanded.filter { $0.category == "App Configs" || $0.category == "Config" }.flatMap(\.paths)
         for config in expanded where config.category != "Repos" {
             let paths = config.paths.filter { path in
@@ -85,7 +89,8 @@ enum DevEnvironment {
             }
             guard !paths.isEmpty else { continue }
             covered.formUnion(paths)
-            let sensitive = config.sensitive || looksSecret(config.label) || paths.contains { looksSecret(($0 as NSString).lastPathComponent) }
+            let sensitive = config.sensitive || looksSecret(config.label)
+                || paths.contains { looksSecret(($0 as NSString).lastPathComponent) || holdsSecret($0) }
             let group = sensitive ? "credenziali" : groupID(for: config)
             byGroup[group, default: []].append(DevItem(id: paths[0], name: config.label, paths: paths,
                                                        detail: paths.joined(separator: ", "), sensitive: sensitive))
