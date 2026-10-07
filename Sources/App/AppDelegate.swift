@@ -462,25 +462,51 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let volumePath = URL(fileURLWithPath: config.destination.path).deletingLastPathComponent()
         let volumeName = volumePath.lastPathComponent
         popover.performClose(nil)
+        // Never pull the disk from under a backup, also one the schedule started on its own.
+        let lockPath = config.destination.path + "/rustymacbackup.lock"
+        if let content = try? String(contentsOfFile: lockPath, encoding: .utf8),
+           let pid = Int32(content.split(separator: "\n").first.map(String.init) ?? ""),
+           kill(pid, 0) == 0 {
+            sendNotification(title: "Disco non espulso",
+                             body: "C'è un backup in corso su \(volumeName). Interrompilo o aspetta che finisca.")
+            return
+        }
         Log.info("Ejecting: \(volumePath.path)")
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let success = Self.runDiskutil(["eject", volumePath.path])
-                || Self.runDiskutil(["unmount", "force", volumePath.path])
+            var success = Self.runDiskutil(["eject", volumePath.path])
+            var holders = ""
+            if !success {
+                // Who keeps it busy (Spotlight, Finder, a terminal…): say it instead of guessing.
+                holders = Self.processesUsing(volumePath.path)
+                // Only system indexers left: safe to force, nothing of ours is writing.
+                let indexers: Set<String> = ["mds", "mds_stores", "mdworker_shared", "fseventsd"]
+                let names = holders.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                if !names.isEmpty, names.allSatisfy({ indexers.contains($0) }) {
+                    success = Self.runDiskutil(["unmount", "force", volumePath.path])
+                }
+            }
             DispatchQueue.main.async {
                 if success {
                     Log.info("Disk ejected: \(volumeName)")
-                    self.sendNotification(title: "Disco espulso",
-                                          body: "\(volumeName) safely removed")
+                    self.sendNotification(title: "Disco espulso", body: "\(volumeName) si può scollegare.")
                     self.iconManager.setState(.diskAbsent)
                     self.pollStatus()
                 } else {
-                    Log.error("Eject failed: \(volumeName)")
-                    self.sendNotification(title: "Eject failed",
-                                          body: "Another app is using \(volumeName). Close it and retry.")
+                    Log.error("Eject failed: \(volumeName) (\(holders))")
+                    self.sendNotification(title: "Disco non espulso",
+                                          body: holders.isEmpty ? "\(volumeName) è in uso. Chiudi le finestre del Finder e riprova."
+                                                                : "\(volumeName) è in uso da: \(holders). Chiudili e riprova.")
                 }
             }
         }
+    }
+
+    /// Names of the processes with files open on a volume (lsof), comma separated.
+    nonisolated private static func processesUsing(_ path: String) -> String {
+        let r = Shell.run("/usr/sbin/lsof", ["-Fc", "+f", "--", path], timeout: 15)
+        let names = r.stdout.split(separator: "\n").filter { $0.hasPrefix("c") }.map { String($0.dropFirst()) }
+        return Array(Set(names)).sorted().joined(separator: ", ")
     }
 
     private func handleOpenFolder() {
