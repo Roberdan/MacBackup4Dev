@@ -39,6 +39,8 @@ final class OnboardingModel: ObservableObject {
 
     var onFinish: ((Config, Int??) -> Void)?
     var onRestoreNewMac: ((URL) -> Void)?
+    /// New Mac: the adopted store becomes this Mac's backup (so it keeps backing up into it).
+    var onAdopted: ((Config) -> Void)?
 
     func refreshDisks() {
         let vols = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeNameKey],
@@ -61,7 +63,20 @@ final class OnboardingModel: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let setup = try EncryptedStore.adopt(container: found.container, volume: found.volume, password: key)
-                DispatchQueue.main.async { self.onRestoreNewMac?(URL(fileURLWithPath: setup.destination)) }
+                // Same folders and databases as the last complete backup of the old Mac.
+                let dest = URL(fileURLWithPath: setup.destination)
+                let manifest = SnapshotCatalog.latestComplete(at: dest).flatMap { SnapshotManifest.read(from: $0.url) }
+                var config = Config(source: SourceConfig(paths: manifest?.sources ?? []),
+                                    destination: DestinationConfig(path: setup.destination),
+                                    exclude: ExcludeConfig(patterns: defaultExcludePatterns),
+                                    retention: RetentionConfig())
+                config.encryption = EncryptionConfig(container: setup.container, volume: setup.volume)
+                config.databases.postgres = manifest?.databases.filter { $0.kind == "postgres" }.map(\.source) ?? []
+                DispatchQueue.main.async {
+                    self.typedKey = ""
+                    self.onAdopted?(config)
+                    self.onRestoreNewMac?(dest)
+                }
             } catch {
                 DispatchQueue.main.async { self.keyError = error.localizedDescription }
             }
@@ -93,7 +108,7 @@ final class OnboardingModel: ObservableObject {
         let scan = self.scan, selected = self.selected, password = self.password, option = schedule.option
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let setup = try EncryptedStore.createStore(on: volume, password: password)
+                let setup = try EncryptedStore.createOrAdopt(on: volume, password: password)
                 var config = DevEnvironment.config(from: scan, selected: selected, backupPath: setup.destination)
                 config.encryption = EncryptionConfig(container: setup.container, volume: setup.volume)
                 DispatchQueue.main.async {

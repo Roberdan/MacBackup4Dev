@@ -14,6 +14,7 @@ struct EncryptionTests {
         try expectNotNil(EncryptedStore.passwordProblem("short", confirm: "short"), "too short refused")
         try expectNotNil(EncryptedStore.passwordProblem("una frase lunga", confirm: "una frase lungA"), "mismatch refused")
         try expectNil(EncryptedStore.passwordProblem("una frase lunga", confirm: "una frase lunga"), "a memorable phrase is fine")
+        try expectNotNil(EncryptedStore.passwordProblem("una frase\nlunga!", confirm: "una frase\nlunga!"), "a newline is refused")
     }
 
     func test_storeEncryptsKeepsHardLinksAndRefusesWrongPassword() throws {
@@ -62,14 +63,16 @@ struct EncryptionTests {
 
     func test_keychainRoundTripAndEnsureOpen() throws {
         // Touches the login Keychain (a throwaway item, removed at the end): skipped on CI.
-        guard ProcessInfo.processInfo.environment["CI"] == nil else { return }
+        guard ProcessInfo.processInfo.environment["CI"] == nil, !EncryptedStore.keychainLocked else { return }
         let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
         let s = setup(box.root)
         defer { EncryptedStore.deletePassword(for: s); EncryptedStore.close(s, force: true) }
         try FileManager.default.createDirectory(atPath: (s.container as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try EncryptedStore.create(s, password: "una \"frase\" con \\ simboli", sizeBytes: 512 * 1_048_576)
-        try EncryptedStore.savePassword("una \"frase\" con \\ simboli", for: s)
-        try expectEqual(EncryptedStore.readPassword(for: s), "una \"frase\" con \\ simboli", "password with quotes survives the Keychain")
+        // Review 4.1 B1: accents, spaces at both ends, quotes and backslashes come back as typed.
+        let pw = "  perché sì, è così \"davvero\" \\ ok  "
+        try EncryptedStore.create(s, password: pw, sizeBytes: 512 * 1_048_576)
+        try EncryptedStore.savePassword(pw, for: s)
+        try expectEqual(EncryptedStore.readPassword(for: s), pw, "the password survives the Keychain exactly")
         var cfg = safety.config(box, sources: [])
         cfg.encryption = EncryptionConfig(container: s.container, volume: s.volume)
         try EncryptedStore.ensureOpen(cfg)
@@ -86,5 +89,23 @@ struct EncryptionTests {
         let back = try Config.load(from: url)
         try expectEqual(back.encryption, cfg.encryption, "encryption saved and read back")
         try expectEqual(back.diskURL.path, "/Volumes/Disk", "the physical disk is the one holding the store")
+    }
+
+    /// Review 4.1 M4: the same disk set up again opens its existing store with the password.
+    func test_existingStoreIsAdoptedNotRecreated() throws {
+        // Uses the Keychain: skipped on CI and while it is locked (never pop a dialog).
+        guard ProcessInfo.processInfo.environment["CI"] == nil, !EncryptedStore.keychainLocked else { return }
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let disk = box.root.appendingPathComponent("disk")
+        try FileManager.default.createDirectory(at: disk, withIntermediateDirectories: true)
+        let first = try EncryptedStore.createStore(on: disk, password: "una frase lunga")
+        defer { EncryptedStore.deletePassword(for: first); EncryptedStore.close(first, force: true) }
+        try "x".write(toFile: first.destination + "/keep", atomically: true, encoding: .utf8)
+        EncryptedStore.close(first)
+        do { _ = try EncryptedStore.createOrAdopt(on: disk, password: "sbagliata!!!"); try fail("wrong password must not open") }
+        catch EncryptedStore.StoreError.wrongPassword {} catch is TestFailure { throw TestFailure.failed("opened with a wrong password") }
+        let again = try EncryptedStore.createOrAdopt(on: disk, password: "una frase lunga")
+        try expectEqual(again, first, "the existing store is reused, not replaced")
+        try expect(FileManager.default.fileExists(atPath: again.destination + "/keep"), "its content is still there")
     }
 }

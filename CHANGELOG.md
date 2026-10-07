@@ -17,6 +17,14 @@
   with its password.
 
 ### Fixed
+- Review fixes before release: passwords with accents or spaces at the ends are stored
+  base64-encoded (macOS printed them back as hex); the Keychain is written before the image
+  is created; free space is checked on the physical disk under the encrypted store; eject
+  never forces the store closed while something uses it; the store is opened off the main
+  thread; a disk that already holds a store is reopened with its password, not refused; a
+  new Mac keeps backing up into the store it opened; newlines refused in passwords.
+- **A locked Keychain never shows a dialog**: checked silently first; the scheduled backup
+  says "Portachiavi bloccato" and retries later instead of waiting for a password window.
 - **"Backup disk is NOT encrypted" at every backup, on an encrypted disk.** The check ran
   `diskutil info` on the backup folder (not a disk) and looked for "FileVault: Yes" with one
   space. Now it asks the file system about the volume itself.

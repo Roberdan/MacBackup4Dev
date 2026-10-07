@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 /// Backups encrypted by the app, whatever the disk (4.1). Snapshots live inside an encrypted
 /// APFS disk image (`MacBackup4Dev.sparsebundle`, AES-256) on the backup disk: without the
@@ -30,12 +31,14 @@ enum EncryptedStore {
         case wrongPassword
         case noPassword(String)
         case containerMissing(String)
+        case keychainLocked
         var errorDescription: String? {
             switch self {
             case .tool(let s): return "Contenitore cifrato: \(s)"
             case .wrongPassword: return "Password sbagliata"
             case .noPassword(let v): return "Manca la password del contenitore \(v) nel Portachiavi"
             case .containerMissing(let p): return "Contenitore cifrato non trovato: \(p) (disco collegato?)"
+            case .keychainLocked: return "Il Portachiavi è bloccato: sbloccalo (password del Mac) e riprovo da solo"
             }
         }
     }
@@ -48,6 +51,9 @@ enum EncryptedStore {
 
     /// nil when acceptable, otherwise why not (Italian, shown under the field).
     static func passwordProblem(_ password: String, confirm: String) -> String? {
+        if password.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) {
+            return "Niente a capo o tabulazioni nella password."
+        }
         if password.count < minimumPasswordLength { return "Almeno \(minimumPasswordLength) caratteri: va bene una frase che ricordi." }
         if password != confirm { return "Le due password non coincidono." }
         return nil
@@ -94,6 +100,8 @@ enum EncryptedStore {
                           timeout: 120, stdin: password)
         }
         guard r.ok else {
+            // Opened meanwhile by someone else (the app and the scheduled backup at once)?
+            if isOpen(setup) { return }
             let text = (r.stderr + r.stdout).lowercased()
             if text.contains("authentication") || text.contains("passphrase") || text.contains("password") { throw StoreError.wrongPassword }
             throw StoreError.tool("apertura non riuscita: \(r.stderr.suffix(200))")
@@ -115,24 +123,50 @@ enum EncryptedStore {
     // MARK: - Keychain (through /usr/bin/security, see the type comment)
 
     /// Saves the password; the command goes to `security` on stdin, so it never appears in
-    /// the process list.
+    /// the process list. Stored base64-encoded: `security -w` prints a non-ASCII password
+    /// ("perché sì") as hex and keeps spaces, so the text read back was not the one saved
+    /// (review 4.1 B1). Base64 is plain ASCII and needs no quoting.
     static func savePassword(_ password: String, for setup: Setup) throws {
-        func q(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
-        let command = "add-generic-password -U -a \(q(setup.volume)) -s \(q(keychainService)) -l \(q(keychainService + " (" + setup.volume + ")")) "
-            + "-T /usr/bin/security -w \(q(password))\n"
+        guard !keychainLocked else { throw StoreError.keychainLocked }
+        let encoded = "b64:" + Data(password.utf8).base64EncodedString()
+        let command = "add-generic-password -U -a \"\(setup.volume)\" -s \"\(keychainService)\" "
+            + "-l \"\(keychainService) (\(setup.volume))\" -T /usr/bin/security -w \"\(encoded)\"\n"
         let r = Shell.run("/usr/bin/security", ["-i"], timeout: 30, stdin: command)
         guard r.ok, readPassword(for: setup) == password else {
-            throw StoreError.tool("password non salvata nel Portachiavi: \(r.stderr.suffix(160))")
+            throw StoreError.tool("password non salvata nel Portachiavi (\(r.status))")
         }
     }
 
+    /// True when the login Keychain is locked. Asked without any dialog: reading or writing
+    /// a locked Keychain makes macOS show a password window and the command waits for it —
+    /// at every scheduled backup, with nobody at the screen (seen 2026-10-07).
+    static var keychainLocked: Bool {
+        var keychain: SecKeychain?
+        guard SecKeychainCopyDefault(&keychain) == errSecSuccess, let keychain else { return true }
+        var status: SecKeychainStatus = 0
+        guard SecKeychainGetStatus(keychain, &status) == errSecSuccess else { return true }
+        return status & UInt32(kSecUnlockStateStatus) == 0
+    }
+
     static func readPassword(for setup: Setup) -> String? {
+        guard !keychainLocked else {
+            Log.error("Keychain locked: the backup password cannot be read now")
+            return nil
+        }
         let r = Shell.run("/usr/bin/security", ["find-generic-password", "-s", keychainService, "-a", setup.volume, "-w"], timeout: 30)
-        let pw = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return r.ok && !pw.isEmpty ? pw : nil
+        guard r.ok else {
+            if r.stderr.lowercased().contains("interaction") { Log.error("Keychain locked: cannot read the backup password") }
+            return nil
+        }
+        var value = r.stdout
+        if value.hasSuffix("\n") { value.removeLast() }   // only the newline security adds
+        guard value.hasPrefix("b64:"), let data = Data(base64Encoded: String(value.dropFirst(4))),
+              let password = String(data: data, encoding: .utf8) else { return nil }
+        return password
     }
 
     static func deletePassword(for setup: Setup) {
+        guard !keychainLocked else { return }
         _ = Shell.run("/usr/bin/security", ["delete-generic-password", "-s", keychainService, "-a", setup.volume], timeout: 30)
     }
 
@@ -144,8 +178,24 @@ enum EncryptedStore {
     static func ensureOpen(_ config: Config?) throws {
         guard let setup = config?.encryption.setup, !isOpen(setup) else { return }
         guard FileManager.default.fileExists(atPath: setup.container) else { return }   // disk not attached
+        guard !keychainLocked else { throw StoreError.keychainLocked }
         guard let password = readPassword(for: setup) else { throw StoreError.noPassword(setup.volume) }
         try open(setup, password: password)
+    }
+
+    /// The store on `volume`: created when there is none, or opened with `password` when the
+    /// disk already holds one (the same disk set up again, or a new Mac). Review 4.1 M4.
+    static func createOrAdopt(on volume: URL, password: String) throws -> Setup {
+        let container = volume.appendingPathComponent(imageName).path
+        if FileManager.default.fileExists(atPath: container) {
+            guard let name = volumeName(ofContainer: container) else {
+                throw StoreError.tool("su questo disco c'è già un backup cifrato, ma non trovo il suo nome (\(container))")
+            }
+            let setup = try adopt(container: container, volume: name, password: password)
+            try FileManager.default.createDirectory(atPath: setup.destination, withIntermediateDirectories: true)
+            return setup
+        }
+        return try createStore(on: volume, password: password)
     }
 
     /// Creates a new encrypted store on `volume` (a backup disk) with the user's password,
@@ -158,9 +208,16 @@ enum EncryptedStore {
         }
         let total = (try? volume.resourceValues(forKeys: [.volumeTotalCapacityKey]))?.volumeTotalCapacity ?? 0
         let size = max(Int64(total), 100 * 1_073_741_824)   // grows on demand up to the disk size
-        try create(setup, password: password, sizeBytes: size)
-        writeVolumeMarker(setup)
+        // Keychain first: an image whose password was not saved would be a locked box.
         try savePassword(password, for: setup)
+        do {
+            try create(setup, password: password, sizeBytes: size)
+            try writeVolumeMarker(setup)
+        } catch {
+            deletePassword(for: setup)
+            try? FileManager.default.removeItem(atPath: setup.container)
+            throw error
+        }
         try open(setup, password: password)
         try FileManager.default.createDirectory(atPath: setup.destination, withIntermediateDirectories: true)
         return setup
@@ -171,7 +228,7 @@ enum EncryptedStore {
     static func adopt(container: String, volume: String, password: String) throws -> Setup {
         let setup = Setup(container: container, volume: volume)
         try open(setup, password: password)
-        try savePassword(password, for: setup)
+        do { try savePassword(password, for: setup) } catch { close(setup); throw error }
         return setup
     }
 
@@ -182,8 +239,8 @@ enum EncryptedStore {
         return (try? String(contentsOfFile: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static func writeVolumeMarker(_ setup: Setup) {
+    static func writeVolumeMarker(_ setup: Setup) throws {
         let marker = URL(fileURLWithPath: setup.container).deletingPathExtension().path + ".volume"
-        try? setup.volume.write(toFile: marker, atomically: true, encoding: .utf8)
+        try setup.volume.write(toFile: marker, atomically: true, encoding: .utf8)
     }
 }

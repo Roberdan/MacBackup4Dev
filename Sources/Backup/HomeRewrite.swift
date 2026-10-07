@@ -53,7 +53,8 @@ struct HomeRewrite: Equatable {
     /// Replaces the old home in a string (only as a whole path component).
     func apply(to text: String) -> String {
         let escaped = NSRegularExpression.escapedPattern(for: from)
-        guard let regex = try? NSRegularExpression(pattern: escaped + #"(?=[/"'\s:;,)<\]]|$)"#) else { return text }
+        // Whole path only: not inside another path (/Volumes/X/Users/old) and not a longer name.
+        guard let regex = try? NSRegularExpression(pattern: #"(?<![\w./-])"# + escaped + #"(?=[/"'\s:;,)}<>|&=\]]|$)"#) else { return text }
         let range = NSRange(text.startIndex..., in: text)
         return regex.stringByReplacingMatches(in: text, range: range, withTemplate: NSRegularExpression.escapedTemplate(for: to))
     }

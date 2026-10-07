@@ -131,10 +131,14 @@ enum BackupEngine {
             return countFiles(in: latest)
         }()
 
-        if diskFreeSpace(at: destPath) < MIN_FREE_SPACE {
+        // An encrypted store is sized as big as its disk: what counts is the free space of the
+        // physical disk under it (the old unencrypted snapshots may still fill it), not only
+        // the space inside the store (review 4.1 B2).
+        func freeSpace() -> UInt64 { min(diskFreeSpace(at: destPath), diskFreeSpace(at: config.diskURL.path)) }
+        if freeSpace() < MIN_FREE_SPACE {
             let _ = try RetentionManager.pruneLockedBackups(at: destURL, policy: config.retention, dryRun: false)
-            if diskFreeSpace(at: destPath) < MIN_FREE_SPACE {
-                throw BackupError.insufficientSpace(diskFreeSpace(at: destPath))
+            if freeSpace() < MIN_FREE_SPACE {
+                throw BackupError.insufficientSpace(freeSpace())
             }
         }
 

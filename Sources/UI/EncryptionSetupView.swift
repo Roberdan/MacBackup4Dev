@@ -35,7 +35,7 @@ final class EncryptionSetupModel: ObservableObject {
         let disk = self.disk, password = self.password
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let setup = try EncryptedStore.createStore(on: disk, password: password)
+                let setup = try EncryptedStore.createOrAdopt(on: disk, password: password)
                 DispatchQueue.main.async { self.finish(setup) }
             } catch {
                 DispatchQueue.main.async { self.error = error.localizedDescription; self.step = .failed }

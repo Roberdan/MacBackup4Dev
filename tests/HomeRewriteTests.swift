@@ -10,6 +10,8 @@ struct HomeRewriteTests {
         try expectEqual(r.apply(to: "\"/Users/roberdan\""), "\"/Users/rob\"", "quoted home")
         try expectEqual(r.apply(to: "/Users/roberdanX/file"), "/Users/roberdanX/file", "another user that starts the same is untouched")
         try expectEqual(r.apply(to: "cd /Users/roberdan"), "cd /Users/rob", "at the end")
+        try expectEqual(r.apply(to: "/Volumes/X/Users/roberdan/a"), "/Volumes/X/Users/roberdan/a", "inside another path: untouched")
+        try expectEqual(r.apply(to: "HOME=/Users/roberdan|x=${/Users/roberdan}"), "HOME=/Users/rob|x=${/Users/rob}", "before | and }")
     }
 
     func test_textAndBinaryPlistAreRewrittenOthersLeftAlone() throws {

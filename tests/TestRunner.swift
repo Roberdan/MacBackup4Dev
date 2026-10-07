@@ -102,6 +102,7 @@ struct TestRunner {
             ("Encryption.realBackup", encryption.test_realBackupIntoTheEncryptedStore),
             ("Encryption.keychainAndEnsureOpen", encryption.test_keychainRoundTripAndEnsureOpen),
             ("Encryption.configSection", encryption.test_configKeepsTheEncryptionSection),
+            ("Encryption.existingStoreAdopted", encryption.test_existingStoreIsAdoptedNotRecreated),
             ("NewUser.wholeComponents", homeRewrite.test_onlyWholePathComponentsAreReplaced),
             ("NewUser.textAndPlist", homeRewrite.test_textAndBinaryPlistAreRewrittenOthersLeftAlone),
             ("NewUser.restoreRewrites", homeRewrite.test_newUserGetsRewrittenConfigOnRestore),
