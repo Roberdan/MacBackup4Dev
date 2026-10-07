@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.1.2] - 2026-10-07
+
+### Fixed
+- **Espelli disco is safe.** It refuses while a backup is running (also one the schedule
+  started on its own) instead of forcing the unmount under it. When the disk is busy it says
+  which apps hold it (e.g. "Finder, CleanMyMac_5"); it forces the unmount only when nothing
+  but Spotlight's indexers is left. Messages in Italian.
+
 ## [3.1.1] - 2026-10-07
 
 ### Fixed
