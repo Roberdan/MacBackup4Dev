@@ -12,7 +12,7 @@ struct Config {
     var topics: [String: [String]] = [:]
 
     static var defaultPath: URL {
-        URL(fileURLWithPath: ("~/.config/rusty-mac-backup/config.toml" as NSString).expandingTildeInPath)
+        URL(fileURLWithPath: AppIdentity.configDir + "/config.toml")
     }
 
     static func load(from url: URL) throws -> Config {
@@ -355,7 +355,7 @@ func generateDefaultConfig(backupPath: String) -> Config {
         }
     }
     // Always include the backup config itself (for portability)
-    paths.append("~/.config/rusty-mac-backup")
+    paths.append("~/.config/macbackup4dev")
 
     // Never list a directory and its own children as separate sources
     paths = ConfigDiscovery.pruneRedundant(paths)

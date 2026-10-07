@@ -30,7 +30,7 @@ class IconManager {
 
         let symConfig = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium, scale: .medium)
         guard let baseSymbol = NSImage(systemSymbolName: "clock.arrow.circlepath",
-                                        accessibilityDescription: "RustyMacBackup")?
+                                        accessibilityDescription: AppIdentity.name)?
                 .withSymbolConfiguration(symConfig) else { return }
 
         // No dot -- use system template rendering (auto white/black)

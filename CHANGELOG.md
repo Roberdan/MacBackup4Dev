@@ -1,5 +1,41 @@
 # Changelog
 
+## [4.0.0] - 2026-10-07
+
+### Changed
+- **Renamed MacBackup4Dev** (was RustyMacBackup): app, command, menus, config folder
+  (`~/.config/macbackup4dev`), data folder (`~/.local/share/macbackup4dev`), LaunchAgent
+  (`com.roberdan.macbackup4dev`), GitHub repository. Everything moves by itself: folders are
+  moved with a link left at the old place, the schedule moves to the new label (only when no
+  backup is running), a 3.x app renames itself, the 3.x pkg app is removed by the 4.0 pkg.
+  Unchanged on purpose: the bundle identifier, everything on the backup disk, past undo data.
+  3.2+ updates to 4.0 by itself through a signed `RustyMacBackup-4.0.0.app.zip` bridge.
+
+### Added
+- **First launch finds the developer environment by itself** and lets you choose: projects per
+  folder (with repository counts), terminal and shell, Git and SSH, editors and IDEs
+  (JetBrains settings without plugins, Neovim, Helix, Windsurf, VS Code snippets), AI
+  assistants, languages, cloud and containers, every `~/.config` tool one by one, local
+  Postgres databases, macOS settings. Credentials are listed apart and never pre-selected;
+  test databases are not proposed; cloud folders are never walked. Then disk, schedule, first
+  backup. `MacBackup4Dev scan` shows the same in the terminal.
+- **"Questo è un Mac nuovo"** on the first screen when a backup disk is attached: straight to
+  the guided restore.
+- **New Mac as onboarding:** two new first phases. *Strumenti di base* checks Apple's developer
+  tools and Homebrew and starts their installers (Apple's window / Terminal with the official
+  command). *Programmi* lists every program of the old Mac — Homebrew formulae, apps and taps,
+  App Store apps, VS Code extensions, global npm / uv / pipx / cargo packages — each with its
+  own checkbox, already installed ones marked, search, install one at a time (a failure never
+  stops the others). Replaces the all-or-nothing `brew bundle` phase.
+- Every backup now also saves the global npm, uv, pipx and cargo packages and the apps kept in
+  `/Applications` subfolders.
+
+### Fixed
+- The first-launch scan took 2.5 minutes on a real home (folder sizes measured again at every
+  level): now 0.4 s, sizes measured only for what was chosen, and cached.
+- Warp's settings path (`~/.warp`, `dev.warp.Warp-Stable`); our own undo folder is no longer
+  proposed as configuration; `~/.config` is no longer taken whole (it held `gh`'s token).
+
 ## [3.3.0] - 2026-10-07
 
 ### Added

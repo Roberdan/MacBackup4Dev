@@ -10,7 +10,7 @@ final class DestinationLock {
         if fd == nil {
             // Some filesystems (e.g. network shares) reject flock; still serialize this Mac's app and CLI.
             let local = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".local/share/rusty-mac-backup/locks")
+                .appendingPathComponent(".local/share/macbackup4dev/locks")
             try FileManager.default.createDirectory(at: local, withIntermediateDirectories: true)
             let key = destination.standardized.path.replacingOccurrences(of: "/", with: "_")
             fd = try Self.lock(local.appendingPathComponent("\(key).lock"))

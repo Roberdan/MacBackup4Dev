@@ -84,7 +84,7 @@ struct PopoverView: View {
                     .foregroundColor(.white)
             }
             VStack(alignment: .leading, spacing: 0) {
-                Text("RustyMacBackup").font(.system(size: 14, weight: .semibold)).foregroundColor(Look.text)
+                Text(AppIdentity.name).font(.system(size: 14, weight: .semibold)).foregroundColor(Look.text)
                 Text("v\(appVersion)").font(.system(size: 10)).foregroundColor(Look.tertiaryText)
             }
             Spacer()
@@ -573,14 +573,19 @@ struct PopoverView: View {
 
     private var diskSetupSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Scegli il disco di backup").font(.system(size: 15, weight: .bold)).foregroundColor(Look.text)
-            if volumes.isEmpty {
-                Text("Nessun disco esterno collegato.").font(.system(size: 12)).foregroundColor(Look.red)
-            } else {
-                ForEach(volumes, id: \.path) { vol in diskButton(for: vol) }
+            Text("Benvenuto").font(.system(size: 15, weight: .bold)).foregroundColor(Look.text)
+            Text("Trovo da solo il tuo ambiente di sviluppo e ti faccio scegliere cosa salvare. Su un Mac nuovo, lo rimetto com'era da un backup.")
+                .font(.system(size: 12)).foregroundColor(Look.secondaryText).fixedSize(horizontal: false, vertical: true)
+            Button { state.onRequestOnboarding?() } label: {
+                Text("Inizia").font(.system(size: 13, weight: .semibold))
+                    .frame(maxWidth: .infinity).padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Look.blue))
+                    .foregroundColor(.white)
             }
+            .buttonStyle(.plain)
         }
     }
+
 
     @ViewBuilder
     private func diskButton(for vol: URL) -> some View {

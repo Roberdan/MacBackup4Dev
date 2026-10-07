@@ -33,6 +33,7 @@ struct TestRunner {
         let updater = UpdaterTests()
         let power = PowerGateTests()
         let stages = NewMacStageTests()
+        let onboarding = OnboardingTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -72,6 +73,8 @@ struct TestRunner {
             ("Updater.validateRejectsWrongBuilds", updater.test_validateRejectsWrongBuilds),
             ("Updater.swapWhole", updater.test_swapReplacesTheAppWholeAndLeavesNothingBehind),
             ("Updater.failedSwapKeepsOld", updater.test_failedSwapKeepsTheOldApp),
+            ("Updater.swapFromLegacyName", updater.test_swapFromLegacyNameLeavesOnlyTheNewApp),
+            ("Rename.foldersMove", updater.test_foldersMoveAndOldPlacesStillWork),
             ("Power.acAllowed", power.test_acAllowsScheduled),
             ("Power.batteryBlocks", power.test_batteryBlocksScheduled),
             ("Power.unknownBlocks", power.test_unknownBlocksScheduled),
@@ -84,6 +87,13 @@ struct TestRunner {
             ("NewMac.serviceHealth", stages.test_serviceHealthFromLaunchctl),
             ("NewMac.serviceMovedAside", stages.test_removedServiceIsMovedAsideNotDeleted),
             ("NewMac.ignoredApps", stages.test_ignoredAppsAreNeverListedAndSurviveSave),
+            ("Onboarding.brewfileAndLists", onboarding.test_brewfileAndPackageListsAreParsed),
+            ("Onboarding.baseToolsFirst", onboarding.test_newMacStartsWithBaseToolsThenPrograms),
+            ("Onboarding.scanProtectsSecrets", onboarding.test_scanGroupsAndProtectsSecrets),
+            ("Onboarding.projectRootsSkipCloud", onboarding.test_projectRootsSkipCloudFoldersAndLinks),
+            ("Onboarding.configFromChoices", onboarding.test_configFromChoicesKeepsOnlyWhatWasChosen),
+            ("Rename.scheduleKeepsWrapper", onboarding.test_legacyScheduleKeepsWrapperAndFlags),
+            ("Onboarding.credentialFolder", onboarding.test_folderWithACredentialIsACredential),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),
@@ -150,7 +160,7 @@ struct TestRunner {
             ("FileScanner.multipleExcludedFiles", scanner.test_multipleExcludedFilesBeforeDirectory)
         ]
 
-        print("🧪 Running RustyMacBackup tests (\(suites.count) total)...")
+        print("🧪 Running MacBackup4Dev tests (\(suites.count) total)...")
         for (name, test) in suites {
             do {
                 try test()

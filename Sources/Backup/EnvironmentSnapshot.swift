@@ -21,12 +21,13 @@ enum EnvironmentSnapshot {
         captureSystemInfo(to: envDir)
         captureAppList(to: envDir)
         captureVSCodeExtensions(to: envDir)
+        capturePackageLists(to: envDir)
         copyAppBinary(to: envDir)
         generateRestoreScript(to: envDir)
 
         // Also copy app to backup ROOT (one level up) so it's visible when you plug in the disk
         let backupRoot = destURL.deletingLastPathComponent()
-        let rootApp = backupRoot.appendingPathComponent("RustyMacBackup.app")
+        let rootApp = backupRoot.appendingPathComponent("\(AppIdentity.name).app")
         if let appURL = findAppBundle() {
             // Only copy if not already there or newer
             let fm = FileManager.default
@@ -125,9 +126,14 @@ enum EnvironmentSnapshot {
     private static func captureAppList(to dir: URL) {
         let fm = FileManager.default
         var apps: [String] = []
+        // Apps grouped in folders (/Applications/Dev, /Applications/AI) count too.
         if let contents = try? fm.contentsOfDirectory(atPath: "/Applications") {
-            for name in contents.sorted() where name.hasSuffix(".app") {
-                apps.append(name.replacingOccurrences(of: ".app", with: ""))
+            for name in contents.sorted() {
+                if name.hasSuffix(".app") { apps.append(String(name.dropLast(4))); continue }
+                var isDir: ObjCBool = false
+                guard !name.hasPrefix("."), fm.fileExists(atPath: "/Applications/" + name, isDirectory: &isDir), isDir.boolValue,
+                      let inner = try? fm.contentsOfDirectory(atPath: "/Applications/" + name) else { continue }
+                apps.append(contentsOf: inner.filter { $0.hasSuffix(".app") }.map { String($0.dropLast(4)) })
             }
         }
         let output = apps.joined(separator: "\n")
@@ -137,8 +143,9 @@ enum EnvironmentSnapshot {
 
     private static func captureVSCodeExtensions(to dir: URL) {
         // VS Code
+        let bundled = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
         captureCommandOutput(
-            cmd: "/usr/local/bin/code", altCmd: "/opt/homebrew/bin/code",
+            cmd: FileManager.default.fileExists(atPath: bundled) ? bundled : "/usr/local/bin/code", altCmd: "/opt/homebrew/bin/code",
             args: ["--list-extensions"],
             to: dir.appendingPathComponent("vscode-extensions.txt"))
         // Cursor
@@ -146,6 +153,38 @@ enum EnvironmentSnapshot {
             cmd: "/usr/local/bin/cursor", altCmd: "/opt/homebrew/bin/cursor",
             args: ["--list-extensions"],
             to: dir.appendingPathComponent("cursor-extensions.txt"))
+    }
+
+    /// Global packages installed outside Homebrew, one name per line, so a new Mac can
+    /// offer to reinstall them one by one (4.0).
+    static func capturePackageLists(to dir: URL) {
+        let home = NSHomeDirectory()
+        func run(_ candidates: [String], _ args: [String]) -> String? {
+            guard let exe = Shell.find(candidates) else { return nil }
+            let r = Shell.run(exe, args, timeout: 60,
+                              environment: ["HOME": home, "PATH": "/opt/homebrew/bin:/usr/local/bin:\(home)/.cargo/bin:\(home)/.local/bin:/usr/bin:/bin"])
+            return r.ok ? r.stdout : nil
+        }
+        func save(_ names: [String], _ file: String) {
+            let unique = Array(Set(names.filter { !$0.isEmpty })).sorted()
+            guard !unique.isEmpty else { return }
+            try? (unique.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent(file), atomically: true, encoding: .utf8)
+        }
+        if let json = run(["/opt/homebrew/bin/npm", "/usr/local/bin/npm"], ["ls", "-g", "--depth=0", "--json"]),
+           let data = json.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let deps = obj["dependencies"] as? [String: Any] {
+            save(deps.keys.filter { $0 != "npm" && $0 != "corepack" }, "npm-global.txt")
+        }
+        if let out = run(["/opt/homebrew/bin/uv", home + "/.local/bin/uv", home + "/.cargo/bin/uv"], ["tool", "list"]) {
+            save(ToolInventory.parseUVToolList(out), "uv-tools.txt")
+        }
+        if let out = run(["/opt/homebrew/bin/pipx", home + "/.local/bin/pipx"], ["list", "--short"]) {
+            save(out.split(separator: "\n").compactMap { $0.split(separator: " ").first.map(String.init) }, "pipx.txt")
+        }
+        if let out = run([home + "/.cargo/bin/cargo", "/opt/homebrew/bin/cargo"], ["install", "--list"]) {
+            save(ToolInventory.parseCargoInstallList(out), "cargo-install.txt")
+        }
     }
 
     private static func captureCommandOutput(cmd: String, altCmd: String,
@@ -185,7 +224,7 @@ enum EnvironmentSnapshot {
     private static func copyAppBinary(to dir: URL) {
         guard let appURL = findAppBundle(),
               FileManager.default.fileExists(atPath: appURL.path) else { return }
-        let destApp = dir.appendingPathComponent("RustyMacBackup.app")
+        let destApp = dir.appendingPathComponent("\(AppIdentity.name).app")
         try? FileManager.default.removeItem(at: destApp)
         try? FileManager.default.copyItem(at: appURL, to: destApp)
     }
@@ -195,7 +234,7 @@ enum EnvironmentSnapshot {
         #!/bin/bash
         set -euo pipefail
 
-        # RustyMacBackup Environment Restore Script
+        # MacBackup4Dev Environment Restore Script
         # Run this on a fresh Mac to restore your dev environment.
         #
         # Usage: bash restore.sh [backup-snapshot-path]
@@ -203,7 +242,7 @@ enum EnvironmentSnapshot {
         SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
         SNAPSHOT="${1:-$(dirname "$SCRIPT_DIR")}"
 
-        echo "=== RustyMacBackup Environment Restore ==="
+        echo "=== MacBackup4Dev Environment Restore ==="
         echo "Snapshot: $SNAPSHOT"
         echo "Environment: $SCRIPT_DIR"
         echo ""
@@ -287,11 +326,11 @@ enum EnvironmentSnapshot {
         fi
 
         # 7. Install the backup app itself
-        if [ -d "$SCRIPT_DIR/RustyMacBackup.app" ]; then
+        if [ -d "$SCRIPT_DIR/MacBackup4Dev.app" ]; then
             echo ""
-            echo "Installing RustyMacBackup.app..."
-            cp -R "$SCRIPT_DIR/RustyMacBackup.app" /Applications/ 2>/dev/null \\
-                && echo "[ok] RustyMacBackup.app installed" \\
+            echo "Installing MacBackup4Dev.app..."
+            cp -R "$SCRIPT_DIR/MacBackup4Dev.app" /Applications/ 2>/dev/null \\
+                && echo "[ok] MacBackup4Dev.app installed" \\
                 || echo "[fail] Could not install (try: sudo cp -R)"
         fi
 
@@ -303,7 +342,7 @@ enum EnvironmentSnapshot {
         echo "  - Config files (shell, git, ssh, editors, AI tools)"
         echo "  - VS Code / Cursor extensions"
         echo "  - Git repos (re-fetched from remote)"
-        echo "  - RustyMacBackup.app"
+        echo "  - MacBackup4Dev.app"
         echo ""
         echo "Manual steps needed:"
         echo "  - Sign into iCloud, GitHub, Azure, etc."

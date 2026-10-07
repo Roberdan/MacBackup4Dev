@@ -16,7 +16,7 @@ import Foundation
 ///   stopped and its file moved aside, never deleted.
 extension NewMacRestore {
     struct Stage: Identifiable, Equatable {
-        enum Kind: Equatable { case files, repos, databases, homebrew, services }
+        enum Kind: Equatable { case prerequisites, packages, files, repos, databases, homebrew, services }
         let id: String
         let title: String
         let detail: String
@@ -62,6 +62,16 @@ extension NewMacRestore {
         var claimed = Set<String>()
         var out: [Stage] = []
 
+        // 0. A new Mac needs Apple's developer tools (git) and Homebrew before anything else,
+        //    then the programs of the old Mac, each with its own checkbox.
+        out.append(Stage(id: "base", title: "Strumenti di base",
+                         detail: "Strumenti per sviluppatori di Apple (git) e Homebrew.", kind: .prerequisites))
+        let packages = ToolInventory.packages(snapshot: snapshot)
+        if !packages.isEmpty {
+            out.append(Stage(id: "programmi", title: "Programmi",
+                             detail: "\(packages.count) programmi del vecchio Mac: scegli quali reinstallare.", kind: .packages))
+        }
+
         // 1. Plain folders: documents, vaults, project data. Nothing here runs by itself.
         let data = usable.filter { rel in
             let top = rel.split(separator: "/").first.map(String.init) ?? rel
@@ -104,7 +114,6 @@ extension NewMacRestore {
                              detail: "Controllata dopo il ripristino: se la shell non parte, la fase si annulla da sola.",
                              kind: .files, paths: shell, restartAfter: true))
         }
-        out.append(Stage(id: "homebrew", title: "Programmi Homebrew", detail: "Dal Brewfile del vecchio Mac.", kind: .homebrew))
         // 5. Last: what starts at login, one service at a time.
         out.append(Stage(id: "servizi", title: servicesTopic,
                          detail: "Uno alla volta. Ognuno viene osservato: se esce con un errore lo fermo e lo metto da parte.",
@@ -167,7 +176,7 @@ extension NewMacRestore {
 
     /// Applies one phase. `dryRun` only counts. `shellCheck` is injectable for tests.
     static func runStage(_ stage: Stage, snapshot: URL, home: String, dryRun: Bool,
-                         services: Set<String> = [],
+                         services: Set<String> = [], packages: Set<String> = [],
                          shellCheck: (String) -> String? = NewMacRestore.shellProblem,
                          serviceSettle: TimeInterval = 8,
                          sink: ((String) -> Void)? = nil) -> StageOutcome {
@@ -175,6 +184,23 @@ extension NewMacRestore {
         func log(_ s: String) { out.lines.append(s); sink?(s) }
         log("== \(stage.title)")
         switch stage.kind {
+        case .prerequisites:
+            for p in ToolInventory.prerequisites() { log("  \(p.ok ? "✓" : "✗") \(p.title): \(p.hint)") }
+            if ToolInventory.prerequisites().contains(where: { !$0.ok }) { out.ok = false }
+        case .packages:
+            let all = ToolInventory.packages(snapshot: snapshot)
+            let chosen = all.filter { packages.contains($0.id) }
+            if chosen.isEmpty {
+                log("  \(all.count) programmi disponibili: scegli quali reinstallare")
+                break
+            }
+            if dryRun {
+                for p in chosen { log("  installerei: \(p.name) (\(p.kind.title))") }
+                break
+            }
+            let r = ToolInventory.install(chosen) { log($0) }
+            log("  installati \(r.ok), non riusciti \(r.failed)")
+            if r.failed > 0 { out.ok = false }
         case .files:
             let plan = SelectiveRestore.plan(snapshot: snapshot, paths: stage.paths, destinationRoot: home)
             let onlyNew = RestorePlan(snapshot: snapshot, destinationRoot: home,
@@ -230,7 +256,8 @@ extension NewMacRestore {
                 }
             }
         }
-        if !dryRun && stage.kind != .services {
+        if !dryRun && stage.kind != .services && stage.kind != .prerequisites
+            && !(stage.kind == .packages && packages.isEmpty) {
             record(ProgressEntry(stageID: stage.id, title: stage.title, date: Date(),
                                  outcome: out.lines.dropFirst().joined(separator: " · "), ok: out.ok,
                                  undoDir: out.undoDir?.path), home: home)

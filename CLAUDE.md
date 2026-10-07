@@ -1,4 +1,4 @@
-# CLAUDE.md — RustyMacBackup
+# CLAUDE.md — MacBackup4Dev (formerly RustyMacBackup)
 
 ## Project
 
@@ -6,11 +6,17 @@ Native macOS backup app (Swift, AppKit/SwiftUI). Single `.app` binary that acts 
 
 **Product**: whitelist-only incremental backup with hard links. Time Machine alternative for MDM-restricted Macs. Dev-tool configs + arbitrary folders.
 
+**Name (4.0):** MacBackup4Dev. All names live in `AppIdentity`. Kept on purpose from 3.x: the
+bundle identifier (update continuity, notification permission), everything on the backup disk
+(`_rustymacbackup/`, `rustymacbackup.lock`, an existing `RustyMacBackup` folder), and
+`~/.rustybackup-pre-restore` (undo data). Releases also publish `RustyMacBackup-<v>.app.zip`
+(same app, old folder name) for 3.x updaters; the app renames itself on first launch.
+
 ## Build & Test
 
 ```bash
 ./build.sh              # compile + sign → build/RustyMacBackup.app
-./run-tests.sh          # 108 tests → build/RustyMacBackupTests
+./run-tests.sh          # 122 tests → build/RustyMacBackupTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -20,15 +26,15 @@ Version is set in one place: `VERSION` default in `build.sh`. `build-pkg.sh` rea
 
 ```
 Sources/
-  App/          AppDelegate, main, StatusManager, AutoUpdater, UpdateSignature, IconManager, MenuBuilder
+  App/          AppDelegate, AppIdentity, main, StatusManager, AutoUpdater, UpdateSignature, IconManager
   Backup/       BackupEngine(+Helpers), HardLinker, FileScanner, RestoreEngine,
                 RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
-                SelectiveRestore (+Topics, FileVersions), NewMacRestore, ProtectionSummary, Shell
-  Config/       ConfigManager, ConfigDiscovery, ScheduleManager
+                SelectiveRestore (+Topics, FileVersions), NewMacRestore, NewMacStages, ToolInventory, ProtectionSummary, Shell
+  Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager
   CLI/          CLIHandler, CLIRestore (3.0 commands), PruneOptions
   Diagnostics/  Log, ErrorReporter, DiskDiagnostics, FDACheck
-  UI/           PopoverView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
+  UI/           PopoverView, OnboardingView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
                 SnapshotPickerView, DesignTokens, TreeWindowController, PopoverViewController
 ```
 
@@ -84,6 +90,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   Services come back only one at a time, off by default, watched after starting
   (`installAndWatch`), moved aside if they fail. The shell phase undoes itself if a login
   shell no longer starts (`shellProblem`).
+- **First launch never walks cloud folders** (links into ~/Library/CloudStorage, OneDrive,
+  Dropbox, iCloud) and never proposes credentials (`DevEnvironment.looksSecret`, token-bearing
+  `~/.config` tools). The scan does not measure sizes (0.4 s); `config(from:)` measures only
+  what was chosen. Installed programs are inventoried, not copied (`ToolInventory`).
 - **Updates install only if signed by the release key** (`UpdateSignature.publicKeyBase64`;
   private key = GitHub secret `UPDATE_SIGNING_KEY`, backup in the maintainer's Keychain as
   "RustyMacBackup update signing key (Ed25519)"). Rotating the key means shipping the new
@@ -140,6 +150,6 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (108 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh` (122 tests). No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.

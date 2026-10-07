@@ -25,7 +25,7 @@ enum Topics {
         "Editor": [".config/zed", "Library/Application Support/Code/User", ".vscode"],
         "Font": ["Library/Fonts"],
         "Python e strumenti": [".venvs", ".config/uv", ".cargo/config.toml", ".npmrc"],
-        "RustyMacBackup": [".config/rusty-mac-backup"],
+        "MacBackup4Dev": [".config/macbackup4dev", ".config/rusty-mac-backup"],
     ]
 
     static func all(config: Config?) -> [RestoreTopic] {

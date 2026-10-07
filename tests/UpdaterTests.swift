@@ -112,4 +112,41 @@ struct UpdaterTests {
                         "no leftovers after a failed swap")
         try expect(!AutoUpdater.canReplaceInPlace(apps.appendingPathComponent("nope.app")), "a missing app is not replaceable")
     }
+
+    /// 4.0 rename: a 3.x "RustyMacBackup.app" becomes "MacBackup4Dev.app", nothing left behind.
+    func test_swapFromLegacyNameLeavesOnlyTheNewApp() throws {
+        let dir = try sandbox(); defer { try? FileManager.default.removeItem(at: dir) }
+        let apps = dir.appendingPathComponent("Applications")
+        let legacy = apps.appendingPathComponent("RustyMacBackup.app")
+        try makeBundle(at: legacy, id: "x", version: "3.3.0", marker: "old", sign: false)
+        let newApp = dir.appendingPathComponent("download/MacBackup4Dev.app")
+        try makeBundle(at: newApp, id: "x", version: "4.0.0", marker: "new", sign: false)
+        let target = apps.appendingPathComponent("MacBackup4Dev.app")
+        try AutoUpdater.swap(newApp: newApp, into: legacy, as: target)
+        try expectEqual(try FileManager.default.contentsOfDirectory(atPath: apps.path), ["MacBackup4Dev.app"],
+                        "only the renamed app is left")
+        let script = try String(contentsOf: target.appendingPathComponent("Contents/MacOS/RustyMacBackup"), encoding: .utf8)
+        try expect(script.contains("new"), "it is the new build")
+    }
+
+    func test_foldersMoveAndOldPlacesStillWork() throws {
+        let home = try sandbox().path; defer { try? FileManager.default.removeItem(atPath: home) }
+        let fm = FileManager.default
+        try fm.createDirectory(atPath: home + "/.config/rusty-mac-backup", withIntermediateDirectories: true)
+        try "x".write(toFile: home + "/.config/rusty-mac-backup/config.toml", atomically: true, encoding: .utf8)
+        try fm.createDirectory(atPath: home + "/.local/share/rusty-mac-backup", withIntermediateDirectories: true)
+        try "s".write(toFile: home + "/.local/share/rusty-mac-backup/status.json", atomically: true, encoding: .utf8)
+
+        let moved = AppIdentity.migrateFolders(home: home)
+        try expectEqual(moved.count, 2, "both folders moved: \(moved)")
+        try expectEqual(try String(contentsOfFile: home + "/.config/macbackup4dev/config.toml", encoding: .utf8), "x", "config at the new place")
+        try expectEqual(try String(contentsOfFile: home + "/.config/rusty-mac-backup/config.toml", encoding: .utf8), "x",
+                        "a 3.x binary still finds it through the link")
+        try expect(AppIdentity.migrateFolders(home: home).isEmpty, "running it again does nothing")
+
+        let volume = try sandbox(); defer { try? fm.removeItem(at: volume) }
+        try expectEqual(AppIdentity.backupFolder(on: volume).lastPathComponent, "MacBackup4Dev", "new disk: new folder name")
+        try fm.createDirectory(at: volume.appendingPathComponent("RustyMacBackup"), withIntermediateDirectories: true)
+        try expectEqual(AppIdentity.backupFolder(on: volume).lastPathComponent, "RustyMacBackup", "existing 3.x folder reused")
+    }
 }

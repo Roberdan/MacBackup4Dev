@@ -33,15 +33,18 @@ jobs:
         run: |
           VER="${{ steps.version.outputs.VERSION }}"
           PUB=$(sed -n 's/.*publicKeyBase64 = "\(.*\)"/\1/p' Sources/App/UpdateSignature.swift)
-          swift tools/sign-update.swift "RustyMacBackup-${VER}.app.zip" "$PUB"
-          swift tools/sign-update.swift "RustyMacBackup-${VER}-arm64.pkg" "$PUB"
-          shasum -a 256 "RustyMacBackup-${VER}.app.zip" "RustyMacBackup-${VER}-arm64.pkg" > SHA256SUMS.txt
+          for f in "MacBackup4Dev-${VER}.app.zip" "MacBackup4Dev-${VER}-arm64.pkg" "RustyMacBackup-${VER}.app.zip" "RustyMacBackup-${VER}-arm64.pkg"; do
+            swift tools/sign-update.swift "$f" "$PUB"
+          done
+          shasum -a 256 "MacBackup4Dev-${VER}.app.zip" "MacBackup4Dev-${VER}-arm64.pkg" "RustyMacBackup-${VER}.app.zip" > SHA256SUMS.txt
 
       - name: Verify artifacts
         run: |
           VER="${{ steps.version.outputs.VERSION }}"
-          for f in "RustyMacBackup-${VER}-arm64.pkg" "RustyMacBackup-${VER}.app.zip" \
-                   "RustyMacBackup-${VER}-arm64.pkg.sig" "RustyMacBackup-${VER}.app.zip.sig" SHA256SUMS.txt; do
+          for f in "MacBackup4Dev-${VER}-arm64.pkg" "MacBackup4Dev-${VER}.app.zip" \
+                   "MacBackup4Dev-${VER}-arm64.pkg.sig" "MacBackup4Dev-${VER}.app.zip.sig" \
+                   "RustyMacBackup-${VER}.app.zip" "RustyMacBackup-${VER}.app.zip.sig" \
+                   "RustyMacBackup-${VER}-arm64.pkg" "RustyMacBackup-${VER}-arm64.pkg.sig" SHA256SUMS.txt; do
             test -s "$f" || { echo "❌ $f missing"; exit 1; }
             echo "✅ $f ($(du -sh "$f" | cut -f1))"
           done
@@ -51,7 +54,7 @@ jobs:
           VER="${{ steps.version.outputs.VERSION }}"
           awk -v v="$VER" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ {if (f) exit} f' CHANGELOG.md > notes.md
           test -s notes.md || { echo "❌ CHANGELOG has no section for ${VER}"; exit 1; }
-          printf '\n**Installazione:** chi ha già la 3.2 o successiva si aggiorna da sola. Altrimenti scarica il `.pkg` e aprilo (firma ad-hoc: tasto destro → Apri). Gli aggiornamenti sono firmati (Ed25519, file `.sig`); le impronte sono in `SHA256SUMS.txt`.\n' >> notes.md
+          printf '\n**Installazione:** chi ha già la 3.2 o successiva si aggiorna da sola (anche dalla 3.x al nuovo nome). Altrimenti scarica il `.pkg` e aprilo (firma ad-hoc: tasto destro → Apri). Gli aggiornamenti sono firmati (Ed25519, file `.sig`); le impronte sono in `SHA256SUMS.txt`.\n' >> notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -59,8 +62,12 @@ jobs:
           name: "v${{ steps.version.outputs.VERSION }}"
           body_path: notes.md
           files: |
-            RustyMacBackup-${{ steps.version.outputs.VERSION }}-arm64.pkg
-            RustyMacBackup-${{ steps.version.outputs.VERSION }}-arm64.pkg.sig
+            MacBackup4Dev-${{ steps.version.outputs.VERSION }}-arm64.pkg
+            MacBackup4Dev-${{ steps.version.outputs.VERSION }}-arm64.pkg.sig
+            MacBackup4Dev-${{ steps.version.outputs.VERSION }}.app.zip
+            MacBackup4Dev-${{ steps.version.outputs.VERSION }}.app.zip.sig
             RustyMacBackup-${{ steps.version.outputs.VERSION }}.app.zip
             RustyMacBackup-${{ steps.version.outputs.VERSION }}.app.zip.sig
+            RustyMacBackup-${{ steps.version.outputs.VERSION }}-arm64.pkg
+            RustyMacBackup-${{ steps.version.outputs.VERSION }}-arm64.pkg.sig
             SHA256SUMS.txt

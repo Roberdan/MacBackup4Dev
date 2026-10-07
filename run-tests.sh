@@ -13,7 +13,7 @@ if [ -z "${DEVELOPER_DIR:-}" ] && [[ "$(xcode-select -p 2>/dev/null)" == *Comman
     if [ -n "$XCODE_APP" ]; then export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"; fi
 fi
 
-echo "🧪 Running RustyMacBackup Tests..."
+echo "🧪 Running MacBackup4Dev Tests..."
 mkdir -p build
 
 declare -a SOURCES=()
@@ -38,10 +38,10 @@ swiftc \
     -framework Cocoa \
     -framework UserNotifications \
     -framework IOKit \
-    -o build/RustyMacBackupTests \
+    -o build/MacBackup4DevTests \
     "${SOURCES[@]}" "${TESTS[@]}"
 
 echo "  ✅ Compilation successful"
 echo ""
 echo "  Running tests..."
-./build/RustyMacBackupTests
+./build/MacBackup4DevTests

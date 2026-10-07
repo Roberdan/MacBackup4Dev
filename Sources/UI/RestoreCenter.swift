@@ -39,6 +39,13 @@ final class RestoreCenterModel: ObservableObject {
     @Published var services: [NewMacRestore.LaunchAgentInfo] = []
     /// Services to turn on: always empty to start with, one explicit toggle each.
     @Published var chosenServices: Set<String> = []
+    // Programs of the old Mac (4.0): proposed = everything not installed yet.
+    @Published var packages: [ToolInventory.Package] = []
+    @Published var installedPackages: Set<String> = []
+    @Published var chosenPackages: Set<String> = []
+    @Published var packageFilter: String = ""
+    @Published var showPackages = false
+    @Published var prerequisites: [ToolInventory.Prerequisite] = []
 
     var onAdvanced: (() -> Void)?
     var onDone: ((RestoreResult) -> Void)?
@@ -168,10 +175,19 @@ final class RestoreCenterModel: ObservableObject {
             let stages = NewMacRestore.stages(snapshot: snap, config: config)
             let services = NewMacRestore.availableLaunchAgents(snapshot: snap)
             let progress = NewMacRestore.progress(home: home)
+            let prerequisites = ToolInventory.prerequisites()
+            let packages = ToolInventory.packages(snapshot: snap)
             DispatchQueue.main.async {
                 self.stages = stages; self.services = services; self.progress = progress
                 self.chosenServices = []
+                self.prerequisites = prerequisites
+                self.packages = packages
                 self.busy = false
+            }
+            let installed = ToolInventory.installed(packages)
+            DispatchQueue.main.async {
+                self.installedPackages = installed
+                self.chosenPackages = Set(packages.filter { !ToolInventory.isInstalled($0, in: installed) }.map(\.id))
             }
             var counts: [String: String] = [:]
             for stage in stages where stage.kind == .files {
@@ -191,20 +207,42 @@ final class RestoreCenterModel: ObservableObject {
         stages.first { $0.kind != .services && done($0.id)?.ok != true }?.id
     }
 
+    func refreshPrerequisites() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let p = ToolInventory.prerequisites()
+            DispatchQueue.main.async { self.prerequisites = p }
+        }
+    }
+
+    func startPrerequisite(_ id: String) {
+        DispatchQueue.global(qos: .userInitiated).async { ToolInventory.startPrerequisite(id) }
+        log = [id == "brew" ? "Si è aperto il Terminale con l'installazione di Homebrew: segui le istruzioni, poi premi Controlla di nuovo."
+                            : "Si è aperta la finestra di Apple: conferma l'installazione, poi premi Controlla di nuovo."]
+    }
+
     func runStage(_ stage: NewMacRestore.Stage, dryRun: Bool) {
         guard let snap = snapshotURL else { return }
-        let home = self.home, services = chosenServices
+        let home = self.home, services = chosenServices, packages = chosenPackages
         log = [dryRun ? "Anteprima di \"\(stage.title)\" (niente viene scritto)…" : "Ripristino di \"\(stage.title)\"…"]
         busy = true
         DispatchQueue.global(qos: .userInitiated).async {
-            let out = NewMacRestore.runStage(stage, snapshot: snap, home: home, dryRun: dryRun, services: services) { line in
+            let out = NewMacRestore.runStage(stage, snapshot: snap, home: home, dryRun: dryRun,
+                                             services: services, packages: stage.kind == .packages ? packages : []) { line in
                 DispatchQueue.main.async { self.log.append(line) }
             }
             let progress = NewMacRestore.progress(home: home)
+            let installed = stage.kind == .packages && !dryRun ? ToolInventory.installed(ToolInventory.packages(snapshot: snap)) : nil
             DispatchQueue.main.async {
                 self.busy = false
                 self.progress = progress
                 if !dryRun && stage.kind == .services { self.chosenServices = [] }
+                if let installed {
+                    self.installedPackages = installed
+                    let byID = Dictionary(uniqueKeysWithValues: self.packages.map { ($0.id, $0) })
+                    self.chosenPackages = self.chosenPackages.filter { id in
+                        byID[id].map { !ToolInventory.isInstalled($0, in: installed) } ?? false
+                    }
+                }
                 if !dryRun {
                     self.log.append(out.ok ? (stage.restartAfter ? "Fatto. Riavvia il Mac prima della fase successiva: se qualcosa non va, sai che è stata questa." : "Fatto.")
                                            : "Fatto con problemi: leggi le righe sopra.")
@@ -430,6 +468,87 @@ struct RestoreCenterView: View {
         }
     }
 
+    private func prerequisitesRow(_ stage: NewMacRestore.Stage) -> some View {
+        let allOK = !model.prerequisites.isEmpty && model.prerequisites.allSatisfy(\.ok)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: allOK ? "checkmark.circle.fill" : "wrench.and.screwdriver")
+                    .foregroundColor(allOK ? .mlVerde : .orange)
+                Text(stage.title).font(.callout.weight(.semibold))
+                Spacer()
+                Button("Controlla di nuovo") { model.refreshPrerequisites() }.controlSize(.small)
+            }
+            ForEach(model.prerequisites) { p in
+                HStack {
+                    Image(systemName: p.ok ? "checkmark" : "xmark").foregroundColor(p.ok ? .mlVerde : .orange).frame(width: 14)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(p.title).font(.caption)
+                        Text(p.hint).font(.caption2).foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if !p.ok { Button("Installa") { model.startPrerequisite(p.id) }.controlSize(.small) }
+                }
+                .padding(.leading, 24)
+            }
+        }
+    }
+
+    private func packagesRow(_ stage: NewMacRestore.Stage) -> some View {
+        let filter = model.packageFilter.lowercased()
+        let visible = model.packages.filter { filter.isEmpty || $0.name.lowercased().contains(filter) }
+        let entry = model.done(stage.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: entry?.ok == true ? "checkmark.circle.fill" : "shippingbox")
+                    .foregroundColor(entry?.ok == true ? .mlVerde : .accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stage.title).font(.callout.weight(.semibold))
+                    Text("\(model.packages.count) del vecchio Mac · \(model.packages.filter { ToolInventory.isInstalled($0, in: model.installedPackages) }.count) già presenti · \(model.chosenPackages.count) scelti")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Button(model.showPackages ? "Nascondi" : "Scegli…") { model.showPackages.toggle() }
+            }
+            if model.showPackages {
+                TextField("Cerca", text: $model.packageFilter).textFieldStyle(.roundedBorder).padding(.leading, 24)
+                ForEach(ToolInventory.Package.Kind.allCases, id: \.self) { kind in
+                    let items = visible.filter { $0.kind == kind }
+                    if !items.isEmpty {
+                        HStack {
+                            Text(kind.title).font(.caption.weight(.semibold))
+                            Spacer()
+                            Button("Tutti") { items.filter { !ToolInventory.isInstalled($0, in: model.installedPackages) }.forEach { model.chosenPackages.insert($0.id) } }
+                                .buttonStyle(.link).font(.caption2)
+                            Button("Nessuno") { items.forEach { model.chosenPackages.remove($0.id) } }
+                                .buttonStyle(.link).font(.caption2)
+                        }
+                        .padding(.leading, 24).padding(.top, 4)
+                        ForEach(items) { p in
+                            let installed = ToolInventory.isInstalled(p, in: model.installedPackages)
+                            Toggle(isOn: Binding(get: { model.chosenPackages.contains(p.id) },
+                                                 set: { on in if on { model.chosenPackages.insert(p.id) } else { model.chosenPackages.remove(p.id) } })) {
+                                HStack {
+                                    Text(p.name).font(.system(.caption, design: .monospaced))
+                                    if installed { Text("già presente").font(.caption2).foregroundColor(.mlVerde) }
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .disabled(installed || model.busy)
+                            .padding(.leading, 36)
+                        }
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Anteprima") { model.runStage(stage, dryRun: true) }.disabled(model.busy || model.chosenPackages.isEmpty)
+                Button("Installa i selezionati (\(model.chosenPackages.count))") { model.runStage(stage, dryRun: false) }
+                    .buttonStyle(.borderedProminent).tint(.mlGold)
+                    .disabled(model.busy || model.chosenPackages.isEmpty)
+            }
+        }
+    }
+
     static func when(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "dd/MM 'alle' HH:mm"; return f.string(from: date)
     }
@@ -469,7 +588,12 @@ struct RestoreCenterView: View {
                         Button("Prepara le fasi") { model.loadStages() }.disabled(model.busy)
                     }
                     ForEach(model.stages) { stage in
-                        if stage.kind == .services { servicesRow(stage) } else { stageRow(stage) }
+                        switch stage.kind {
+                        case .services: servicesRow(stage)
+                        case .prerequisites: prerequisitesRow(stage)
+                        case .packages: packagesRow(stage)
+                        default: stageRow(stage)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

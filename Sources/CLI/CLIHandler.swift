@@ -25,7 +25,7 @@ enum CLIHandler {
 
         do {
             switch command {
-            case "version", "--version", "-v": print("RustyMacBackup v\(version)")
+            case "version", "--version", "-v": print("\(AppIdentity.name) v\(version)")
             case "help", "--help", "-h": printUsage()
             case "init": try runInit(configPath: configPath)
             case "backup": try runBackup(configPath: configPath, scheduled: subArgs.contains("--scheduled"))
@@ -47,6 +47,14 @@ enum CLIHandler {
             case "restore-file": try runRestoreFile(subArgs: subArgs, configPath: configPath)
             case "undo": try runUndo(subArgs: subArgs)
             case "new-mac": try runNewMac(subArgs: subArgs, configPath: configPath)
+            case "render-restore":
+                guard args.count > 2 else { print("render-restore <backup-dir> <out-dir>"); return }
+                MainActor.assumeIsolated { renderRestore(backup: args[1], to: args[2]) }
+            case "render-onboarding":
+                let out = args.count > 1 ? args[1] : FileManager.default.temporaryDirectory.path
+                MainActor.assumeIsolated { renderOnboarding(to: out) }
+            case "scan":
+                printDevScan()
             case "measure-menu":
                 MainActor.assumeIsolated { measureMenu() }
             case "render-menu":
@@ -71,9 +79,9 @@ enum CLIHandler {
 
     static func printUsage() {
         print("""
-        \(bold("RustyMacBackup v\(version) -- Safe Dev Config Backup"))
+        \(bold("\(AppIdentity.name) v\(version) -- Backup and new-Mac onboarding for developers"))
 
-        Usage: RustyMacBackup [options] <command>
+        Usage: MacBackup4Dev [options] <command>
 
         Options:
           -c, --config <path>    Use custom config file
@@ -154,7 +162,7 @@ enum CLIHandler {
         }
         print("")
         print("Custom discovery file: \(ConfigDiscovery.customDiscoveryPath.path)")
-        print("Add custom entries: RustyMacBackup discover add \"Tool Name\" ~/.config/tool")
+        print("Add custom entries: MacBackup4Dev discover add \"Tool Name\" ~/.config/tool")
     }
 
     private static func runDiscoverAdd(subArgs: [String]) throws {
@@ -255,7 +263,7 @@ enum CLIHandler {
 
     private static func runStatus(configPath: String?) throws {
         let cfg = try loadConfig(configPath: configPath)
-        print(bold(blue("RustyMacBackup Status\n")))
+        print(bold(blue("\(AppIdentity.name) Status\n")))
 
         let statusURL = URL(fileURLWithPath: StatusWriter.statusPath)
         if FileManager.default.fileExists(atPath: statusURL.path),
@@ -494,7 +502,7 @@ enum CLIHandler {
         guard let raw = readLine(), let sel = Int(raw), (1...volumes.count).contains(sel) else {
             throw err("Invalid selection")
         }
-        let backupDir = volumes[sel - 1].appendingPathComponent("RustyMacBackup")
+        let backupDir = AppIdentity.backupFolder(on: volumes[sel - 1])
         try FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
 
         let config = generateDefaultConfig(backupPath: backupDir.path)
@@ -503,7 +511,7 @@ enum CLIHandler {
         print(green("Config saved: \(configURL.path)"))
         print("\nBacking up \(config.source.paths.count) paths:")
         for p in config.source.paths { print("  \(p)") }
-        print("\nRun 'RustyMacBackup backup' to start.")
+        print("\nRun '\(AppIdentity.name) backup' to start.")
     }
 
     private static func runErrors(subArgs: [String]) {
@@ -583,4 +591,18 @@ enum CLIHandler {
     static func yellow(_ t: String) -> String { colored(t, "33") }
     static func blue(_ t: String) -> String { colored(t, "34") }
     static func bold(_ t: String) -> String { colored(t, "1") }
+
+    /// What the first-launch setup would propose, in the terminal.
+    static func printDevScan() {
+        let scan = DevEnvironment.scan()
+        for group in scan.groups {
+            print(bold("\(group.title) (\(group.items.count))"))
+            for item in group.items {
+                print("  \(item.sensitive ? yellow("○") : green("●")) \(item.name)" + (item.detail.isEmpty ? "" : "  — \(item.detail)"))
+            }
+        }
+        print(bold("\nInstallato (si può rimettere su un Mac nuovo)"))
+        for t in scan.toolchains { print("  · \(t.name): \(t.detail)") }
+        print("\n● proposto  ○ credenziale: si sceglie a mano")
+    }
 }
