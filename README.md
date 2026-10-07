@@ -62,7 +62,7 @@ Each backup creates a timestamped snapshot. **Unchanged files are hard-linked** 
 > ⚠️ **`COPYFILE_CLONE` is intentionally disabled.** On macOS, APFS cloning silently becomes a destructive *move* when source and destination are on different filesystems (APFS → ExFAT/HFS+). We've seen this destroy entire home directories. We use `copyfile()` with `COPYFILE_ALL = 0x0F` only.
 
 Backups run:
-- **On demand** — menu bar button or `rustyback backup`
+- **On demand** — menu bar button or `mb4d backup`
 - **On schedule** — via macOS `LaunchAgent` (hourly, daily, or custom interval)
 - **Automatically stopped** on disk eject or low battery
 
@@ -148,22 +148,22 @@ Requires macOS 14+ and Xcode (found automatically wherever it is installed, e.g.
 
 ```bash
 # Convenience alias
-alias rustyback='/Applications/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev'
+alias mb4d='/Applications/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev'
 
 # First-time setup: discovers configs, picks destination disk
-rustyback init
+mb4d init
 
 # See what configs are detected on this Mac
-rustyback discover
+mb4d discover
 
 # Run a backup now
-rustyback backup
+mb4d backup
 
 # Check live status + last result
-rustyback status
+mb4d status
 
 # List snapshots
-rustyback list
+mb4d list
 ```
 
 ## CLI Reference
@@ -264,22 +264,22 @@ Requires macOS 14+ and Xcode (found automatically wherever it is installed, e.g.
 
 ```bash
 # Convenience alias
-alias rustyback='/Applications/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev'
+alias mb4d='/Applications/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev'
 
 # First-time setup: discovers configs, picks destination disk
-rustyback init
+mb4d init
 
 # See what configs are detected on this Mac
-rustyback discover
+mb4d discover
 
 # Run a backup now
-rustyback backup
+mb4d backup
 
 # Check live status + last result
-rustyback status
+mb4d status
 
 # List snapshots
-rustyback list
+mb4d list
 ```
 
 ## CLI Reference
@@ -316,8 +316,8 @@ The most recent snapshot is always kept, even if it is older than the selected p
 The same operation is available from the CLI:
 
 ```bash
-rustyback prune --older-than 6m           # preview only
-rustyback prune --older-than 6m --yes     # permanently delete after reviewing
+mb4d prune --older-than 6m           # preview only
+mb4d prune --older-than 6m --yes     # permanently delete after reviewing
 ```
 
 Age refers to the snapshot date, not the modification dates of files inside it.
@@ -685,7 +685,7 @@ know which phase it was.
 This software is provided **as-is**, without warranty of any kind. I built it for my own use and share it in the hope it's useful — but I take no responsibility for data loss, corruption, missed backups, or any other damage that may result from using it.
 
 **Backup software is critical infrastructure.** Before relying on MacBackup4Dev for anything important:
-- Verify your backups actually restore correctly (`rustyback restore`)
+- Verify your backups actually restore correctly (`mb4d restore`)
 - Keep at least one other backup method (Time Machine, cloud, etc.)
 - Test on non-critical data first
 
