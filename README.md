@@ -7,7 +7,7 @@
 Built for developers who live in the terminal. Not a replacement for Time Machine — a complement
 to it, and an onboarding tool for the next Mac.
 
-![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![Swift](https://img.shields.io/badge/Swift-5.9-orange) ![License](https://img.shields.io/badge/license-MIT-green) ![Version](https://img.shields.io/badge/version-4.0.0-brightgreen)
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![Swift](https://img.shields.io/badge/Swift-5.9-orange) ![License](https://img.shields.io/badge/license-MIT-green) [![Release](https://img.shields.io/github/v/release/Roberdan/MacBackup4Dev)](https://github.com/Roberdan/MacBackup4Dev/releases/latest)
 
 ## First launch
 
@@ -597,7 +597,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 122 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 123 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
@@ -664,6 +664,14 @@ Releasing: push a `v*` tag. The workflow runs the tests, builds, signs both arch
 fails if the secret does not match the public key in the app), writes `SHA256SUMS.txt` and
 takes the release notes from the version's `CHANGELOG.md` section (it fails if there is none).
 
+
+### The app is on the backup disk too
+
+Every backup keeps a copy of the app at the top of the backup folder
+(`<disk>/<backup folder>/MacBackup4Dev.app`, always the version that made the last backup)
+and one inside each snapshot (`_environment/MacBackup4Dev.app`, the version that made that
+snapshot). On a new Mac without internet you can start it straight from the disk; older copies
+and installers left there by previous versions are removed.
 
 ### New Mac, one phase at a time
 

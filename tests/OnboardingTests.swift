@@ -122,4 +122,28 @@ struct OnboardingTests {
         try expectNil(ToolInventory.command(for: ToolInventory.Package(kind: .npm, name: "--global-style")),
                       "a package name that looks like an option is refused")
     }
+
+    /// The app at the top of the backup folder is kept current; older copies and installers go.
+    func test_recoveryAppIsKeptCurrent() throws {
+        let root = URL(fileURLWithPath: try sandbox()); defer { try? FileManager.default.removeItem(at: root) }
+        func bundle(_ url: URL, _ version: String, _ id: String = "com.roberdan.rusty-mac-backup") throws {
+            try FileManager.default.createDirectory(at: url.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+            let plist: [String: Any] = ["CFBundleIdentifier": id, "CFBundleShortVersionString": version]
+            try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+                .write(to: url.appendingPathComponent("Contents/Info.plist"))
+        }
+        let disk = root.appendingPathComponent("RustyMacBackup")
+        try bundle(disk.appendingPathComponent("MacBackup4Dev.app"), "4.0.0")
+        try bundle(disk.appendingPathComponent("RustyMacBackup.app"), "2.7.2")
+        try "x".write(to: disk.appendingPathComponent("RustyMacBackup-2.7.2-arm64.pkg"), atomically: true, encoding: .utf8)
+        try bundle(disk.appendingPathComponent("Other.app"), "1.0", "com.example.other")
+        let running = root.appendingPathComponent("installed/MacBackup4Dev.app")
+        try bundle(running, "4.0.3")
+
+        EnvironmentSnapshot.refreshRecoveryApp(from: running, in: disk)
+        let names = try FileManager.default.contentsOfDirectory(atPath: disk.path).sorted()
+        try expectEqual(names, ["MacBackup4Dev.app", "Other.app"], "old copy and installer removed, others untouched")
+        try expectEqual(NSDictionary(contentsOf: disk.appendingPathComponent("MacBackup4Dev.app/Contents/Info.plist"))?["CFBundleShortVersionString"] as? String,
+                        "4.0.3", "the copy on the disk is the running version")
+    }
 }

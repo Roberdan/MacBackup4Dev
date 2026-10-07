@@ -25,14 +25,49 @@ enum EnvironmentSnapshot {
         copyAppBinary(to: envDir)
         generateRestoreScript(to: envDir)
 
-        // Also copy app to backup ROOT (one level up) so it's visible when you plug in the disk
-        let backupRoot = destURL.deletingLastPathComponent()
-        let rootApp = backupRoot.appendingPathComponent("\(AppIdentity.name).app")
+        // Also keep the app at the top of the backup folder, so a new Mac can run it straight
+        // from the disk. Kept current: it used to be copied once and never again (the disk
+        // still offered RustyMacBackup 2.7.2 on 2026-10-07).
         if let appURL = findAppBundle() {
-            // Only copy if not already there or newer
-            let fm = FileManager.default
-            if !fm.fileExists(atPath: rootApp.path) {
-                try? fm.copyItem(at: appURL, to: rootApp)
+            refreshRecoveryApp(from: appURL, in: destURL.deletingLastPathComponent())
+        }
+    }
+
+    /// Puts the running app at `<backup folder>/MacBackup4Dev.app` when that copy is missing or
+    /// of another version (copy beside, then rename: never a half copy), and removes this
+    /// app's older copies and installers (same bundle id, older names) from that folder.
+    static func refreshRecoveryApp(from appURL: URL, in root: URL) {
+        let fm = FileManager.default
+        let target = root.appendingPathComponent("\(AppIdentity.name).app")
+        // Info.plist read from disk: Bundle(url:) caches, and would report a replaced copy's old version.
+        func info(_ app: URL, _ key: String) -> String? {
+            NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist"))?[key] as? String
+        }
+        let mine = info(appURL, "CFBundleShortVersionString")
+        let there = info(target, "CFBundleShortVersionString")
+        if mine != nil, mine != there {
+            let staged = root.appendingPathComponent(".\(AppIdentity.name)-new.app")
+            try? fm.removeItem(at: staged)
+            do {
+                try fm.copyItem(at: appURL, to: staged)
+                try? fm.removeItem(at: target)
+                try fm.moveItem(at: staged, to: target)
+                Log.info("Recovery app on the backup disk updated to \(mine ?? "?")")
+            } catch {
+                try? fm.removeItem(at: staged)
+                Log.error("Recovery app not updated: \(error.localizedDescription)")
+                return
+            }
+        }
+        // Older copies of this app and their installers: one current copy is enough.
+        for name in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] {
+            let url = root.appendingPathComponent(name)
+            if name == "\(AppIdentity.legacyName).app",
+               info(url, "CFBundleIdentifier") == AppIdentity.bundleID {
+                try? fm.removeItem(at: url)
+            } else if name.hasSuffix(".pkg"),
+                      name.hasPrefix(AppIdentity.legacyName + "-") || name.hasPrefix(AppIdentity.name + "-") {
+                try? fm.removeItem(at: url)
             }
         }
     }
@@ -143,9 +178,8 @@ enum EnvironmentSnapshot {
 
     private static func captureVSCodeExtensions(to dir: URL) {
         // VS Code
-        let bundled = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
         captureCommandOutput(
-            cmd: FileManager.default.fileExists(atPath: bundled) ? bundled : "/usr/local/bin/code", altCmd: "/opt/homebrew/bin/code",
+            cmd: ToolInventory.codeCLI ?? "/usr/local/bin/code", altCmd: "/opt/homebrew/bin/code",
             args: ["--list-extensions"],
             to: dir.appendingPathComponent("vscode-extensions.txt"))
         // Cursor
@@ -163,7 +197,8 @@ enum EnvironmentSnapshot {
             guard let exe = Shell.find(candidates) else { return nil }
             let r = Shell.run(exe, args, timeout: 60,
                               environment: ["HOME": home, "PATH": "/opt/homebrew/bin:/usr/local/bin:\(home)/.cargo/bin:\(home)/.local/bin:/usr/bin:/bin"])
-            return r.ok ? r.stdout : nil
+            // npm ls exits 1 on a harmless peer-dependency warning: keep the output anyway.
+            return r.ok || !r.stdout.isEmpty ? r.stdout : nil
         }
         func save(_ names: [String], _ file: String) {
             let unique = Array(Set(names.filter { !$0.isEmpty })).sorted()
