@@ -195,38 +195,53 @@ extension CLIHandler {
     }
 
     static func runNewMac(subArgs: [String], configPath: String?) throws {
-        let flags = Flags(subArgs, valued: ["--snapshot", "--steps", "--agents"])
-        let (_, dest) = try destination(configPath)
+        let flags = Flags(subArgs, valued: ["--snapshot", "--steps", "--agents", "--stage", "--undo"])
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if let id = flags.values["--undo"] {
+            print(NewMacRestore.undoStage(id, home: home))
+            return
+        }
+        let (config, dest) = try destination(configPath)
         let snap = try pickSnapshot(flags, at: dest)
         let yes = flags.switches.contains("--yes")
         print(bold("Nuovo Mac da \(snap.name) (\(snap.state.label))\n"))
-        print(bold("Controlli"))
-        for item in NewMacRestore.checklist(snapshot: snap.url) {
-            print("  \(item.ok ? green("✓") : yellow("!")) \(item.title): \(item.hint)")
-        }
-        let steps: Set<NewMacRestore.Step>
+
+        // Legacy 3.0 form: whole steps at once (login items are still never copied).
         if let s = flags.values["--steps"] {
-            steps = Set(try s.split(separator: ",").map { raw in
+            let steps = Set(try s.split(separator: ",").map { raw -> NewMacRestore.Step in
                 guard let step = NewMacRestore.Step(rawValue: String(raw)) else { throw err("Passo sconosciuto: \(raw)") }
                 return step
             })
-        } else {
-            steps = [.config, .repos, .databases]
+            let agents = Set((flags.values["--agents"] ?? "").split(separator: ",").map(String.init))
+            let report = NewMacRestore.run(snapshot: snap.url, steps: steps, launchAgents: agents, dryRun: !yes) { print($0) }
+            if !yes { print(yellow("\nAnteprima: niente è stato scritto. Aggiungi --yes per eseguire.")) }
+            for f in report.failures { print(red("  - \(f)")) }
+            return
+        }
+
+        let stages = NewMacRestore.stages(snapshot: snap.url, config: config)
+        guard let wanted = flags.values["--stage"] else {
+            print(bold("Controlli"))
+            for item in NewMacRestore.checklist(snapshot: snap.url, ignoredApps: config.coverage.ignoreApps) {
+                print("  \(item.ok ? green("✓") : yellow("!")) \(item.title): \(item.hint)")
+            }
+            print(bold("\nFasi, nell'ordine consigliato") + " (una alla volta: new-mac --stage <id> [--yes])")
+            for stage in stages {
+                let done = NewMacRestore.lastDone(stage.id, home: home)
+                let mark = done != nil ? green("✓") : "·"
+                print("  \(mark) \(stage.id.padding(toLength: 22, withPad: " ", startingAt: 0)) \(stage.title)" + (stage.restartAfter ? yellow("  (poi riavvia)") : ""))
+            }
+            print("\nServizi automatici: nessuno viene acceso da solo. Uno alla volta: --stage servizi --agents <label> --yes")
+            print("Annullare una fase: new-mac --undo <id>   ·   spegnere un servizio: new-mac --undo servizio:<label>")
+            return
         }
         let agents = Set((flags.values["--agents"] ?? "").split(separator: ",").map(String.init))
-        if steps.contains(.launchAgents) && agents.isEmpty {
-            print(bold("\nServizi automatici disponibili") + " (sceglili con --agents label1,label2)")
-            for a in NewMacRestore.availableLaunchAgents(snapshot: snap.url) {
-                print("  \(a.programExists ? green("✓") : yellow("manca programma")) \(a.label)")
-            }
+        for id in wanted.split(separator: ",").map(String.init) {
+            guard let stage = stages.first(where: { $0.id == id }) else { throw err("Fase sconosciuta: \(id)") }
+            let out = NewMacRestore.runStage(stage, snapshot: snap.url, home: home, dryRun: !yes, services: agents) { print($0) }
+            if yes && stage.restartAfter && out.ok { print(yellow("Riavvia il Mac prima della fase successiva.")) }
+            if !out.ok { print(red("Fase \(id) con problemi: leggi le righe sopra.")) }
         }
-        print("")
-        let report = NewMacRestore.run(snapshot: snap.url, steps: steps, launchAgents: agents,
-                                       dryRun: !yes) { print($0) }
         if !yes { print(yellow("\nAnteprima: niente è stato scritto. Aggiungi --yes per eseguire.")) }
-        if !report.failures.isEmpty {
-            print(red("\nDa sistemare:"))
-            for f in report.failures { print("  - \(f)") }
-        }
     }
 }

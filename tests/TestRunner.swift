@@ -32,6 +32,7 @@ struct TestRunner {
         let picker = PickerTests()
         let updater = UpdaterTests()
         let power = PowerGateTests()
+        let stages = NewMacStageTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -76,6 +77,13 @@ struct TestRunner {
             ("Power.unknownBlocks", power.test_unknownBlocksScheduled),
             ("Power.plistPassesFlag", power.test_plistsPassScheduledFlag),
             ("Power.liveReaderSane", power.test_liveReaderReturnsAValue),
+            ("NewMac.loginItemsNeverInFilePhase", stages.test_loginItemsAreNeverInAFilePhase),
+            ("NewMac.brokenShellUndoes", stages.test_brokenShellUndoesItsPhase),
+            ("NewMac.realShellCheck", stages.test_realShellCheckCatchesExitAndPassesHealthy),
+            ("NewMac.phaseUndoAlone", stages.test_eachPhaseUndoesOnItsOwn),
+            ("NewMac.serviceHealth", stages.test_serviceHealthFromLaunchctl),
+            ("NewMac.serviceMovedAside", stages.test_removedServiceIsMovedAsideNotDeleted),
+            ("NewMac.ignoredApps", stages.test_ignoredAppsAreNeverListedAndSurviveSave),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),
