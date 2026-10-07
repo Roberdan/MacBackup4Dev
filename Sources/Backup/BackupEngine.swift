@@ -384,6 +384,7 @@ enum BackupEngine {
             // Run AFTER backup completes, in a non-interactive shell to avoid triggering kaku/dotfile managers
             Log.info("Capturing environment snapshot...")
             EnvironmentSnapshot.capture(to: finalURL)
+            EnvironmentSnapshot.refreshRecoveryApp(onDisk: config.diskURL)
             Log.info("Environment snapshot complete")
         }
 

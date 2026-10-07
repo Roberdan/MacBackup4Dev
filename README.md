@@ -633,7 +633,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 136 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 137 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
@@ -703,8 +703,9 @@ takes the release notes from the version's `CHANGELOG.md` section (it fails if t
 
 ### The app is on the backup disk too
 
-Every backup keeps a copy of the app at the top of the backup folder
-(`<disk>/<backup folder>/MacBackup4Dev.app`, always the version that made the last backup)
+Every backup keeps a copy of the app at the top of the backup disk, unencrypted
+(`<disk>/MacBackup4Dev.app`, always the installed version: refreshed at launch, when the disk
+is attached and after each backup)
 and one inside each snapshot (`_environment/MacBackup4Dev.app`, the version that made that
 snapshot). On a new Mac without internet you can start it straight from the disk; older copies
 and installers left there by previous versions are removed.
