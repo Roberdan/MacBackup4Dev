@@ -31,6 +31,7 @@ struct TestRunner {
         let coverageNoise = CoverageNoiseTests()
         let picker = PickerTests()
         let updater = UpdaterTests()
+        let power = PowerGateTests()
         let stages = NewMacStageTests()
         let onboarding = OnboardingTests()
 
@@ -74,6 +75,11 @@ struct TestRunner {
             ("Updater.failedSwapKeepsOld", updater.test_failedSwapKeepsTheOldApp),
             ("Updater.swapFromLegacyName", updater.test_swapFromLegacyNameLeavesOnlyTheNewApp),
             ("Rename.foldersMove", updater.test_foldersMoveAndOldPlacesStillWork),
+            ("Power.acAllowed", power.test_acAllowsScheduled),
+            ("Power.batteryBlocks", power.test_batteryBlocksScheduled),
+            ("Power.unknownBlocks", power.test_unknownBlocksScheduled),
+            ("Power.plistPassesFlag", power.test_plistsPassScheduledFlag),
+            ("Power.liveReaderSane", power.test_liveReaderReturnsAValue),
             ("NewMac.loginItemsNeverInFilePhase", stages.test_loginItemsAreNeverInAFilePhase),
             ("NewMac.brokenShellUndoes", stages.test_brokenShellUndoesItsPhase),
             ("NewMac.realShellCheck", stages.test_realShellCheckCatchesExitAndPassesHealthy),

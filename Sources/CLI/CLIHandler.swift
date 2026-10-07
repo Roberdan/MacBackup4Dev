@@ -28,7 +28,7 @@ enum CLIHandler {
             case "version", "--version", "-v": print("\(AppIdentity.name) v\(version)")
             case "help", "--help", "-h": printUsage()
             case "init": try runInit(configPath: configPath)
-            case "backup": try runBackup(configPath: configPath)
+            case "backup": try runBackup(configPath: configPath, scheduled: subArgs.contains("--scheduled"))
             case "stop": try runStop(configPath: configPath)
             case "status": try runStatus(configPath: configPath)
             case "prune": try runPrune(subArgs: subArgs, configPath: configPath)
@@ -88,7 +88,7 @@ enum CLIHandler {
 
         Commands:
           init            Setup wizard (discovers dev tool configs)
-          backup          Run backup now
+          backup          Run backup now (--scheduled: only on AC power)
           stop            Stop running backup
           status          Show backup status
           list            List backup snapshots
@@ -206,7 +206,13 @@ enum CLIHandler {
         print("File: \(url.path)")
     }
 
-    private static func runBackup(configPath: String?) throws {
+    private static func runBackup(configPath: String?, scheduled: Bool = false) throws {
+        // Scheduled (launchd) runs only on wall power; manual runs are never gated.
+        if scheduled && !PowerGate.scheduledBackupAllowed() {
+            print(PowerGate.skipMessage)
+            Log.info(PowerGate.skipMessage)
+            return
+        }
         let cfg = try loadConfig(configPath: configPath)
         let sem = DispatchSemaphore(value: 0)
         final class ErrorBox: @unchecked Sendable { var error: Error? }

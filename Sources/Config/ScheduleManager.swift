@@ -115,6 +115,7 @@ enum ScheduleManager {
             <array>
                 <string>\(binaryPath)</string>
                 <string>backup</string>
+                <string>--scheduled</string>
             </array>
             <key>RunAtLoad</key>
             <true/>
