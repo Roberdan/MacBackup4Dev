@@ -100,7 +100,12 @@ No Full Disk Access required. No TCC prompts. No system file access.
 
 ## Installation
 
-**From source (recommended for developers):**
+**From the pkg installer (recommended):** download `RustyMacBackup-<version>-arm64.pkg` from
+[Releases](https://github.com/Roberdan/RustyMacBackup/releases) and open it. The build is
+ad-hoc signed: if macOS says the developer cannot be verified, right-click the file → Open.
+Quit and reopen the menu-bar app after updating.
+
+**From source:**
 
 ```bash
 git clone https://github.com/Roberdan/RustyMacBackup.git
@@ -108,11 +113,118 @@ cd RustyMacBackup
 ./install.sh        # builds with swiftc + installs to /Applications
 ```
 
-Requires macOS 14+ (Sonoma) and Xcode Command Line Tools (`xcode-select --install`).
+Requires macOS 14+ and Xcode (found automatically wherever it is installed, e.g.
+`/Applications/Dev/Xcode.app`): the Command Line Tools alone lack the SwiftUI macro plugin.
 
-**From pkg installer:**
+---
 
-Download `RustyMacBackup-2.2.0-arm64.pkg` from [Releases](https://github.com/Roberdan/RustyMacBackup/releases) and double-click. No admin password needed after first install — auto-updates work in-place.
+## Quick Start (CLI)
+
+```bash
+# Convenience alias
+alias rustyback='/Applications/RustyMacBackup.app/Contents/MacOS/RustyMacBackup'
+
+# First-time setup: discovers configs, picks destination disk
+rustyback init
+
+# See what configs are detected on this Mac
+rustyback discover
+
+# Run a backup now
+rustyback backup
+
+# Check live status + last result
+rustyback status
+
+# List snapshots
+rustyback list
+```
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `discover` | Show all detected dev tool configs |
+| `init` | Interactive setup: discover + pick disk |
+| `backup` | Run backup now; prints *Backup completo* or *Backup INCOMPLETO* with reasons |
+| `stop` | Cancel a running backup |
+| `status` | Live status, last result, folder list |
+| `list` | List snapshots on disk |
+| `snapshots` | Snapshots with their state: completo / INCOMPLETO / non verificato |
+| `coverage [--days N]` | Active folders and databases that the backup does not save |
+| `versions <file>` | Every distinct version of one file across snapshots |
+| `find <text> [--snapshot S]` | Search files in a snapshot |
+| `topics` | Restorable topics (Warp, Terminale e shell, Claude Code, …) |
+| `restore-topic <name> [--snapshot S] [--yes]` | Restore a topic (preview without `--yes`) |
+| `restore-file <file> [--snapshot S] [--to <dir>] [--yes]` | Restore one file or folder (preview without `--yes`) |
+| `undo [dir] [--file <file>]` | Undo the last restore, or one file of it |
+| `new-mac [--steps …] [--agents …] [--yes]` | Guided restore of a new Mac (preview without `--yes`) |
+| `prune [--dry-run \| --yes]` | Preview retention-policy cleanup; `--yes` deletes |
+| `prune --older-than 1m\|6m\|1y [--dry-run \| --yes]` | Preview/delete snapshots older than 1 month, 6 months or 1 year |
+| `restore <snapshot> [path] --to <dest>` | Legacy whole-path restore |
+| `config show\|add\|remove\|edit` | Manage backed-up paths |
+| `schedule on\|off\|interval <min>\|daily <hour>` | Manage LaunchAgent schedule |
+| `errors [--all]` | Show categorised backup errors |
+| `measure-menu` | Debug: open the real popover and check it fits its content |
+| `render-menu <dir>` | Debug: draw the popover content in its main states to PNG |
+| `--version` | Print version |
+
+---
+
+## Configuration, Not Data
+
+Hidden folders in your home directory are picked up automatically, so a tool you install
+tomorrow is backed up without editing any list. What is *not* configuration is filtered out
+in two passes:
+
+1. **By name** — package registries and downloaded runtimes (`.npm`, `.cargo/registry`,
+   `.rustup`, `.nuget`), model stores (`.ollama`, `.lmstudio`), caches, logs, browser
+   profiles, `node_modules`, timestamped `.bak-*` copies.
+2. **By size** — a folder over 200 MB once the exclusions are applied is data, not
+   configuration. The scan opens it, finds the oversized part inside, and adds *that* to the
+   exclusion list while still backing up the folder itself.
+
+Folders that hold credentials (`.ssh`, `.gnupg`, `.aws`, `.azure`, `.docker`, `.npmrc`) are
+detected but left **off by default** — you opt into them explicitly, exactly as before.
+
+### What It Will Never Touch
+
+These paths are hardcoded as forbidden and enforced at both the UI and engine level —
+including the "Aggiungi percorso" picker, which now rejects them on add instead of
+listing them as if they were backupable:
+
+```
+~/Library/Mail         ~/Library/Messages      ~/Library/Safari
+~/Library/Containers   ~/Library/Caches
+/Library   /System   /etc   /Applications   /usr   /opt   /private
+```
+
+`~/Library/CloudStorage` (OneDrive, Dropbox, Google Drive, …) is forbidden by the same
+rule but for a different reason: not a daemon-crash risk, a *provider* one (a sync client
+re-uploading a local copy, a company's DLP policy blocking the copy). See `[protection]`
+below for the config-only opt-in.
+
+No Full Disk Access required. No TCC prompts. No system file access.
+
+---
+
+## Installation
+
+**From the pkg installer (recommended):** download `RustyMacBackup-<version>-arm64.pkg` from
+[Releases](https://github.com/Roberdan/RustyMacBackup/releases) and open it. The build is
+ad-hoc signed: if macOS says the developer cannot be verified, right-click the file → Open.
+Quit and reopen the menu-bar app after updating.
+
+**From source:**
+
+```bash
+git clone https://github.com/Roberdan/RustyMacBackup.git
+cd RustyMacBackup
+./install.sh        # builds with swiftc + installs to /Applications
+```
+
+Requires macOS 14+ and Xcode (found automatically wherever it is installed, e.g.
+`/Applications/Dev/Xcode.app`): the Command Line Tools alone lack the SwiftUI macro plugin.
 
 ---
 
@@ -340,42 +452,44 @@ ignore = ["~/Scratch"]          # never report this folder as "not backed up"
 
 ## Menu Bar App
 
-Launch the app (no arguments) to get the menu-bar popover. The first line answers one
-question: **am I protected, and since when?** It counts only complete snapshots.
+Launch the app (no arguments) to get the menu-bar popover: a dark panel lit by the state
+colour, sized to its content.
 
 ```
-┌──────────────────────────────────────────┐
-│ ● Backup          RoberdanBCK · 1,4 TB   │
-├──────────────────────────────────────────┤
-│ Protetto · ultimo completo 2 ore fa      │  ← green / orange / red
-│ oggi 07:42 · 171.604 file · 0 errori     │
-│ [6 repo con commit salvati] [3 database] │
-│                                          │
-│ Una cartella non viene salvata  [Ignora] │  ← coverage audit
-│ ~/Projects/new-app        [ Aggiungi ]   │
-│                                          │
-│ Ultimi 14 giorni ▮▮▮▮▮▮▮▮▮▮▮▮▮▮           │
-├──────────────────────────────────────────┤
-│ [ Esegui ora ]      [ Ripristina… ]      │
-├──────────────────────────────────────────┤
-│ Annulla l'ultimo ripristino              │
-│ Scegli cosa salvare…                     │
-│ Pianificazione: mezzanotte               │
-│ Libera spazio…                           │
-│ Apri cartella dei backup                 │
-│ Espelli disco                            │
-│ Esci                                     │
-└──────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ [▣] RustyMacBackup        ( RoberdanBCK 1,4TB)│
+│ ┌──────────────────────────────────────────┐ │
+│ │  ╭──╮   Protetto · ultimo completo        │ │  ring: green shield when protected,
+│ │  │✓ │   2 ore fa                          │ │  live % while a backup runs,
+│ │  ╰──╯   oggi 07:42 · 0 errori             │ │  orange / red when it needs you
+│ │  (171.604 file) (6 repo) (3 database)    │ │
+│ └──────────────────────────────────────────┘ │
+│ [!] Cartella non salvata  Ignora [Aggiungi]  │  ← coverage audit, one card per problem
+│ Ultimi 14 giorni                       7/14  │
+│ ● ● ● ● ● ● ● ● ● ● ● ● ● ●                  │
+│ [   Esegui ora   ]   [   Ripristina…   ]     │
+│ ┌─────────┐ ┌─────────┐ ┌─────────┐          │
+│ │ Annulla │ │ Scegli  │ │ Pianif. │          │  tiles with coloured icons
+│ │ripristin│ │cartelle │ │ ogni 1h │          │
+│ ├─────────┤ ├─────────┤ ├─────────┤          │
+│ │ Libera  │ │  Apri   │ │ Espelli │          │
+│ │ spazio  │ │cartella │ │  disco  │          │
+│ └─────────┘ └─────────┘ └─────────┘          │
+│ Solo gli snapshot completi contano     Esci  │
+└──────────────────────────────────────────────┘
 ```
 
 - **Esegui ora** backs up what is configured, immediately.
-- **Scegli cosa salvare…** opens the folder picker. Every configured folder is listed (also
-  the ones added by hand or from the coverage audit, under *Le tue cartelle*); **Tutti** never
-  selects items that hold credentials (SSH keys, tokens): those are chosen one by one.
+- **Scegli cartelle** opens the folder picker. Every configured folder is listed (also the ones
+  added by hand or from the coverage audit, under *Le tue cartelle*); **Tutti** never selects
+  items that hold credentials (SSH keys, tokens): those are chosen one by one.
 - **Ripristina…** opens the restore window: *Argomento*, *File* (every version), *Nuovo Mac*.
+- **Espelli disco** refuses while a backup runs (also a scheduled one), says which apps keep
+  the disk busy, and forces the unmount only when only Spotlight's indexers are left.
 - Problems appear with the button that fixes them: *Riprova* for an incomplete backup,
   *Aggiungi* / *Ignora* for a folder or database that is not backed up. The audit never
-  suggests credentials, parked folders (`_name`), caches or a tool's own databases.
+  suggests credentials, parked folders (`_name`), caches, a tool's own databases or git
+  worktrees.
 - Notifications say *Backup completo* or *Backup incompleto* with the reason, also for
   scheduled runs. Starting a backup while one is running shows the running one.
 
@@ -392,65 +506,74 @@ Single-binary `.app` bundle — no frameworks, no SPM, no Xcode project. Compile
 ```
 Sources/
 ├── App/
-│   ├── AppDelegate.swift       # NSApplicationDelegate, menu bar, popover lifecycle
-│   ├── StatusManager.swift     # Polls status.json from disk, manages AppState
+│   ├── AppDelegate.swift       # Menu bar, popover lifecycle, backup/restore/eject actions
+│   ├── StatusManager.swift     # Polls status.json, manages AppState
 │   ├── AutoUpdater.swift       # GitHub release check, codesign verify, atomic install
-│   ├── IconManager.swift       # Animated menu-bar icon (3-frame pulse per state)
+│   ├── IconManager.swift       # Animated menu-bar icon
 │   └── main.swift              # Entry point: CLI dispatch or NSApplication.main()
 ├── Backup/
-│   ├── BackupEngine.swift      # Core backup loop, lock, TaskGroup workers
-│   ├── BackupEngine+Helpers.swift  # Mount validation, lock format, stale cleanup
-│   ├── DestinationLock.swift   # Shared lock: backup, restore and cleanup never overlap
-│   ├── FileScanner.swift       # Recursive traversal with exclude filter
-│   ├── HardLinker.swift        # Hard-link decision (mtime + size, 1 ms tolerance)
-│   ├── RestoreEngine.swift     # Restore + manifest-based undo
-│   ├── RetentionManager.swift  # Snapshot pruning (hourly/daily/weekly/monthly)
+│   ├── BackupEngine.swift      # Core loop: QueueGate (never drops), workers, manifest, finalisation
+│   ├── BackupEngine+Helpers.swift  # Mount validation, lock, per-file copy
+│   ├── SnapshotManifest.swift  # Per-snapshot manifest + SnapshotCatalog (which snapshot is good)
+│   ├── GitSafety.swift         # git bundle of unpublished commits per repository
+│   ├── DatabaseDumps.swift     # SQLite online backup + pg_dump
+│   ├── CoverageAuditor.swift   # Active folders/databases not backed up (no noise)
+│   ├── SelectiveRestore.swift  # Topics, file versions, preview, atomic apply, per-file undo
+│   ├── NewMacRestore.swift     # Checklist, config, repos, databases, Homebrew, LaunchAgents
+│   ├── ProtectionSummary.swift # "Protetto · ultimo completo …" for the menu
+│   ├── RetentionManager.swift  # Pruning; protects the 3 newest complete snapshots
 │   ├── SnapshotCleanup.swift   # Manual cleanup: preview, confirm, measure freed space
-│   └── StatusWriter.swift      # Writes status.json + errors.json to disk
+│   ├── FileScanner.swift       # Traversal; realpath-based relative paths
+│   ├── HardLinker.swift        # Hard-link decision and copyfile (never COPYFILE_CLONE)
+│   ├── RestoreEngine.swift     # Legacy whole-path restore + undo
+│   ├── DestinationLock.swift   # Backup, restore and cleanup never overlap
+│   └── Shell.swift             # Process runner with timeout and non-blocking drain
 ├── UI/
-│   ├── PopoverView.swift       # SwiftUI popover (4-zone layout, 320 px)
-│   ├── BackupTreeView.swift    # Collapsible tree with tri-state checkboxes
-│   └── AppUIState.swift        # @Observable state shared between AppDelegate + SwiftUI
+│   ├── PopoverView.swift       # SwiftUI popover (3.1 look)
+│   ├── PopoverViewController.swift # NSHostingController: the popover follows the content size
+│   ├── RestoreCenter.swift     # Ripristina window: Argomento / File / Nuovo Mac
+│   ├── TreeView.swift          # Folder picker with tri-state checkboxes
+│   └── AppUIState.swift        # Observable state shared between AppDelegate + SwiftUI
 ├── Config/
-│   ├── Config.swift            # TOML config model + parser
+│   ├── ConfigManager.swift     # TOML config ([source], [databases], [coverage], [topics], …)
 │   ├── ConfigDiscovery.swift   # Auto-discovery of dev tool paths
-│   └── ScheduleManager.swift  # LaunchAgent bootstrap/bootout
+│   └── ScheduleManager.swift   # LaunchAgent bootstrap/bootout
 ├── CLI/
-│   ├── CLIHandler.swift        # All CLI subcommands
-│   └── PruneOptions.swift      # `prune --older-than 1m|6m|1y [--yes]` parsing
+│   ├── CLIHandler.swift        # Subcommands
+│   ├── CLIRestore.swift        # 3.0 restore/coverage commands
+│   ├── CLIRender.swift         # render-menu (debug)
+│   └── CLIMeasure.swift        # measure-menu (debug)
 └── Diagnostics/
     └── ErrorReporter.swift     # Error taxonomy, localised titles, suggested actions
 ```
 
 **Key design decisions:**
 
-- **No Full Disk Access** — whitelist model means we never need it
+- **No Full Disk Access** — whitelist model, kept honest by the coverage audit
+- **A snapshot is good only if its manifest says so** — never "the newest folder"
 - **Hard links for deduplication** — same as Time Machine, but transparent
 - **`copyfile()` not `COPYFILE_CLONE`** — APFS cloning is dangerous cross-volume (see above)
 - **Lock file with PID + timestamp + UUID** — stale lock detection survives crashes
 - **`mountedVolumeURLs()` not `statfs()`** — `statfs()` returns success on ejected volumes
-- **`launchctl bootstrap/bootout`** — not the deprecated `load/unload`
-- **No SPM / no Xcode** — single `swiftc` invocation, easy to audit, no dependency graph
+- **No SPM / no Xcode project** — single `swiftc` invocation, easy to audit
 
 ---
 
 ## Building & Testing
 
 ```bash
-# Build only
-./build.sh
-
-# Run unit tests (55 tests)
-./run-tests.sh
-
-# Build distributable .pkg + .app.zip
-./build-pkg.sh
-
-# Build specific version
-VERSION=2.6.0 ./build-pkg.sh
+./build.sh                      # build (finds Xcode automatically)
+./run-tests.sh                  # 96 tests, including real engine runs in a sandbox
+./build-pkg.sh                  # distributable .pkg + .app.zip
+VERSION=3.1.3 ./build-pkg.sh    # specific version
+build/RustyMacBackup.app/Contents/MacOS/RustyMacBackup measure-menu   # real popover fits?
 ```
 
-Tests cover: `ExcludeFilter`, `RetentionManager`, `Config` parsing + round-trip, `BackupEngine` snapshot naming, `HardLinker` mtime logic, legacy config migration, manual snapshot cleanup (preview, lock, latest-backup protection, hard-link safety) and mandatory cache exclusions.
+Tests cover the engine end to end in a sandbox (no file dropped, incomplete snapshots, git
+bundles applied to a fresh clone, SQLite/WAL copies, coverage noise), retention protection,
+selective restore and per-file undo, a whole *Nuovo Mac* rebuild, the folder picker, config
+round-trips and the pre-3.0 suites. Releases: push a `v*` tag; the workflow runs the tests
+and publishes the `.pkg` and `.app.zip`.
 
 ---
 
