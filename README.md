@@ -158,7 +158,10 @@ rustyback list
 | `restore-topic <name> [--snapshot S] [--yes]` | Restore a topic (preview without `--yes`) |
 | `restore-file <file> [--snapshot S] [--to <dir>] [--yes]` | Restore one file or folder (preview without `--yes`) |
 | `undo [dir] [--file <file>]` | Undo the last restore, or one file of it |
-| `new-mac [--steps …] [--agents …] [--yes]` | Guided restore of a new Mac (preview without `--yes`) |
+| `new-mac` | New Mac: checks, then the phases in order with what is done |
+| `new-mac --stage <id>[,id] [--yes]` | Run one phase (preview without `--yes`) |
+| `new-mac --stage servizi --agents <label> --yes` | Turn on one service, watched; moved aside if it fails |
+| `new-mac --undo <id>` / `--undo servizio:<label>` | Undo a phase / turn a service off |
 | `prune [--dry-run \| --yes]` | Preview retention-policy cleanup; `--yes` deletes |
 | `prune --older-than 1m\|6m\|1y [--dry-run \| --yes]` | Preview/delete snapshots older than 1 month, 6 months or 1 year |
 | `restore <snapshot> [path] --to <dest>` | Legacy whole-path restore |
@@ -520,7 +523,8 @@ Sources/
 │   ├── DatabaseDumps.swift     # SQLite online backup + pg_dump
 │   ├── CoverageAuditor.swift   # Active folders/databases not backed up (no noise)
 │   ├── SelectiveRestore.swift  # Topics, file versions, preview, atomic apply, per-file undo
-│   ├── NewMacRestore.swift     # Checklist, config, repos, databases, Homebrew, LaunchAgents
+│   ├── NewMacRestore.swift     # Checklist, repos, databases, Homebrew, LaunchAgents
+│   ├── NewMacStages.swift      # "Nuovo Mac" a tappe: phases, progress, undo, shell/service checks
 │   ├── ProtectionSummary.swift # "Protetto · ultimo completo …" for the menu
 │   ├── RetentionManager.swift  # Pruning; protects the 3 newest complete snapshots
 │   ├── SnapshotCleanup.swift   # Manual cleanup: preview, confirm, measure freed space
@@ -564,9 +568,9 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 101 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 107 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
-VERSION=3.2.0 ./build-pkg.sh    # specific version
+VERSION=3.3.0 ./build-pkg.sh    # specific version
 build/RustyMacBackup.app/Contents/MacOS/RustyMacBackup measure-menu   # real popover fits?
 ```
 
@@ -630,6 +634,18 @@ The app updates itself, Sparkle-style, with no admin password and nothing to cli
 Releasing: push a `v*` tag. The workflow runs the tests, builds, signs both archives (it
 fails if the secret does not match the public key in the app), writes `SHA256SUMS.txt` and
 takes the release notes from the version's `CHANGELOG.md` section (it fails if there is none).
+
+
+### New Mac, one phase at a time
+
+*Ripristina… → Nuovo Mac* (or `RustyMacBackup new-mac`) lists the phases in the safe order:
+documents → repositories → databases → one per tool → other configurations → shell →
+Homebrew → services. Run one, check the Mac, go on; every phase only adds files and can be
+undone alone. Nothing that starts at login is ever restored as a plain file: services
+(LaunchAgents) are all off, each has its own switch, and one that fails right after
+starting is stopped and moved to `~/RustyMacBackup-copie-parziali/LaunchAgents/`. After the
+shell and the services phases, restart the Mac before going on: if something is wrong, you
+know which phase it was.
 
 ---
 

@@ -10,7 +10,7 @@ Native macOS backup app (Swift, AppKit/SwiftUI). Single `.app` binary that acts 
 
 ```bash
 ./build.sh              # compile + sign → build/RustyMacBackup.app
-./run-tests.sh          # 101 tests → build/RustyMacBackupTests
+./run-tests.sh          # 107 tests → build/RustyMacBackupTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -78,6 +78,12 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   .preferredContentSize`). Never wrap it in another view controller: NSPopover then stays at
   320×320 and clips. Check layout changes with `RustyMacBackup measure-menu` (real popover),
   not only `render-menu` (content only).
+- **Nothing that starts at login is restored by a file restore** (scar 2026-10-06):
+  `NewMacRestore.isLoginSensitive` (LaunchAgents/Daemons, login items, `com.apple.*` and
+  ByHost prefs) is filtered out of every phase, every topic and the legacy `.config` step.
+  Services come back only one at a time, off by default, watched after starting
+  (`installAndWatch`), moved aside if they fail. The shell phase undoes itself if a login
+  shell no longer starts (`shellProblem`).
 - **Updates install only if signed by the release key** (`UpdateSignature.publicKeyBase64`;
   private key = GitHub secret `UPDATE_SIGNING_KEY`, backup in the maintainer's Keychain as
   "RustyMacBackup update signing key (Ed25519)"). Rotating the key means shipping the new
@@ -134,6 +140,6 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (101 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh` (107 tests). No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.

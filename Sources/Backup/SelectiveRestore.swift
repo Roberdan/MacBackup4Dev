@@ -23,7 +23,6 @@ enum Topics {
         "Git e SSH": [".gitconfig", ".gitconfig-*", ".config/git", ".ssh/config", ".ssh/known_hosts",
                       ".config/gh"],
         "Editor": [".config/zed", "Library/Application Support/Code/User", ".vscode"],
-        "Servizi automatici": ["Library/LaunchAgents"],
         "Font": ["Library/Fonts"],
         "Python e strumenti": [".venvs", ".config/uv", ".cargo/config.toml", ".npmrc"],
         "RustyMacBackup": [".config/rusty-mac-backup"],
@@ -45,12 +44,15 @@ enum Topics {
         return p
     }
 
-    /// The snapshot-relative files a topic covers inside one snapshot.
+    /// The snapshot-relative files a topic covers inside one snapshot. Never anything that
+    /// starts at login (LaunchAgents, login items, system preferences of the old Mac): those
+    /// come back only through "Nuovo Mac" → Servizi automatici, one explicit toggle each.
     static func files(of topic: RestoreTopic, in snapshot: URL) -> [String] {
         var out: [String] = []
         for pattern in topic.paths {
             for root in expand(pattern, in: snapshot) {
-                out.append(contentsOf: SelectiveRestore.filesBelow(root, in: snapshot))
+                out.append(contentsOf: SelectiveRestore.filesBelow(root, in: snapshot)
+                    .filter { !NewMacRestore.isLoginSensitive($0) })
             }
         }
         return Array(Set(out)).sorted()

@@ -75,10 +75,16 @@ enum NewMacRestore {
 
         let appsFile = snapshot.appendingPathComponent("_environment/installed-apps.txt").path
         if let apps = try? String(contentsOfFile: appsFile, encoding: .utf8) {
+            // Apps are often grouped in folders (/Applications/Dev, /Applications/AI): look one level down too.
+            var roots = ["/Applications", home + "/Applications", "/System/Applications"]
+            for base in ["/Applications", home + "/Applications"] {
+                for sub in (try? fm.contentsOfDirectory(atPath: base)) ?? [] where !sub.hasSuffix(".app") && !sub.hasPrefix(".") {
+                    var isDir: ObjCBool = false
+                    if fm.fileExists(atPath: base + "/" + sub, isDirectory: &isDir), isDir.boolValue { roots.append(base + "/" + sub) }
+                }
+            }
             let missing = apps.split(separator: "\n").map(String.init).filter { name in
-                !name.isEmpty && !fm.fileExists(atPath: "/Applications/\(name).app")
-                    && !fm.fileExists(atPath: home + "/Applications/\(name).app")
-                    && !fm.fileExists(atPath: "/System/Applications/\(name).app")
+                !name.isEmpty && !roots.contains { fm.fileExists(atPath: "\($0)/\(name).app") }
             }
             items.append(CheckItem(title: "App del vecchio Mac", ok: missing.isEmpty,
                                    hint: missing.isEmpty ? "tutte presenti" : "Mancano: " + missing.joined(separator: ", ")))
@@ -107,7 +113,8 @@ enum NewMacRestore {
                 repoPaths.contains { rel == $0 || rel.hasPrefix($0 + "/") }
             }
             let onlyNew = RestorePlan(snapshot: snapshot, destinationRoot: home,
-                                      items: plan.items.filter { $0.action == .create && !insideRepo($0.relativePath) })
+                                      items: plan.items.filter { $0.action == .create && !insideRepo($0.relativePath)
+                                          && !isLoginSensitive($0.relativePath) })
             report.log("  \(onlyNew.items.count) file da aggiungere, \(plan.toReplace) già presenti e diversi (lasciati come sono)", sink)
             if !dryRun, !onlyNew.items.isEmpty {
                 do {

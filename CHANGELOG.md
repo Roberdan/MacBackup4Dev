@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.3.0] - 2026-10-07
+
+### Added
+- **"Nuovo Mac" a tappe.** The restore of a whole Mac is split into small phases run one at a
+  time, in a safe order: documents, repositories, databases, one phase per tool (Warp, Claude
+  Code, Copilot, Git e SSH, …), other configurations, shell, Homebrew, services. Each phase
+  has a preview, is recorded, and can be undone on its own (`new-mac --undo <id>`). The
+  window marks the next phase and suggests a restart after the shell and the services.
+- **The shell phase checks itself:** after restoring, a fresh login shell must start and
+  finish within 20 s; if it hangs or dies the phase undoes itself.
+- **Services (LaunchAgents) are off by default, one toggle each.** Turning one on starts it,
+  watches it for a few seconds and, if it exits with an error or crashes, stops it and moves
+  its file aside (never deleted). *Spegni* turns it off the same way.
+
+### Fixed
+- **Nothing that starts at login is copied by a file restore any more**: LaunchAgents,
+  LaunchDaemons, login items, the old Mac's `com.apple.*` and per-host (`ByHost`)
+  preferences. Before, *Configurazioni e file* and the *Servizi automatici* topic copied every
+  LaunchAgent at once, and all of them started at the next login (scar 2026-10-06: after the
+  reboot the Mac did not get back to a usable login). The *Servizi automatici* topic is gone.
+- *App del vecchio Mac* now finds apps kept in folders (`/Applications/Dev`, `/Applications/AI`).
+
 ## [3.2.0] - 2026-10-07
 
 ### Added
