@@ -61,6 +61,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.onRequestBackup = { [weak self] in self?.handleRequestBackup() }
         uiState.onRequestRestore = { [weak self] in self?.handleOpenRestoreCenter() }
         uiState.onRequestAdvancedRestore = { [weak self] in self?.handleRequestRestore() }
+        uiState.onRequestChooseSources = { [weak self] in self?.handleChooseSources() }
         uiState.onAddCoverage = { [weak self] gap in self?.handleCoverage(gap, ignore: false) }
         uiState.onIgnoreCoverage = { [weak self] gap in self?.handleCoverage(gap, ignore: true) }
         uiState.onRequestStop = { [weak self] in self?.handleStop() }
@@ -311,7 +312,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    /// "Esegui ora": back up what is configured, now. Choosing folders is a separate action
+    /// (the picker used to stand in front of every backup and rewrite the source list).
     private func handleRequestBackup() {
+        guard !uiState.isCleaning, let config = config else { return }
+        popover.performClose(nil)
+        startBackup(selectedPaths: config.source.paths,
+                    includeRightsManagedFiles: config.protection.includeRightsManagedFiles)
+    }
+
+    private func handleChooseSources() {
         guard !uiState.isCleaning else { return }
         guard let config = config else { return }
         popover.performClose(nil)
@@ -416,6 +426,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         }
                     }
                     self.pollStatus(forceProtection: true)
+                }
+            } catch BackupError.lockExists {
+                // Another backup (the nightly one, or a second click) is already running:
+                // that is not a failure, show the running one (seen 2026-10-07).
+                await MainActor.run {
+                    Log.info("Backup request ignored: another backup is already running")
+                    self.sendNotification(title: "C'è già un backup in corso",
+                                          body: "Ti avviso quando finisce.")
+                    self.pollStatus()
                 }
             } catch {
                 await MainActor.run {

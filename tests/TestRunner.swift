@@ -28,6 +28,8 @@ struct TestRunner {
         let review = ReviewFixTests()
         let review2 = ReviewRound2Tests()
         let realRun = RealRunTests()
+        let coverageNoise = CoverageNoiseTests()
+        let picker = PickerTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -59,6 +61,9 @@ struct TestRunner {
             ("Review.R3.bundleHardLinked", review2.test_unchangedBundleIsHardLinked),
             ("RealRun.objectlessGit", realRun.test_objectlessGitIsAWarning),
             ("RealRun.walDatabase", realRun.test_walDatabaseIsCopied),
+            ("Coverage.noNoise", coverageNoise.test_noSecretsParkedCopiesOrToolDatabases),
+            ("Picker.configuredFoldersSurvive", picker.test_configuredFoldersSurviveThePicker),
+            ("Picker.selectAllSkipsCredentials", picker.test_selectAllSkipsCredentials),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

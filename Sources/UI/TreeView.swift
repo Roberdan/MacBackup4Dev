@@ -65,9 +65,22 @@ final class TreeSelectionModel: ObservableObject {
                 if shouldCheck { item.paths.forEach { initialChecked.insert($0) } }
             }
 
+            // Every configured folder must appear, even when discovery does not know it
+            // (~/Obsidian, ~/actions-runners, a path added from the coverage audit): a source
+            // the tree cannot show used to vanish from the config on confirm (2026-10-07).
+            let shown = Set(discovered.flatMap(\.paths))
+            let unknown = enabledPaths.filter { !shown.contains($0) }.sorted()
+            if !unknown.isEmpty {
+                catOrder.insert("Le tue cartelle", at: 0)
+                catMap["Le tue cartelle"] = unknown.map { path in
+                    ItemInfo(paths: [path], label: path, sensitive: false, isConflict: false)
+                }
+                unknown.forEach { initialChecked.insert($0) }
+            }
+
             categories = catOrder.map { CategoryInfo(name: $0, items: catMap[$0]!) }
             checkedPaths = initialChecked
-            expandedCategories = []       // collapsed by default
+            expandedCategories = unknown.isEmpty ? [] : ["Le tue cartelle"]
             hasBrewfile = false
 
         case .restore(let snapshotURL):
@@ -204,7 +217,8 @@ final class TreeSelectionModel: ObservableObject {
         return true
     }
 
-    func selectAll()    { categories.flatMap(\.items).flatMap(\.paths).forEach { checkedPaths.insert($0) } }
+    /// "Tutti" never includes items that hold credentials: those are chosen one by one.
+    func selectAll()    { categories.flatMap(\.items).filter { !$0.sensitive }.flatMap(\.paths).forEach { checkedPaths.insert($0) } }
     func selectNone()   { checkedPaths.removeAll() }
     func selectNewOnly() {
         checkedPaths.removeAll()

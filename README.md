@@ -340,39 +340,48 @@ ignore = ["~/Scratch"]          # never report this folder as "not backed up"
 
 ## Menu Bar App
 
-Launch the app (no arguments) to get the menu-bar popover:
+Launch the app (no arguments) to get the menu-bar popover. The first line answers one
+question: **am I protected, and since when?** It counts only complete snapshots.
 
 ```
-┌─────────────────────────────────────┐
-│ ● RustyMacBackup          [RUNNING] │
-├─────────────────────────────────────┤
-│ Backup in progress…                 │
-│ SanDisk: 142 GB free                │
-│ ████████████░░░░ 67%  8.2 MB/s      │
-│ ETA: 2 min  ·  ~/GitHub/MyProject   │
-├─────────────────────────────────────┤
-│ [    Stop Backup    ]               │  ← red filled button
-│ Ripristina snapshot…                │
-│ Pianificazione: ogni ora            │
-│ Libera spazio…                      │
-│ ─────────────────────────────────── │
-│ Apri cartella backup                │
-│ Espelli disco                       │
-├─────────────────────────────────────┤
-│ Esci                                │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│ ● Backup          RoberdanBCK · 1,4 TB   │
+├──────────────────────────────────────────┤
+│ Protetto · ultimo completo 2 ore fa      │  ← green / orange / red
+│ oggi 07:42 · 171.604 file · 0 errori     │
+│ [6 repo con commit salvati] [3 database] │
+│                                          │
+│ Una cartella non viene salvata  [Ignora] │  ← coverage audit
+│ ~/Projects/new-app        [ Aggiungi ]   │
+│                                          │
+│ Ultimi 14 giorni ▮▮▮▮▮▮▮▮▮▮▮▮▮▮           │
+├──────────────────────────────────────────┤
+│ [ Esegui ora ]      [ Ripristina… ]      │
+├──────────────────────────────────────────┤
+│ Annulla l'ultimo ripristino              │
+│ Scegli cosa salvare…                     │
+│ Pianificazione: mezzanotte               │
+│ Libera spazio…                           │
+│ Apri cartella dei backup                 │
+│ Espelli disco                            │
+│ Esci                                     │
+└──────────────────────────────────────────┘
 ```
 
-**Status dot colours:**
-- 🟢 Green — idle, last backup succeeded
-- 🟡 Gold — backup running
-- 🟠 Orange — stopping or backup overdue (>24 h)
-- 🔵 Blue — restore in progress
-- 🔴 Red — last backup failed / disk absent
+- **Esegui ora** backs up what is configured, immediately.
+- **Scegli cosa salvare…** opens the folder picker. Every configured folder is listed (also
+  the ones added by hand or from the coverage audit, under *Le tue cartelle*); **Tutti** never
+  selects items that hold credentials (SSH keys, tokens): those are chosen one by one.
+- **Ripristina…** opens the restore window: *Argomento*, *File* (every version), *Nuovo Mac*.
+- Problems appear with the button that fixes them: *Riprova* for an incomplete backup,
+  *Aggiungi* / *Ignora* for a folder or database that is not backed up. The audit never
+  suggests credentials, parked folders (`_name`), caches or a tool's own databases.
+- Notifications say *Backup completo* or *Backup incompleto* with the reason, also for
+  scheduled runs. Starting a backup while one is running shows the running one.
 
-**Libera spazio…** opens a small menu (older than 1 month / 6 months / 1 year), shows a preview with destination, cutoff date and number of backups, and deletes only after explicit confirmation. The result reports the space actually freed on the disk. See [Freeing backup disk space](#freeing-backup-disk-space).
-
-**After a failed backup**, an error card appears with a localised description, suggested fix, and a direct "Show Log" link to Console.app.
+**Libera spazio…** opens a small menu (older than 1 month / 6 months / 1 year), shows a preview
+and deletes only after explicit confirmation; the 3 newest complete snapshots are never
+deleted. See [Freeing backup disk space](#freeing-backup-disk-space).
 
 ---
 

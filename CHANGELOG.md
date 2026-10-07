@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.0.1] - 2026-10-07
+
+Found on the first morning of real use.
+
+### Fixed
+- **The folder picker silently rewrote the source list.** It showed only the folders discovery
+  knows, so confirming it dropped every other configured folder (the Obsidian vault, the CI
+  runners, folders added from the coverage audit). Every configured folder is now listed
+  under *Le tue cartelle*.
+- **"Tutti" selected credentials** (the SSH private key, `.npmrc`, Azure sessions, the GitHub
+  CLI token) into a backup on a disk the app itself reports as unencrypted. Items marked
+  sensitive are now only ever chosen one by one.
+- **"Esegui ora" no longer goes through the picker**: it backs up the current configuration.
+  Choosing folders is the separate *Scegli cosa salvare…*.
+- Starting a backup while another one runs (the nightly run, a second click) is no longer
+  reported as a failure: the menu shows the running backup.
+- The coverage audit suggested credentials (`~/.azure`), parked copies (`_name`),
+  browser-profile and tool-internal databases (`~/.codex`, Atuin, Playwright profiles). It
+  now suggests only folders and project databases worth backing up.
+- Engine error messages are in Italian.
+
 ## [3.0.0] - 2026-10-06
 
 Rewritten after a real reinstall on 2026-10-06, where restoring a Mac from these backups

@@ -31,15 +31,15 @@ enum BackupError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .sourceNotFound(let p):    return "Source not found: \(p)"
-        case .volumeNotMounted(let p):  return "Volume not mounted at: \(p)"
-        case .notWritable(let p):       return "Destination not writable: \(p)"
-        case .insufficientSpace(let b): return "Insufficient disk space: \(b / 1_048_576) MB free"
-        case .diskDisconnected:         return "Destination disk disconnected during backup"
-        case .lockExists:               return "Another backup is already running (lock file exists)"
-        case .cancelled:                return "Backup was cancelled"
-        case .forbiddenPath(let p):     return "Forbidden path (system/TCC protected): \(p)"
-        case .sourceFilesVanishing:     return "EMERGENCY STOP: source files are disappearing (possible iCloud eviction). Backup halted to protect your data."
+        case .sourceNotFound(let p):    return "Cartella da salvare non trovata: \(p)"
+        case .volumeNotMounted(let p):  return "Disco di backup non collegato: \(p)"
+        case .notWritable(let p):       return "Non posso scrivere sul disco di backup: \(p)"
+        case .insufficientSpace(let b): return "Spazio insufficiente sul disco di backup: \(b / 1_048_576) MB liberi"
+        case .diskDisconnected:         return "Il disco di backup si è scollegato durante il backup"
+        case .lockExists:               return "C'è già un backup in corso"
+        case .cancelled:                return "Backup annullato"
+        case .forbiddenPath(let p):     return "Cartella protetta dal sistema, non salvabile: \(p)"
+        case .sourceFilesVanishing:     return "Backup fermato: i file stanno sparendo mentre li copio (probabile iCloud che libera spazio). Mi sono fermato per proteggere i tuoi dati."
         }
     }
 }

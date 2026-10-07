@@ -10,7 +10,7 @@ Native macOS backup app (Swift, AppKit/SwiftUI). Single `.app` binary that acts 
 
 ```bash
 ./build.sh              # compile + sign → build/RustyMacBackup.app
-./run-tests.sh          # 79 tests → build/RustyMacBackupTests
+./run-tests.sh          # 96 tests → build/RustyMacBackupTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -71,6 +71,11 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   created files.** Tests must pass a temp `undoRoot`/`home`: never write into the real home.
 - Tests run the real engine with `BackupRunOptions(home:)` and `StatusWriter(directory:)`
   pointed at a sandbox: never the user's status file.
+- **The picker must never drop a configured source** (scar 2026-10-07): every
+  `enabledPaths` entry discovery does not know is listed under "Le tue cartelle". "Tutti"
+  never selects `sensitive` items. "Esegui ora" never opens the picker.
+- **The coverage audit never suggests credentials, `_parked` folders, caches/profiles or
+  databases inside a tool's hidden folder** (`CoverageAuditor.isNoise`).
 
 ## Known Critical Issues (from 2026-03-20 audit)
 
@@ -119,6 +124,6 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (79 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh` (96 tests). No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.
