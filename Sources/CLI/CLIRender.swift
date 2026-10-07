@@ -16,13 +16,13 @@ extension CLIHandler {
                               looksLikeNewMac: false,
                               days: [.none, .none, .none, .complete, .complete, .none, .complete, .none,
                                      .complete, .none, .complete, .incomplete, .complete, .complete],
-                              reposWithSavedCommits: 6, databasesSaved: 3)
+                              reposWithSavedCommits: 6, databasesSaved: 3, filesInLastComplete: 171_604)
         }
         let cfg = try? Config.load(from: Config.defaultPath)
         let states: [(String, (AppUIState) -> Void)] = [
             ("protetto", { s in
                 s.appState = .idle
-                s.protection = summary(.protected, "Protetto · ultimo completo 2 ore fa", "oggi 07:42 · 171604 file · 0 errori")
+                s.protection = summary(.protected, "Protetto · ultimo completo 2 ore fa", "oggi 07:42 · 0 errori")
             }),
             ("in-corso", { s in
                 s.appState = .running
@@ -49,7 +49,6 @@ extension CLIHandler {
             state.onRequestScheduleMenu = {}
             apply(state)
             let view = PopoverView().environmentObject(state)
-                .background(Color(nsColor: .windowBackgroundColor))
             let renderer = ImageRenderer(content: view)
             renderer.scale = 2
             guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,

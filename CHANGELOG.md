@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.1.0] - 2026-10-07
+
+### Changed
+- **New look for the menu popover**: a deep dark panel lit by the state colour, one large
+  ring that answers "am I protected?" (a full green shield; the live percentage while a
+  backup runs; orange or red when something needs attention), stat pills (files, repos with
+  saved commits, databases), a glowing 14-day strip, a gradient primary button and tiles
+  with coloured icons for the other actions.
+- Numbers use thousands separators; the file count is no longer repeated.
+- `.DS_Store` files are no longer tracked in the repository.
+
 ## [3.0.2] - 2026-10-07
 
 ### Fixed

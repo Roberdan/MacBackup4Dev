@@ -9,7 +9,7 @@ if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Develope
 fi
 
 APP_NAME="RustyMacBackup"
-VERSION="${VERSION:-3.0.2}"
+VERSION="${VERSION:-3.1.0}"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 BINARY="$BUILD_DIR/$APP_NAME"

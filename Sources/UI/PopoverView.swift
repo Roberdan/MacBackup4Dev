@@ -1,6 +1,25 @@
 import SwiftUI
 
-/// SwiftUI content of the menu bar popover (3.0).
+// MARK: - Look (3.1): a dark, deep panel lit by the state colour, one big ring that answers
+// "am I protected?", glass cards, a gradient primary action and tiles for the rest.
+
+private enum Look {
+    static let backgroundTop = Color(red: 0.09, green: 0.10, blue: 0.19)
+    static let backgroundBottom = Color(red: 0.13, green: 0.09, blue: 0.22)
+    static let glass = Color.white.opacity(0.07)
+    static let glassStroke = Color.white.opacity(0.10)
+    static let text = Color.white
+    static let secondaryText = Color.white.opacity(0.62)
+    static let tertiaryText = Color.white.opacity(0.40)
+    static let green = Color(red: 0.20, green: 0.84, blue: 0.52)
+    static let gold = Color(red: 1.00, green: 0.76, blue: 0.20)
+    static let orange = Color(red: 1.00, green: 0.56, blue: 0.22)
+    static let red = Color(red: 1.00, green: 0.33, blue: 0.36)
+    static let blue = Color(red: 0.38, green: 0.62, blue: 1.00)
+    static let violet = Color(red: 0.62, green: 0.48, blue: 1.00)
+}
+
+/// SwiftUI content of the menu bar popover.
 /// First line answers "am I protected, and since when?" counting only COMPLETE snapshots;
 /// then the problems, each with the button that fixes it; then the actions.
 /// Observes AppUIState via @EnvironmentObject; all actions go through state callbacks.
@@ -10,40 +29,41 @@ struct PopoverView: View {
     @State private var showAllIssues = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 16) {
             headerSection
             updateBanner
-            VStack(alignment: .leading, spacing: 14) {
-                if state.appState == .needsSetup {
-                    diskSetupSection
-                } else {
-                    heroCard
-                    if state.isRunning, let s = state.status { progressSection(status: s) }
-                    if let phase = state.cleanupPhase { cleanupRow(phase) }
-                    if state.appState == .error { errorCard }
-                    if let result = state.restoreResult { restoreResultCard(result) }
-                    issuesList
-                    if let p = state.protection, state.appState != .diskAbsent { timeline(p) }
-                }
+            if state.appState == .needsSetup {
+                diskSetupSection
+            } else {
+                heroCard
+                if let phase = state.cleanupPhase { cleanupRow(phase) }
+                if state.appState == .error { errorCard }
+                if let result = state.restoreResult { restoreResultCard(result) }
+                issuesList
+                if let p = state.protection, state.appState != .diskAbsent { timeline(p) }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 6)
-            .padding(.bottom, 14)
-            Divider()
-            primaryActions
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .disabled(state.isCleaning)
-            Divider()
-            secondaryActions
-                .disabled(state.isCleaning)
-                .padding(.vertical, 6)
+            primaryActions.disabled(state.isCleaning)
+            tiles.disabled(state.isCleaning)
+            footer
         }
-        .frame(width: 360)
+        .padding(18)
+        .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
+        .background(background)
+        .environment(\.colorScheme, .dark)
         .onAppear { if state.appState == .needsSetup { refreshVolumes() } }
         .onChange(of: state.appState) { _, newState in
             if newState == .needsSetup { refreshVolumes() }
+        }
+    }
+
+    private var background: some View {
+        ZStack {
+            LinearGradient(colors: [Look.backgroundTop, Look.backgroundBottom], startPoint: .top, endPoint: .bottom)
+            RadialGradient(colors: [levelColor.opacity(0.35), .clear], center: .topLeading,
+                           startRadius: 10, endRadius: 320)
+            RadialGradient(colors: [Look.violet.opacity(0.18), .clear], center: .bottomTrailing,
+                           startRadius: 10, endRadius: 300)
         }
     }
 
@@ -54,32 +74,41 @@ struct PopoverView: View {
     }
 
     private var headerSection: some View {
-        HStack(spacing: 8) {
-            Circle().fill(levelColor).frame(width: 9, height: 9)
-                .accessibilityLabel("Stato: \(heroHeadline)")
-            Text("Backup").font(.headline)
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(LinearGradient(colors: [Look.violet, Look.blue], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 30, height: 30)
+                Image(systemName: "externaldrive.fill.badge.timemachine")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Text("RustyMacBackup").font(.system(size: 14, weight: .semibold)).foregroundColor(Look.text)
+                Text("v\(appVersion)").font(.system(size: 10)).foregroundColor(Look.tertiaryText)
+            }
             Spacer()
-            if let c = state.config { diskLabel(c) }
-            Text("v\(appVersion)").font(.caption2).foregroundColor(.secondary)
+            if let c = state.config { diskPill(c) }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 8)
     }
 
     @ViewBuilder
-    private func diskLabel(_ config: Config) -> some View {
+    private func diskPill(_ config: Config) -> some View {
         let (free, total) = DiskDiagnostics.diskSpace(at: config.destination.path)
         let vol = URL(fileURLWithPath: config.destination.path).deletingLastPathComponent().lastPathComponent
-        if total > 0 {
-            Text("\(vol) · \(Fmt.formatBytes(free)) liberi")
-                .font(.caption).foregroundColor(diskSpaceColor(free: free))
-        } else {
-            Text("\(vol) non collegato").font(.caption).foregroundColor(.mlRosso)
+        HStack(spacing: 5) {
+            Image(systemName: total > 0 ? "externaldrive.fill" : "externaldrive.badge.xmark")
+                .font(.system(size: 10))
+            Text(total > 0 ? "\(vol) · \(Fmt.formatBytes(free))" : "\(vol) assente")
+                .font(.system(size: 11, weight: .medium))
         }
+        .foregroundColor(total > 0 ? (free < 10 * 1_073_741_824 ? Look.orange : Look.secondaryText) : Look.red)
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(Capsule().fill(Look.glass))
+        .overlay(Capsule().stroke(Look.glassStroke, lineWidth: 1))
     }
 
-    // MARK: - Hero
+    // MARK: - Hero: one ring, one sentence
 
     private var heroLevel: ProtectionSummary.Level {
         switch state.appState {
@@ -89,21 +118,20 @@ struct PopoverView: View {
     }
 
     private var levelColor: Color {
-        if state.appState == .running || state.appState == .restoring { return .mlGold }
+        if state.appState == .running || state.appState == .restoring || state.appState == .stopping { return Look.gold }
         switch heroLevel {
-        case .protected: return .mlVerde
-        case .attention: return .orange
-        case .unprotected: return .mlRosso
+        case .protected: return Look.green
+        case .attention: return Look.orange
+        case .unprotected: return Look.red
         }
     }
 
     private var heroHeadline: String {
         switch state.appState {
-        case .running: return "Backup in corso…"
+        case .running: return "Backup in corso"
         case .stopping: return "Interrompo il backup…"
-        case .restoring: return "Ripristino in corso…"
-        case .diskAbsent:
-            return "Disco di backup non collegato" + (state.protection?.lastCompleteDate.map { " · ultimo completo \(ProtectionSummary.ago(Date().timeIntervalSince($0)))" } ?? "")
+        case .restoring: return "Ripristino in corso"
+        case .diskAbsent: return "Disco di backup non collegato"
         case .error: return "L'ultimo backup non è riuscito"
         default: return state.protection?.headline ?? "Nessun backup"
         }
@@ -111,50 +139,125 @@ struct PopoverView: View {
 
     private var heroDetail: String {
         switch state.appState {
-        case .diskAbsent: return "Collega il disco: il backup riparte da solo all'orario previsto."
-        case .error: return state.protection?.lastCompleteDate.map { "Ultimo completo: \(ProtectionSummary.dateLabel($0))" } ?? ""
-        case .running, .stopping, .restoring:
+        case .diskAbsent:
+            let last = state.protection?.lastCompleteDate.map { "Ultimo completo \(ProtectionSummary.ago(Date().timeIntervalSince($0))). " } ?? ""
+            return last + "Collegalo: riparte da solo all'orario previsto."
+        case .error, .running, .stopping, .restoring:
             return state.protection?.lastCompleteDate.map { "Ultimo completo: \(ProtectionSummary.dateLabel($0))" } ?? ""
         default:
             return state.protection?.detail ?? ""
         }
     }
 
-    private var heroCard: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(heroHeadline).font(.system(size: 15, weight: .semibold))
-                .fixedSize(horizontal: false, vertical: true)
-            if !heroDetail.isEmpty {
-                Text(heroDetail).font(.caption).foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let p = state.protection, p.level == .protected, state.appState == .idle {
-                HStack(spacing: 6) {
-                    chip(p.reposWithSavedCommits > 0 ? "\(p.reposWithSavedCommits) repo con commit salvati" : "Commit non pubblicati: nessuno", ok: true)
-                    if p.databasesSaved > 0 { chip("\(p.databasesSaved) database salvati", ok: true) }
-                }
-                .padding(.top, 4)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(levelColor.opacity(0.12))
-        .cornerRadius(10)
-        .accessibilityElement(children: .combine)
+    private var progress: Double? {
+        guard state.isRunning, let s = state.status, s.filesTotal > 0 else { return nil }
+        return min(1, Double(s.filesDone) / Double(s.filesTotal))
     }
 
-    private func chip(_ text: String, ok: Bool) -> some View {
-        Text(text).font(.caption2)
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background((ok ? Color.mlVerde : Color.orange).opacity(0.14))
-            .foregroundColor(ok ? .mlVerde : .orange)
-            .clipShape(Capsule())
+    private var ringSymbol: String {
+        switch state.appState {
+        case .running, .stopping: return "arrow.up"
+        case .restoring: return "arrow.down"
+        case .diskAbsent: return "externaldrive.badge.xmark"
+        case .error: return "xmark"
+        default:
+            switch heroLevel {
+            case .protected: return "checkmark.shield.fill"
+            case .attention: return "exclamationmark"
+            case .unprotected: return "shield.slash"
+            }
+        }
+    }
+
+    private var ring: some View {
+        let value = progress ?? (heroLevel == .protected && !state.isRunning ? 1 : 0.28)
+        return ZStack {
+            Circle().stroke(Color.white.opacity(0.08), lineWidth: 9)
+            Circle()
+                .trim(from: 0, to: value)
+                .stroke(AngularGradient(colors: [levelColor.opacity(0.55), levelColor], center: .center),
+                        style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .shadow(color: levelColor.opacity(0.6), radius: 8)
+            if let progress {
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(Look.text)
+                    .monospacedDigit()
+            } else {
+                Image(systemName: ringSymbol)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(levelColor)
+            }
+        }
+        .frame(width: 78, height: 78)
+    }
+
+    private var heroCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 16) {
+                ring
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(heroHeadline)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(Look.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !heroDetail.isEmpty {
+                        Text(heroDetail)
+                            .font(.system(size: 12))
+                            .foregroundColor(Look.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            if state.isRunning, let s = state.status {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("\(Fmt.formatFileCount(s.filesDone)) file").monospacedDigit()
+                        Spacer()
+                        if s.etaSecs > 0 { Text("ancora \(Fmt.formatDuration(Double(s.etaSecs)))") }
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(Look.secondaryText)
+                    if !s.currentFile.isEmpty {
+                        Text(s.currentFile).font(.system(size: 10)).foregroundColor(Look.tertiaryText)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                }
+            } else if let p = state.protection, p.level == .protected, state.appState == .idle {
+                HStack(spacing: 6) {
+                    if let n = p.filesInLastComplete { stat("doc.on.doc.fill", "\(Fmt.formatFileCount(UInt64(n))) file") }
+                    stat("arrow.triangle.branch", "\(p.reposWithSavedCommits) repo")
+                    stat("cylinder.split.1x2.fill", "\(p.databasesSaved) database")
+                }
+            }
+        }
+        .padding(16)
+        .background(glassCard(radius: 18))
+    }
+
+    private func stat(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 10)).foregroundColor(levelColor)
+            Text(text).font(.system(size: 11, weight: .medium)).foregroundColor(Look.text)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(Capsule().fill(Color.white.opacity(0.06)))
+    }
+
+    private func glassCard(radius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(Look.glass)
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(Look.glassStroke, lineWidth: 1))
     }
 
     // MARK: - Issues
 
     private struct Issue: Identifiable {
         let id: String
+        let icon: String
+        let tint: Color
         let title: String
         let detail: String
         let primary: (String, () -> Void)?
@@ -164,14 +267,17 @@ struct PopoverView: View {
     private var issues: [Issue] {
         var out: [Issue] = []
         if let p = state.protection, p.latestIsIncomplete, state.appState == .idle || state.appState == .stale {
-            out.append(Issue(id: "incomplete", title: "Ultimo backup incompleto",
+            out.append(Issue(id: "incomplete", icon: "exclamationmark.triangle.fill", tint: Look.orange,
+                             title: "Ultimo backup incompleto",
                              detail: p.latestReasons.prefix(2).joined(separator: " "),
                              primary: ("Riprova", { state.onRequestBackup?() }), secondary: nil))
         }
         for gap in state.coverageGaps {
             out.append(Issue(id: "gap-\(gap.path)",
-                             title: gap.kind == .database ? "Un database non viene copiato" : "Una cartella non viene salvata",
-                             detail: "\(gap.path) · cambiata \(ProtectionSummary.dateLabel(ISO8601DateFormatter().date(from: gap.lastModified) ?? Date()))",
+                             icon: gap.kind == .database ? "cylinder.split.1x2" : "folder.badge.questionmark",
+                             tint: Look.blue,
+                             title: gap.kind == .database ? "Database non copiato" : "Cartella non salvata",
+                             detail: gap.path,
                              primary: ("Aggiungi", { state.onAddCoverage?(gap) }),
                              secondary: ("Ignora", { state.onIgnoreCoverage?(gap) })))
         }
@@ -182,94 +288,99 @@ struct PopoverView: View {
     private var issuesList: some View {
         let all = issues
         if !all.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(showAllIssues ? all : Array(all.prefix(3))) { issue in
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .center, spacing: 10) {
+                        iconTile(issue.icon, issue.tint, size: 30)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(issue.title).font(.subheadline.weight(.semibold))
-                            Text(issue.detail).font(.caption).foregroundColor(.secondary)
+                            Text(issue.title).font(.system(size: 12, weight: .semibold)).foregroundColor(Look.text)
+                            Text(issue.detail).font(.system(size: 11)).foregroundColor(Look.secondaryText)
                                 .lineLimit(2).truncationMode(.middle)
                         }
                         Spacer(minLength: 4)
                         if let s = issue.secondary {
-                            Button(s.0, action: s.1).buttonStyle(.borderless).font(.caption)
+                            Button(s.0, action: s.1).buttonStyle(.plain)
+                                .font(.system(size: 11)).foregroundColor(Look.secondaryText)
                         }
                         if let p = issue.primary {
-                            Button(p.0, action: p.1).buttonStyle(.borderedProminent).tint(.mlGold)
-                                .controlSize(.small)
+                            Button(action: p.1) {
+                                Text(p.0).font(.system(size: 11, weight: .semibold)).foregroundColor(.black)
+                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .background(Capsule().fill(issue.tint))
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(10)
-                    .background(Color.primary.opacity(0.06))
-                    .cornerRadius(8)
+                    .background(glassCard(radius: 12))
                 }
                 if all.count > 3 {
                     Button(showAllIssues ? "Mostra meno" : "Altri \(all.count - 3) avvisi") { showAllIssues.toggle() }
-                        .buttonStyle(.borderless).font(.caption)
+                        .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(Look.secondaryText)
                 }
             }
         }
     }
 
+    private func iconTile(_ icon: String, _ tint: Color, size: CGFloat) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(LinearGradient(colors: [tint.opacity(0.95), tint.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            Image(systemName: icon).font(.system(size: size * 0.45, weight: .semibold)).foregroundColor(.white)
+        }
+        .frame(width: size, height: size)
+    }
+
     // MARK: - Timeline (last 14 days)
 
     private func timeline(_ p: ProtectionSummary) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Ultimi 14 giorni").font(.caption2).foregroundColor(.secondary)
-            HStack(spacing: 3) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Ultimi 14 giorni").font(.system(size: 11, weight: .medium)).foregroundColor(Look.secondaryText)
+                Spacer()
+                Text("\(p.days.filter { $0 == .complete }.count)/14").font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Look.tertiaryText).monospacedDigit()
+            }
+            HStack(spacing: 4) {
                 ForEach(Array(p.days.enumerated()), id: \.offset) { _, day in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(day == .complete ? Color.mlVerde : day == .incomplete ? Color.orange : Color.secondary.opacity(0.18))
-                        .frame(height: 14)
+                    Capsule()
+                        .fill(day == .complete ? Look.green : day == .incomplete ? Look.orange : Color.white.opacity(0.08))
+                        .frame(height: 18)
+                        .shadow(color: day == .complete ? Look.green.opacity(0.45) : .clear, radius: 4)
                 }
             }
             .accessibilityLabel("\(p.days.filter { $0 == .complete }.count) giorni con un backup completo su 14")
         }
     }
 
-    // MARK: - Progress, cleanup, error, restore result
-
-    private func progressSection(status s: BackupStatusFile) -> some View {
-        let pct = s.filesTotal > 0 ? Double(s.filesDone) / Double(s.filesTotal) : 0
-        return VStack(alignment: .leading, spacing: 3) {
-            ProgressView(value: pct).tint(.mlGold)
-                .accessibilityValue("\(Int(pct * 100)) percento completato")
-            HStack(spacing: 8) {
-                Text("\(Fmt.formatFileCount(s.filesDone)) file").font(.caption.monospacedDigit()).foregroundColor(.secondary)
-                Spacer()
-                if s.etaSecs > 0 { Text("ancora \(Fmt.formatDuration(Double(s.etaSecs)))").font(.caption).foregroundColor(.secondary) }
-            }
-            if !s.currentFile.isEmpty {
-                Text(s.currentFile).font(.caption2).foregroundColor(Color(.tertiaryLabelColor))
-                    .lineLimit(1).truncationMode(.middle)
-            }
-        }
-    }
+    // MARK: - Cleanup, error, restore result
 
     private func cleanupRow(_ phase: CleanupPhase) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             if phase.showsProgress { ProgressView().controlSize(.small) }
-            Text(phase.label).font(.subheadline)
+            Text(phase.label).font(.system(size: 12)).foregroundColor(Look.text)
         }
     }
 
     @ViewBuilder
     private var errorCard: some View {
         if let errors = loadErrors(), let top = topErrorCategory(errors) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(ErrorReporter.localizedTitle(for: top)).font(.caption.weight(.semibold)).foregroundColor(.mlRosso)
-                Text(ErrorReporter.suggestedAction(for: top)).font(.caption2).foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 10) {
-                    Button("Mostra log") { NSWorkspace.shared.open(ErrorReporter.logURL) }
-                    Button("Riprova") { state.onRequestBackup?() }
+            HStack(alignment: .top, spacing: 10) {
+                iconTile("xmark.octagon.fill", Look.red, size: 30)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(ErrorReporter.localizedTitle(for: top)).font(.system(size: 12, weight: .semibold)).foregroundColor(Look.text)
+                    Text(ErrorReporter.suggestedAction(for: top)).font(.system(size: 11)).foregroundColor(Look.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 12) {
+                        Button("Mostra log") { NSWorkspace.shared.open(ErrorReporter.logURL) }
+                        Button("Riprova") { state.onRequestBackup?() }
+                    }
+                    .buttonStyle(.plain).font(.system(size: 11, weight: .semibold)).foregroundColor(Look.blue)
                 }
-                .buttonStyle(.borderless).font(.caption)
             }
-            .padding(8)
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.mlRosso.opacity(0.08))
-            .cornerRadius(8)
+            .background(glassCard(radius: 12))
         }
     }
 
@@ -283,88 +394,131 @@ struct PopoverView: View {
     }
 
     private func restoreResultCard(_ result: RestoreResultSummary) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Ripristino completato").font(.caption.weight(.semibold)).foregroundColor(.mlVerde)
-            Text("\(result.restored) ripristinati · \(result.overwritten) sostituiti · \(result.failed) non riusciti")
-                .font(.caption2).foregroundColor(.secondary)
-            if !result.backedUpTo.isEmpty {
-                Text("Le versioni precedenti sono annullabili dal menu.").font(.caption2).foregroundColor(.secondary)
+        HStack(spacing: 10) {
+            iconTile("checkmark", Look.green, size: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Ripristino completato").font(.system(size: 12, weight: .semibold)).foregroundColor(Look.text)
+                Text("\(result.restored) ripristinati · \(result.overwritten) sostituiti · \(result.failed) non riusciti")
+                    .font(.system(size: 11)).foregroundColor(Look.secondaryText)
             }
         }
-        .padding(8)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.mlVerde.opacity(0.08))
-        .cornerRadius(8)
+        .background(glassCard(radius: 12))
     }
 
     // MARK: - Actions
 
+    private func gradientButton(_ title: String, icon: String, colors: [Color], action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: icon).font(.system(size: 13, weight: .bold))
+                Text(title).font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundColor(.black.opacity(0.85))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .background(Capsule().fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)))
+            .shadow(color: colors.last!.opacity(0.45), radius: 10, y: 3)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func glassButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: icon).font(.system(size: 13, weight: .semibold))
+                Text(title).font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundColor(Look.text)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .background(Capsule().fill(Look.glass))
+            .overlay(Capsule().stroke(Look.glassStroke, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private var primaryActions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             switch state.appState {
             case .running:
-                Button { state.onRequestStop?() } label: {
-                    Label("Interrompi", systemImage: "stop.fill").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent).tint(.mlRosso)
+                gradientButton("Interrompi", icon: "stop.fill", colors: [Look.red.opacity(0.85), Look.red]) { state.onRequestStop?() }
             case .stopping, .restoring:
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity)
             case .needsSetup, .diskAbsent:
-                Button { state.onRequestRestore?() } label: {
-                    Label("Ripristina…", systemImage: "clock.arrow.circlepath").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!state.hasBackups)
+                glassButton("Ripristina…", icon: "clock.arrow.circlepath") { state.onRequestRestore?() }
+                    .disabled(!state.hasBackups).opacity(state.hasBackups ? 1 : 0.4)
             default:
-                Button { state.onRequestBackup?() } label: {
-                    Label("Esegui ora", systemImage: "arrow.up.circle.fill").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent).tint(.mlGold)
-                Button { state.onRequestRestore?() } label: {
-                    Label("Ripristina…", systemImage: "clock.arrow.circlepath").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!state.hasBackups)
+                gradientButton("Esegui ora", icon: "arrow.up.circle.fill", colors: [Look.gold, Look.orange]) { state.onRequestBackup?() }
+                glassButton("Ripristina…", icon: "clock.arrow.circlepath") { state.onRequestRestore?() }
+                    .disabled(!state.hasBackups).opacity(state.hasBackups ? 1 : 0.4)
             }
-        }
-        .controlSize(.large)
-    }
-
-    private var secondaryActions: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if state.canUndo {
-                row("Annulla l'ultimo ripristino", icon: "arrow.uturn.backward") { state.onRequestUndoRestore?() }
-            }
-            row("Scegli cosa salvare…", icon: "checklist") { state.onRequestChooseSources?() }
-                .disabled(state.isRunning || state.config == nil)
-            if state.onRequestScheduleMenu != nil {
-                row("Pianificazione: \(state.scheduleLabel)", icon: "clock") { state.onRequestScheduleMenu?() }
-            }
-            row("Libera spazio…", icon: "trash") { state.onRequestCleanupMenu?() }
-                .disabled(state.isRunning || state.config == nil || state.appState == .diskAbsent)
-            row("Apri cartella dei backup", icon: "folder") { state.onRequestOpenFolder?() }
-            row("Espelli disco", icon: "eject") { state.onRequestEject?() }
-                .disabled(state.isRunning || state.appState == .diskAbsent)
-            Divider().padding(.vertical, 3)
-            row("Esci", icon: "power") { state.onRequestQuit?() }
         }
     }
 
-    private func row(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon).frame(width: 20, alignment: .center)
-                Text(title)
-                Spacer(minLength: 0)
-            }
-            .foregroundColor(Color(.labelColor))
+    private struct Tile: Identifiable {
+        let id: String
+        let icon: String
+        let tint: Color
+        let enabled: Bool
+        let action: () -> Void
+    }
+
+    private var tileItems: [Tile] {
+        var out: [Tile] = [
+            Tile(id: "Scegli cartelle", icon: "checklist", tint: Look.violet,
+                 enabled: !state.isRunning && state.config != nil, action: { state.onRequestChooseSources?() }),
+            Tile(id: "Pianificazione\n\(state.scheduleLabel)", icon: "clock.fill", tint: Look.blue,
+                 enabled: state.onRequestScheduleMenu != nil, action: { state.onRequestScheduleMenu?() }),
+            Tile(id: "Libera spazio", icon: "trash.fill", tint: Look.orange,
+                 enabled: !state.isRunning && state.config != nil && state.appState != .diskAbsent,
+                 action: { state.onRequestCleanupMenu?() }),
+            Tile(id: "Apri cartella", icon: "folder.fill", tint: Look.green, enabled: true,
+                 action: { state.onRequestOpenFolder?() }),
+            Tile(id: "Espelli disco", icon: "eject.fill", tint: Color.gray, enabled: !state.isRunning && state.appState != .diskAbsent,
+                 action: { state.onRequestEject?() }),
+        ]
+        if state.canUndo {
+            out.insert(Tile(id: "Annulla ripristino", icon: "arrow.uturn.backward", tint: Look.red, enabled: true,
+                            action: { state.onRequestUndoRestore?() }), at: 0)
         }
-        .buttonStyle(.plain)
-        .modifier(DimWhenDisabled())
-        .padding(.horizontal, 16)
-        .padding(.vertical, 5)
-        .contentShape(Rectangle())
+        return out
+    }
+
+    private var tiles: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+            ForEach(tileItems) { tile in
+                Button(action: tile.action) {
+                    VStack(spacing: 6) {
+                        iconTile(tile.icon, tile.tint, size: 28)
+                        Text(tile.id).font(.system(size: 10, weight: .medium)).foregroundColor(Look.text)
+                            .multilineTextAlignment(.center).lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 66)
+                    .background(glassCard(radius: 12))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!tile.enabled)
+                .opacity(tile.enabled ? 1 : 0.35)
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            Text("Solo gli snapshot completi contano come protezione")
+                .font(.system(size: 10)).foregroundColor(Look.tertiaryText)
+            Spacer()
+            Button { state.onRequestQuit?() } label: {
+                HStack(spacing: 4) { Image(systemName: "power"); Text("Esci") }
+                    .font(.system(size: 11, weight: .medium)).foregroundColor(Look.secondaryText)
+            }
+            .buttonStyle(.plain)
+            .disabled(state.isCleaning)
+        }
     }
 
     // MARK: - Update banner
@@ -372,33 +526,30 @@ struct PopoverView: View {
     @ViewBuilder
     private var updateBanner: some View {
         if let version = state.updateAvailable, state.dismissedUpdateVersion != version {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
+                iconTile("arrow.down.circle.fill", Look.blue, size: 26)
                 Button { state.onRequestUpdate?() } label: {
-                    HStack(spacing: 8) {
-                        if state.isUpdating {
-                            ProgressView().controlSize(.small)
-                            Text(updatePhaseLabel).font(.subheadline).foregroundColor(.mlInfo)
-                        } else {
-                            Image(systemName: "arrow.down.circle.fill").foregroundColor(.mlInfo)
-                            Text("Versione \(version) disponibile").font(.subheadline).foregroundColor(.mlInfo)
-                            Spacer()
-                            Text("Installa").font(.subheadline.weight(.semibold)).foregroundColor(.mlInfo)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(state.isUpdating ? updatePhaseLabel : "Versione \(version) disponibile")
+                            .font(.system(size: 12, weight: .semibold)).foregroundColor(Look.text)
+                        if !state.isUpdating {
+                            Text("Installa").font(.system(size: 11)).foregroundColor(Look.blue)
                         }
                     }
                 }
                 .buttonStyle(.plain)
                 .disabled(state.isUpdating)
-                if !state.isUpdating {
+                Spacer()
+                if state.isUpdating { ProgressView().controlSize(.small) } else {
                     Button { state.dismissedUpdateVersion = version } label: {
-                        Image(systemName: "xmark").font(.caption).foregroundColor(.secondary)
+                        Image(systemName: "xmark").font(.system(size: 10)).foregroundColor(Look.tertiaryText)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Ignora aggiornamento \(version)")
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color.mlInfo.opacity(0.08))
+            .padding(10)
+            .background(glassCard(radius: 12))
         }
     }
 
@@ -414,10 +565,10 @@ struct PopoverView: View {
     // MARK: - Disk setup
 
     private var diskSetupSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Scegli il disco di backup").font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Scegli il disco di backup").font(.system(size: 15, weight: .bold)).foregroundColor(Look.text)
             if volumes.isEmpty {
-                Text("Nessun disco esterno collegato.").font(.caption).foregroundColor(.mlRosso)
+                Text("Nessun disco esterno collegato.").font(.system(size: 12)).foregroundColor(Look.red)
             } else {
                 ForEach(volumes, id: \.path) { vol in diskButton(for: vol) }
             }
@@ -428,25 +579,16 @@ struct PopoverView: View {
     private func diskButton(for vol: URL) -> some View {
         let (free, total) = DiskDiagnostics.diskSpace(at: vol.path)
         Button { state.onSelectDisk?(vol) } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "externaldrive").foregroundColor(.mlInfo)
-                Text(vol.lastPathComponent)
+            HStack(spacing: 10) {
+                iconTile("externaldrive.fill", Look.blue, size: 28)
+                Text(vol.lastPathComponent).foregroundColor(Look.text)
                 Spacer()
-                if total > 0 { Text(Fmt.formatBytes(free) + " liberi").font(.caption).foregroundColor(.secondary) }
+                if total > 0 { Text(Fmt.formatBytes(free) + " liberi").font(.system(size: 11)).foregroundColor(Look.secondaryText) }
             }
-            .padding(7)
-            .background(Color(.controlBackgroundColor))
-            .cornerRadius(6)
+            .padding(10)
+            .background(glassCard(radius: 12))
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - Helpers
-
-    private func diskSpaceColor(free: UInt64) -> Color {
-        if free > 50 * 1_073_741_824 { return .secondary }
-        if free > 10 * 1_073_741_824 { return .orange }
-        return .mlRosso
     }
 
     private func refreshVolumes() {
@@ -457,9 +599,4 @@ struct PopoverView: View {
             return p != "/" && p != "/System/Volumes/Data" && $0.lastPathComponent != "Macintosh HD" && p.hasPrefix("/Volumes/")
         }
     }
-}
-
-private struct DimWhenDisabled: ViewModifier {
-    @Environment(\.isEnabled) private var isEnabled
-    func body(content: Content) -> some View { content.opacity(isEnabled ? 1 : 0.4) }
 }
