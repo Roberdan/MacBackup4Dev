@@ -247,11 +247,13 @@ final class CoverageNoiseTests {
         try safety.write("x", to: box.home + "/.tool/state.db")
         try safety.write("x", to: box.home + "/.scout/m-playwright-profiles/p/Default/load.db")
         try safety.write("x", to: box.home + "/work/app/runtime/history.db")
+        try safety.write("x", to: box.home + "/GitHub/repo-worktree/a.txt")
+        try safety.write("gitdir: /elsewhere/.git/worktrees/x\n", to: box.home + "/GitHub/repo-worktree/.git")
         let cfg = safety.config(box, sources: [".tool", ".scout", "work"])
         let paths = Set(CoverageAuditor.audit(config: cfg, home: box.home).map(\.path))
         try expect(paths.contains { $0.hasSuffix("/GitHub/real-project") }, "real project suggested: \(paths)")
         try expect(paths.contains { $0.hasSuffix("/work/app/runtime/history.db") }, "project database suggested: \(paths)")
-        for noise in ["/.azure", "/_copia-parziale", "/.tool/state.db", "/load.db"] {
+        for noise in ["/.azure", "/_copia-parziale", "/.tool/state.db", "/load.db", "/repo-worktree"] {
             try expect(!paths.contains { $0.hasSuffix(noise) }, "\(noise) must not be suggested: \(paths)")
         }
     }
