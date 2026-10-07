@@ -74,6 +74,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 - **The picker must never drop a configured source** (scar 2026-10-07): every
   `enabledPaths` entry discovery does not know is listed under "Le tue cartelle". "Tutti"
   never selects `sensitive` items. "Esegui ora" never opens the picker.
+- **The popover's controller is the NSHostingController itself** (`sizingOptions =
+  .preferredContentSize`). Never wrap it in another view controller: NSPopover then stays at
+  320×320 and clips. Check layout changes with `RustyMacBackup measure-menu` (real popover),
+  not only `render-menu` (content only).
 - **The coverage audit never suggests credentials, `_parked` folders, caches/profiles or
   databases inside a tool's hidden folder** (`CoverageAuditor.isNoise`).
 

@@ -47,6 +47,8 @@ enum CLIHandler {
             case "restore-file": try runRestoreFile(subArgs: subArgs, configPath: configPath)
             case "undo": try runUndo(subArgs: subArgs)
             case "new-mac": try runNewMac(subArgs: subArgs, configPath: configPath)
+            case "measure-menu":
+                MainActor.assumeIsolated { measureMenu() }
             case "render-menu":
                 let dir = subArgs.first ?? FileManager.default.temporaryDirectory.path
                 try MainActor.assumeIsolated { try renderMenu(to: dir) }
