@@ -31,6 +31,7 @@ struct TestRunner {
         let coverageNoise = CoverageNoiseTests()
         let picker = PickerTests()
         let updater = UpdaterTests()
+        let power = PowerGateTests()
         let stages = NewMacStageTests()
 
         let suites: [(String, TestClosure)] = [
@@ -71,6 +72,11 @@ struct TestRunner {
             ("Updater.validateRejectsWrongBuilds", updater.test_validateRejectsWrongBuilds),
             ("Updater.swapWhole", updater.test_swapReplacesTheAppWholeAndLeavesNothingBehind),
             ("Updater.failedSwapKeepsOld", updater.test_failedSwapKeepsTheOldApp),
+            ("Power.acAllowed", power.test_acAllowsScheduled),
+            ("Power.batteryBlocks", power.test_batteryBlocksScheduled),
+            ("Power.unknownBlocks", power.test_unknownBlocksScheduled),
+            ("Power.plistPassesFlag", power.test_plistsPassScheduledFlag),
+            ("Power.liveReaderSane", power.test_liveReaderReturnsAValue),
             ("NewMac.loginItemsNeverInFilePhase", stages.test_loginItemsAreNeverInAFilePhase),
             ("NewMac.brokenShellUndoes", stages.test_brokenShellUndoesItsPhase),
             ("NewMac.realShellCheck", stages.test_realShellCheckCatchesExitAndPassesHealthy),
