@@ -36,6 +36,7 @@ final class AppUIState: ObservableObject {
     /// Mirrors AutoUpdater.autoInstall for the footer label.
     @Published var autoInstallUpdates: Bool = true
     var onRequestUpdateMenu: (() -> Void)?
+    var onRequestOnboarding: (() -> Void)?
 
     // MARK: - 3.0: protection and coverage (computed by AppDelegate, never while rendering)
     @Published var protection: ProtectionSummary?

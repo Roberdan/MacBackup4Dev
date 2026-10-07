@@ -32,6 +32,7 @@ struct TestRunner {
         let picker = PickerTests()
         let updater = UpdaterTests()
         let stages = NewMacStageTests()
+        let onboarding = OnboardingTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -80,6 +81,11 @@ struct TestRunner {
             ("NewMac.serviceHealth", stages.test_serviceHealthFromLaunchctl),
             ("NewMac.serviceMovedAside", stages.test_removedServiceIsMovedAsideNotDeleted),
             ("NewMac.ignoredApps", stages.test_ignoredAppsAreNeverListedAndSurviveSave),
+            ("Onboarding.brewfileAndLists", onboarding.test_brewfileAndPackageListsAreParsed),
+            ("Onboarding.baseToolsFirst", onboarding.test_newMacStartsWithBaseToolsThenPrograms),
+            ("Onboarding.scanProtectsSecrets", onboarding.test_scanGroupsAndProtectsSecrets),
+            ("Onboarding.projectRootsSkipCloud", onboarding.test_projectRootsSkipCloudFoldersAndLinks),
+            ("Onboarding.configFromChoices", onboarding.test_configFromChoicesKeepsOnlyWhatWasChosen),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

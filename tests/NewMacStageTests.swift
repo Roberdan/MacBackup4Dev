@@ -30,7 +30,7 @@ struct NewMacStageTests {
         let f = try fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
         let stages = NewMacRestore.stages(snapshot: f.snap, config: nil)
         let ids = stages.map(\.id)
-        try expect(ids.first == "dati", "documents first: \(ids)")
+        try expect(ids.first == "base", "base tools first: \(ids)")
         try expect(ids.last == "servizi", "services last: \(ids)")
         try expect(ids.firstIndex(of: "shell")! > ids.firstIndex(of: "tema:Warp")!, "shell after the tool phases: \(ids)")
         let everyPath = stages.flatMap(\.paths)

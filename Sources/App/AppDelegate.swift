@@ -14,6 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var iconManager: IconManager!
     private var pollTimer: Timer?
     private var updateTimer: Timer?
+    private var onboardingWC: OnboardingWindowController?
     /// A version that failed verification: never retried automatically (no hourly alarms).
     private var rejectedUpdate: String?
     private let popover = NSPopover()
@@ -77,6 +78,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.onRequestUndoRestore = { [weak self] in self?.handleUndoRestore() }
         uiState.onRequestUpdate = { [weak self] in self?.handleRequestUpdate() }
         uiState.onRequestUpdateMenu = { [weak self] in self?.handleRequestUpdateMenu() }
+        uiState.onRequestOnboarding = { [weak self] in self?.showOnboarding() }
         uiState.onSetSchedule = { [weak self] option in self?.handleSetSchedule(option) }
         uiState.onRequestScheduleMenu = { [weak self] in self?.handleRequestScheduleMenu() }
         uiState.onRequestCleanupMenu = { [weak self] in self?.handleRequestCleanupMenu() }
@@ -171,6 +173,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         startUpdateSchedule()
         migrateLegacyScheduleWhenIdle()
+        if config == nil { showOnboarding() }
+    }
+
+    // MARK: - First launch
+
+    private func showOnboarding() {
+        popover.performClose(nil)
+        if let wc = onboardingWC, wc.window?.isVisible == true {
+            wc.window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return
+        }
+        let model = OnboardingModel()
+        model.onFinish = { [weak self] newConfig, schedule in self?.finishOnboarding(newConfig, schedule: schedule) }
+        model.onRestoreNewMac = { [weak self] backupDir in
+            self?.onboardingWC?.window?.close()
+            self?.openRestoreCenter(destination: backupDir, tab: .newMac)
+        }
+        let wc = OnboardingWindowController(model: model)
+        wc.showWindow(nil)
+        wc.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        onboardingWC = wc
+    }
+
+    private func finishOnboarding(_ newConfig: Config, schedule: Int??) {
+        do {
+            try FileManager.default.createDirectory(atPath: AppIdentity.configDir, withIntermediateDirectories: true)
+            try newConfig.save(to: Config.defaultPath)
+            config = try Config.load(from: Config.defaultPath)
+        } catch {
+            sendNotification(title: "Configurazione non salvata", body: error.localizedDescription)
+            return
+        }
+        if let schedule { handleSetSchedule(schedule) }
+        onboardingWC?.window?.close()
+        onboardingWC = nil
+        Log.info("Onboarding done: \(newConfig.source.paths.count) paths, \(newConfig.databases.postgres.count) databases")
+        sendNotification(title: "Primo backup avviato",
+                         body: "\(newConfig.source.paths.count) cartelle e \(newConfig.databases.postgres.count) database su \(URL(fileURLWithPath: newConfig.destination.path).deletingLastPathComponent().lastPathComponent).")
+        pollStatus()
+        handleRequestBackup()
     }
 
     /// Moves the 3.x LaunchAgent to the new label once no backup is running (bootout would
@@ -866,13 +908,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleOpenRestoreCenter() {
         guard let config else { return }
+        openRestoreCenter(destination: URL(fileURLWithPath: config.destination.path), tab: .topic)
+    }
+
+    private func openRestoreCenter(destination: URL, tab: RestoreCenterModel.Tab) {
         popover.performClose(nil)
         if let wc = restoreCenterWC, wc.window?.isVisible == true {
             wc.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        let model = RestoreCenterModel(destination: URL(fileURLWithPath: config.destination.path), config: config)
+        let model = RestoreCenterModel(destination: destination, config: config)
+        model.tab = tab
         model.onAdvanced = { [weak self] in
             self?.restoreCenterWC?.window?.close()
             self?.handleRequestRestore()

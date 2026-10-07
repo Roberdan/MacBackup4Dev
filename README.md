@@ -1,10 +1,36 @@
-# RustyMacBackup
+# MacBackup4Dev
 
-> A native macOS menu-bar app that backs up your developer environment to an external disk — safely, incrementally, and without Full Disk Access.
+> Back up a developer's Mac — projects, dotfiles, editors, AI tools, databases and the list of
+> installed programs — to an external disk, and rebuild a new Mac from it, one safe phase at
+> a time. Native menu-bar app, no Full Disk Access. Formerly **RustyMacBackup**.
 
-Built for developers who live in the terminal and need a reliable, transparent backup of their configs, dotfiles, SSH keys, and project repos. Not a replacement for Time Machine — a complement to it.
+Built for developers who live in the terminal. Not a replacement for Time Machine — a complement
+to it, and an onboarding tool for the next Mac.
 
-![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![Swift](https://img.shields.io/badge/Swift-5.9-orange) ![License](https://img.shields.io/badge/license-MIT-green) ![Version](https://img.shields.io/badge/version-2.2.0-brightgreen)
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![Swift](https://img.shields.io/badge/Swift-5.9-orange) ![License](https://img.shields.io/badge/license-MIT-green) ![Version](https://img.shields.io/badge/version-4.0.0-brightgreen)
+
+## First launch
+
+The app finds your development environment by itself (under a second) and lets you choose:
+
+- **Projects:** every folder with git repositories (`~/GitHub`, `~/Developer`, `~/code`, or any
+  other), counted per folder; uncommitted work included. Cloud folders (OneDrive, Dropbox,
+  iCloud) and links into them are never walked.
+- **Terminal and shell, Git and SSH, editors and IDEs** (VS Code, Cursor, Zed, Neovim, Helix,
+  Xcode, JetBrains settings without plugins), **AI assistants** (Claude Code, Copilot, Codex,
+  Gemini, Cursor…), **languages and package managers**, **cloud and containers**, every tool in
+  `~/.config` one by one.
+- **Local Postgres databases**, dumped consistently with `pg_dump` (databases that look like
+  tests are not proposed).
+- **Credentials** (SSH keys, tokens, `~/.config/gh`, anything named secret/token/credential)
+  are listed apart and never selected for you: the backup disk may not be encrypted.
+- **Installed programs** (Homebrew formulae and apps, App Store apps, VS Code extensions,
+  global npm / uv / pipx / cargo packages) are not copied: their list is saved at every backup
+  so a new Mac can reinstall them.
+
+Then choose the disk and how often (every hour, every 6 hours, nightly, or by hand) and the
+first backup starts. On a new Mac with a backup disk attached, the first screen offers
+**"Questo è un Mac nuovo"** instead: the guided restore below.
 
 ---
 
@@ -12,7 +38,7 @@ Built for developers who live in the terminal and need a reliable, transparent b
 
 Time Machine doesn't work on MDM-managed Macs. iCloud doesn't back up `~/.ssh` or `~/GitHub`. Cloud sync services fight with `node_modules` and `.git`. Git doesn't back up your shell config.
 
-RustyMacBackup solves the problem that every developer has but nobody talks about: **your muscle memory lives in dotfiles, and they're never backed up.**
+MacBackup4Dev solves the problem that every developer has but nobody talks about: **your muscle memory lives in dotfiles, and they're never backed up.**
 
 ---
 
@@ -20,7 +46,7 @@ RustyMacBackup solves the problem that every developer has but nobody talks abou
 
 ```
 External Disk
-└── RustyMacBackup/
+└── MacBackup4Dev/
     ├── 2026-03-20T14:32:00/    ← snapshot (hard-linked, incremental)
     │   ├── .zshrc
     │   ├── .gitconfig
@@ -100,16 +126,16 @@ No Full Disk Access required. No TCC prompts. No system file access.
 
 ## Installation
 
-**From the pkg installer (recommended):** download `RustyMacBackup-<version>-arm64.pkg` from
-[Releases](https://github.com/Roberdan/RustyMacBackup/releases) and open it. The build is
+**From the pkg installer (recommended):** download `MacBackup4Dev-<version>-arm64.pkg` from
+[Releases](https://github.com/Roberdan/MacBackup4Dev/releases) and open it. The build is
 ad-hoc signed: if macOS says the developer cannot be verified, right-click the file → Open.
 Install once: from 3.2 the app updates itself (see [Auto-Update](#auto-update)).
 
 **From source:**
 
 ```bash
-git clone https://github.com/Roberdan/RustyMacBackup.git
-cd RustyMacBackup
+git clone https://github.com/Roberdan/MacBackup4Dev.git
+cd MacBackup4Dev
 ./install.sh        # builds with swiftc + installs to /Applications
 ```
 
@@ -122,7 +148,7 @@ Requires macOS 14+ and Xcode (found automatically wherever it is installed, e.g.
 
 ```bash
 # Convenience alias
-alias rustyback='/Applications/RustyMacBackup.app/Contents/MacOS/RustyMacBackup'
+alias rustyback='/Applications/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev'
 
 # First-time setup: discovers configs, picks destination disk
 rustyback init
@@ -160,6 +186,8 @@ rustyback list
 | `undo [dir] [--file <file>]` | Undo the last restore, or one file of it |
 | `new-mac` | New Mac: checks, then the phases in order with what is done |
 | `new-mac --stage <id>[,id] [--yes]` | Run one phase (preview without `--yes`) |
+| `new-mac --stage programmi --packages brew:jq,cask:warp --yes` | Reinstall chosen programs (`--all-packages`: all missing ones) |
+| `scan` | What the first-launch setup finds on this Mac |
 | `new-mac --stage servizi --agents <label> --yes` | Turn on one service, watched; moved aside if it fails |
 | `new-mac --undo <id>` / `--undo servizio:<label>` | Undo a phase / turn a service off |
 | `prune [--dry-run \| --yes]` | Preview retention-policy cleanup; `--yes` deletes |
@@ -170,6 +198,7 @@ rustyback list
 | `errors [--all]` | Show categorised backup errors |
 | `measure-menu` | Debug: open the real popover and check it fits its content |
 | `render-menu <dir>` | Debug: draw the popover content in its main states to PNG |
+| `render-onboarding <dir>` / `render-restore <backup> <dir>` | Debug: save the first-launch and Nuovo Mac windows as PNG |
 | `--version` | Print version |
 
 ---
@@ -213,16 +242,16 @@ No Full Disk Access required. No TCC prompts. No system file access.
 
 ## Installation
 
-**From the pkg installer (recommended):** download `RustyMacBackup-<version>-arm64.pkg` from
-[Releases](https://github.com/Roberdan/RustyMacBackup/releases) and open it. The build is
+**From the pkg installer (recommended):** download `MacBackup4Dev-<version>-arm64.pkg` from
+[Releases](https://github.com/Roberdan/MacBackup4Dev/releases) and open it. The build is
 ad-hoc signed: if macOS says the developer cannot be verified, right-click the file → Open.
 Install once: from 3.2 the app updates itself (see [Auto-Update](#auto-update)).
 
 **From source:**
 
 ```bash
-git clone https://github.com/Roberdan/RustyMacBackup.git
-cd RustyMacBackup
+git clone https://github.com/Roberdan/MacBackup4Dev.git
+cd MacBackup4Dev
 ./install.sh        # builds with swiftc + installs to /Applications
 ```
 
@@ -235,7 +264,7 @@ Requires macOS 14+ and Xcode (found automatically wherever it is installed, e.g.
 
 ```bash
 # Convenience alias
-alias rustyback='/Applications/RustyMacBackup.app/Contents/MacOS/RustyMacBackup'
+alias rustyback='/Applications/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev'
 
 # First-time setup: discovers configs, picks destination disk
 rustyback init
@@ -326,7 +355,7 @@ files, and deliberately does not apply all `.gitignore` rules, which may hide va
 
 ### Configuration file
 
-Config lives at `~/.config/rusty-mac-backup/config.toml` and is created by `rustyback init`. You can also edit it directly.
+Config lives at `~/.config/macbackup4dev/config.toml` and is created by the first-launch setup (or `MacBackup4Dev init`). You can also edit it directly.
 
 ```toml
 [source]
@@ -341,7 +370,7 @@ paths = [
 ]
 
 [destination]
-path = "/Volumes/BackupDisk/RustyMacBackup"
+path = "/Volumes/BackupDisk/MacBackup4Dev"
 
 [exclude]
 patterns = [
@@ -460,7 +489,7 @@ colour, sized to its content.
 
 ```
 ┌──────────────────────────────────────────────┐
-│ [▣] RustyMacBackup        ( RoberdanBCK 1,4TB)│
+│ [▣] MacBackup4Dev        ( RoberdanBCK 1,4TB)│
 │ ┌──────────────────────────────────────────┐ │
 │ │  ╭──╮   Protetto · ultimo completo        │ │  ring: green shield when protected,
 │ │  │✓ │   2 ore fa                          │ │  live % while a backup runs,
@@ -568,10 +597,10 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 108 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 115 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
-VERSION=3.3.0 ./build-pkg.sh    # specific version
-build/RustyMacBackup.app/Contents/MacOS/RustyMacBackup measure-menu   # real popover fits?
+VERSION=4.0.0 ./build-pkg.sh    # specific version
+build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
 ```
 
 Tests cover the engine end to end in a sandbox (no file dropped, incomplete snapshots, git
@@ -588,20 +617,20 @@ Three ways, in the menu (**Ripristina…**) and in the CLI. Each one previews fi
 undone file by file (`undo`, or *Annulla l'ultimo ripristino* in the menu).
 
 ```bash
-RustyMacBackup snapshots                    # completo / incompleto / non verificato
-RustyMacBackup topics                       # Warp, Terminale e shell, Claude Code, …
-RustyMacBackup restore-topic warp           # preview; add --yes to restore
-RustyMacBackup versions ~/.zshrc            # every distinct version of one file
-RustyMacBackup restore-file ~/.zshrc --snapshot 2026-10-04_190948 --yes
-RustyMacBackup new-mac                      # checklist + preview of a whole new Mac
-RustyMacBackup new-mac --steps config,repos,databases --yes
+MacBackup4Dev snapshots                    # completo / incompleto / non verificato
+MacBackup4Dev topics                       # Warp, Terminale e shell, Claude Code, …
+MacBackup4Dev restore-topic warp           # preview; add --yes to restore
+MacBackup4Dev versions ~/.zshrc            # every distinct version of one file
+MacBackup4Dev restore-file ~/.zshrc --snapshot 2026-10-04_190948 --yes
+MacBackup4Dev new-mac                      # checklist + preview of a whole new Mac
+MacBackup4Dev new-mac --steps config,repos,databases --yes
 ```
 
 **Nuovo Mac** restores configuration files that are missing (never overwriting), clones each
 repository on the branch and commit it had, puts unpublished commits back from the saved
 bundle and the uncommitted files on top (so `git status` shows exactly what was local),
 restores SQLite files and recreates absent Postgres databases. A half-restored folder in the
-way is moved to `~/RustyMacBackup-copie-parziali`, never deleted.
+way is moved to `~/MacBackup4Dev-copie-parziali`, never deleted.
 
 Only complete snapshots are offered by default. Restoring from an incomplete one requires
 naming it with `--snapshot` and prints a warning.
@@ -623,7 +652,7 @@ The app updates itself, Sparkle-style, with no admin password and nothing to cli
 - **Never half-installed:** the new app is copied beside the old one and swapped in with two
   renames in `/Applications`; if the second fails the old app is put back. A backup that
   started from the old binary keeps running. Then the app relaunches and notifies
-  *RustyMacBackup aggiornato*.
+  *MacBackup4Dev aggiornato*.
 - **Installed by an administrator?** If the app is not the user's to replace (e.g. installed
   by a pkg before 3.2), the app does not install on its own: the banner offers the update, and
   clicking it opens the signed `.pkg` in Installer. The pkg hands the app to the logged-in user,
@@ -638,12 +667,14 @@ takes the release notes from the version's `CHANGELOG.md` section (it fails if t
 
 ### New Mac, one phase at a time
 
-*Ripristina… → Nuovo Mac* (or `RustyMacBackup new-mac`) lists the phases in the safe order:
-documents → repositories → databases → one per tool → other configurations → shell →
-Homebrew → services. Run one, check the Mac, go on; every phase only adds files and can be
+*Ripristina… → Nuovo Mac* (or `MacBackup4Dev new-mac`) lists the phases in the safe order:
+base tools (Apple's developer tools, Homebrew: one click starts each installer) → programs
+(every package of the old Mac with its own checkbox; already installed ones are marked; one
+failure never stops the others) → documents → repositories → databases → one per tool →
+other configurations → shell → services. Run one, check the Mac, go on; every phase only adds files and can be
 undone alone. Nothing that starts at login is ever restored as a plain file: services
 (LaunchAgents) are all off, each has its own switch, and one that fails right after
-starting is stopped and moved to `~/RustyMacBackup-copie-parziali/LaunchAgents/`. After the
+starting is stopped and moved to `~/MacBackup4Dev-copie-parziali/LaunchAgents/`. After the
 shell and the services phases, restart the Mac before going on: if something is wrong, you
 know which phase it was.
 
@@ -653,7 +684,7 @@ know which phase it was.
 
 This software is provided **as-is**, without warranty of any kind. I built it for my own use and share it in the hope it's useful — but I take no responsibility for data loss, corruption, missed backups, or any other damage that may result from using it.
 
-**Backup software is critical infrastructure.** Before relying on RustyMacBackup for anything important:
+**Backup software is critical infrastructure.** Before relying on MacBackup4Dev for anything important:
 - Verify your backups actually restore correctly (`rustyback restore`)
 - Keep at least one other backup method (Time Machine, cloud, etc.)
 - Test on non-critical data first

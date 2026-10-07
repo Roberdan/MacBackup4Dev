@@ -188,7 +188,9 @@ enum ConfigDiscovery {
 
         // Terminal emulators
         ("Terminal", "Ghostty", ["~/.config/ghostty"], false),
-        ("Terminal", "Warp", ["~/Library/Application Support/Warp"], false),
+        ("Terminal", "Warp", ["~/.warp", "~/Library/Application Support/dev.warp.Warp-Stable",
+                              "~/Library/Preferences/dev.warp.Warp-Stable.plist"], false),
+        ("Terminal", "WezTerm", ["~/.wezterm.lua", "~/.config/wezterm"], false),
         ("Terminal", "iTerm2", ["~/Library/Application Support/iTerm2"], false),
         ("Terminal", "Alacritty", ["~/.config/alacritty"], false),
         ("Terminal", "kitty", ["~/.config/kitty"], false),
@@ -199,6 +201,11 @@ enum ConfigDiscovery {
 
         // Editors (no Neovim/Helix -- add via custom discovery if needed)
         ("Editor", "Vim", ["~/.vimrc", "~/.vim"], false),
+        ("Editor", "Neovim", ["~/.config/nvim"], false),
+        ("Editor", "Helix", ["~/.config/helix"], false),
+        ("Editor", "VS Code snippets", ["~/Library/Application Support/Code/User/snippets"], false),
+        ("Editor", "Windsurf settings", ["~/Library/Application Support/Windsurf/User/settings.json",
+                                           "~/Library/Application Support/Windsurf/User/keybindings.json"], false),
         ("Editor", "VS Code settings", ["~/Library/Application Support/Code/User/settings.json",
                                           "~/Library/Application Support/Code/User/keybindings.json"], false),
         ("Editor", "VS Code extensions", ["~/.vscode/extensions"], false),
@@ -305,6 +312,8 @@ enum ConfigDiscovery {
         // VM/container engine disk images (huge, regenerable): never propose these as a
         // configuration source to back up (scar 2026-09-27, see ConfigManager.baseExcludePatterns)
         ".colima", ".lima", ".orbstack",
+        // Our own undo copies of past restores: not configuration.
+        ".rustybackup-pre-restore",
     ]
 
     /// Directory and file names that are never configuration, at any depth.
@@ -455,7 +464,36 @@ enum ConfigDiscovery {
     /// Allocated size of a tree, ignoring anything the default exclusions would drop and
     /// stopping as soon as `limit` is passed, so a multi-gigabyte cache costs the same as
     /// a small directory to reject.
+    /// Sizes already measured in this process: `dataSubdirectories` asks for a folder and
+    /// then for each of its children, so without this the same files are walked again
+    /// at every level (2.5 minutes on a real home, 2026-10-07).
+    private static var sizeCache: [String: Int64] = [:]
+    private static let sizeCacheLock = NSLock()
+
     static func approximateSize(atPath path: String, limit: Int64) -> Int64 {
+        let key = "\(limit)|\(path)"
+        sizeCacheLock.lock()
+        if let cached = sizeCache[key] { sizeCacheLock.unlock(); return cached }
+        sizeCacheLock.unlock()
+        let size = measureSize(atPath: path, limit: limit)
+        sizeCacheLock.lock(); sizeCache[key] = size; sizeCacheLock.unlock()
+        return size
+    }
+
+    /// Data folders to exclude inside the chosen hidden home entries ("~/.claude" …).
+    static func dataExclusions(forSources paths: [String]) -> [String] {
+        var out: [String] = []
+        for path in paths where path.hasPrefix("~/.") {
+            let relative = String(path.dropFirst(2))
+            guard !relative.contains("/") else { continue }
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: home + "/" + relative, isDirectory: &isDir), isDir.boolValue else { continue }
+            out.append(contentsOf: dataSubdirectories(relative: relative, depth: 1))
+        }
+        return out
+    }
+
+    private static func measureSize(atPath path: String, limit: Int64) -> Int64 {
         let filter = defaultFilter
         let root = URL(fileURLWithPath: path)
         let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey,

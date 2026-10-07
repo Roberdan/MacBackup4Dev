@@ -1,4 +1,4 @@
-# Contributing to RustyMacBackup
+# Contributing to MacBackup4Dev
 
 Thanks for your interest. This is a personal tool I use daily — contributions are welcome, but the bar is high: correctness and safety over features.
 
@@ -20,8 +20,8 @@ Read [`CLAUDE.md`](CLAUDE.md). It contains the architecture overview, critical t
 ## Development Setup
 
 ```bash
-git clone https://github.com/Roberdan/RustyMacBackup.git
-cd RustyMacBackup
+git clone https://github.com/Roberdan/MacBackup4Dev.git
+cd MacBackup4Dev
 xcode-select --install   # if not already installed
 ./run-tests.sh           # should show: 55 tests, 55 passed, 0 failed
 ```

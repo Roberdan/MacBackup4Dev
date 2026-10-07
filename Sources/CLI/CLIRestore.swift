@@ -195,7 +195,7 @@ extension CLIHandler {
     }
 
     static func runNewMac(subArgs: [String], configPath: String?) throws {
-        let flags = Flags(subArgs, valued: ["--snapshot", "--steps", "--agents", "--stage", "--undo"])
+        let flags = Flags(subArgs, valued: ["--snapshot", "--steps", "--agents", "--stage", "--undo", "--packages"])
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         if let id = flags.values["--undo"] {
             print(NewMacRestore.undoStage(id, home: home))
@@ -236,9 +236,22 @@ extension CLIHandler {
             return
         }
         let agents = Set((flags.values["--agents"] ?? "").split(separator: ",").map(String.init))
+        // Programs: --packages brew:jq,cask:warp,… or --all-packages (everything not installed yet).
+        var packages = Set((flags.values["--packages"] ?? "").split(separator: ",").map(String.init))
+        if flags.switches.contains("--all-packages") {
+            let all = ToolInventory.packages(snapshot: snap.url)
+            let installed = ToolInventory.installed(all)
+            packages = Set(all.filter { !ToolInventory.isInstalled($0, in: installed) }.map(\.id))
+        }
         for id in wanted.split(separator: ",").map(String.init) {
             guard let stage = stages.first(where: { $0.id == id }) else { throw err("Fase sconosciuta: \(id)") }
-            let out = NewMacRestore.runStage(stage, snapshot: snap.url, home: home, dryRun: !yes, services: agents) { print($0) }
+            if stage.kind == .packages && packages.isEmpty {
+                for p in ToolInventory.packages(snapshot: snap.url) { print("  \(p.id)") }
+                print(yellow("Scegli con --packages <id>,<id> oppure --all-packages"))
+                continue
+            }
+            let out = NewMacRestore.runStage(stage, snapshot: snap.url, home: home, dryRun: !yes,
+                                             services: agents, packages: packages) { print($0) }
             if yes && stage.restartAfter && out.ok { print(yellow("Riavvia il Mac prima della fase successiva.")) }
             if !out.ok { print(red("Fase \(id) con problemi: leggi le righe sopra.")) }
         }

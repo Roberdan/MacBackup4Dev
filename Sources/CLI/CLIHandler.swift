@@ -47,6 +47,14 @@ enum CLIHandler {
             case "restore-file": try runRestoreFile(subArgs: subArgs, configPath: configPath)
             case "undo": try runUndo(subArgs: subArgs)
             case "new-mac": try runNewMac(subArgs: subArgs, configPath: configPath)
+            case "render-restore":
+                guard args.count > 2 else { print("render-restore <backup-dir> <out-dir>"); return }
+                MainActor.assumeIsolated { renderRestore(backup: args[1], to: args[2]) }
+            case "render-onboarding":
+                let out = args.count > 1 ? args[1] : FileManager.default.temporaryDirectory.path
+                MainActor.assumeIsolated { renderOnboarding(to: out) }
+            case "scan":
+                printDevScan()
             case "measure-menu":
                 MainActor.assumeIsolated { measureMenu() }
             case "render-menu":
@@ -577,4 +585,18 @@ enum CLIHandler {
     static func yellow(_ t: String) -> String { colored(t, "33") }
     static func blue(_ t: String) -> String { colored(t, "34") }
     static func bold(_ t: String) -> String { colored(t, "1") }
+
+    /// What the first-launch setup would propose, in the terminal.
+    static func printDevScan() {
+        let scan = DevEnvironment.scan()
+        for group in scan.groups {
+            print(bold("\(group.title) (\(group.items.count))"))
+            for item in group.items {
+                print("  \(item.sensitive ? yellow("○") : green("●")) \(item.name)" + (item.detail.isEmpty ? "" : "  — \(item.detail)"))
+            }
+        }
+        print(bold("\nInstallato (si può rimettere su un Mac nuovo)"))
+        for t in scan.toolchains { print("  · \(t.name): \(t.detail)") }
+        print("\n● proposto  ○ credenziale: si sceglie a mano")
+    }
 }
