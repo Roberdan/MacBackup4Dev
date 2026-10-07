@@ -19,7 +19,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Last encrypted-store error notified (said once, not every 30 s).
     private var lastStoreError: String?
     private var storeOpening = false
+    private var compactingStore = false
+    private var compactRetryAfter = Date.distantPast
     private var storeRetryAfter = Date.distantPast
+
+    /// Old snapshots deleted inside the encrypted store: give the space back to the disk
+    /// (close, compact, reopen) when nothing is running. At most one attempt an hour.
+    private func compactStoreIfNeeded() {
+        guard let config, let setup = config.encryption.setup, !compactingStore, Date() >= compactRetryAfter,
+              EncryptedStore.needsCompaction(setup), EncryptedStore.isOpen(setup),
+              uiState.appState == .idle || uiState.appState == .stale, !isBusyForUpdate else { return }
+        compactingStore = true
+        compactRetryAfter = Date().addingTimeInterval(3600)
+        Log.info("Compacting the encrypted store")
+        DispatchQueue.global(qos: .utility).async {
+            var outcome = ""
+            do {
+                guard let password = EncryptedStore.readPassword(for: setup) else { throw EncryptedStore.StoreError.noPassword(setup.volume) }
+                let freed = try EncryptedStore.compact(setup, password: password)
+                outcome = "freed \(freed) bytes"
+                if freed > 1_073_741_824 {
+                    DispatchQueue.main.async {
+                        self.sendNotification(title: "Spazio recuperato", body: "\(Fmt.formatBytes(freed)) tornati liberi sul disco di backup.")
+                    }
+                }
+            } catch {
+                outcome = error.localizedDescription
+                // Never leave the store closed because of a compaction.
+                try? EncryptedStore.ensureOpen(config)
+            }
+            Log.info("Compaction: \(outcome)")
+            DispatchQueue.main.async { self.compactingStore = false; self.pollStatus() }
+        }
+    }
 
     /// Encrypted store: opened as soon as its disk is there, off the main thread (attaching
     /// can take a while), never more than one attempt at a time, and after a failure not
@@ -1013,6 +1045,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func pollStatus(forceProtection: Bool = false) {
         openStoreInBackground()
+        compactStoreIfNeeded()
         let newState = statusManager.poll(config: config)
         // F-14: don't clobber .stopping/.restoring set by action handlers
         if newState != .running || (uiState.appState != .stopping && uiState.appState != .restoring) {

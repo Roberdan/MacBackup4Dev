@@ -32,6 +32,8 @@ enum EncryptedStore {
         case noPassword(String)
         case containerMissing(String)
         case keychainLocked
+        case busyCompacting
+        case damaged(String)
         var errorDescription: String? {
             switch self {
             case .tool(let s): return "Contenitore cifrato: \(s)"
@@ -39,6 +41,8 @@ enum EncryptedStore {
             case .noPassword(let v): return "Manca la password del contenitore \(v) nel Portachiavi"
             case .containerMissing(let p): return "Contenitore cifrato non trovato: \(p) (disco collegato?)"
             case .keychainLocked: return "Il Portachiavi è bloccato: sbloccalo (password del Mac) e riprovo da solo"
+            case .busyCompacting: return "Sto recuperando spazio sul disco di backup: riprovo tra poco"
+            case .damaged(let why): return "Il backup cifrato ha errori che macOS non ha riparato (\(why)): non ci scrivo. Controllalo con Utility Disco."
             }
         }
     }
@@ -95,6 +99,7 @@ enum EncryptedStore {
     static func open(_ setup: Setup, password: String) throws {
         guard !isOpen(setup) else { return }
         guard FileManager.default.fileExists(atPath: setup.container) else { throw StoreError.containerMissing(setup.container) }
+        let wasLeftOpen = wasLeftOpen(setup)
         var r = Shell.Result(status: -1, stdout: "", stderr: "")
         if hasDiskutilImage {
             r = Shell.run("/usr/sbin/diskutil", ["image", "attach", "--stdinpass", "--nobrowse", setup.container],
@@ -113,6 +118,89 @@ enum EncryptedStore {
             throw StoreError.tool("apertura non riuscita: \(r.stderr.suffix(200))")
         }
         guard isOpen(setup) else { throw StoreError.tool("aperto, ma non montato in \(setup.mountPoint)") }
+        // Closed without us in this same boot = the disk was pulled out (or the Mac crashed):
+        // check the volume before anything writes into it, repair if needed.
+        if wasLeftOpen {
+            Log.warn("Encrypted store was not closed cleanly: checking it")
+            if let problem = checkAndRepair(setup) {
+                close(setup)
+                throw StoreError.damaged(problem)
+            }
+        }
+        writeOpenMarker(setup)
+    }
+
+    // MARK: - Pulled out without ejecting
+
+    /// `<data>/store-<volume>.open` holds the boot time while the store is open. Found at the
+    /// next open with the same boot time: the store vanished without being closed by us (disk
+    /// pulled out). A restart or shutdown closes it cleanly and changes the boot time.
+    static func openMarker(_ setup: Setup) -> String { AppIdentity.dataDir + "/store-\(setup.volume).open" }
+
+    static var bootTime: String {
+        var tv = timeval(); var size = MemoryLayout<timeval>.size
+        sysctlbyname("kern.boottime", &tv, &size, nil, 0)
+        return String(tv.tv_sec)
+    }
+
+    static func writeOpenMarker(_ setup: Setup) {
+        try? FileManager.default.createDirectory(atPath: AppIdentity.dataDir, withIntermediateDirectories: true)
+        try? bootTime.write(toFile: openMarker(setup), atomically: true, encoding: .utf8)
+    }
+
+    static func wasLeftOpen(_ setup: Setup) -> Bool {
+        (try? String(contentsOfFile: openMarker(setup), encoding: .utf8)) == bootTime
+    }
+
+    /// nil when the volume is sound (after a repair if one was needed), otherwise why not.
+    static func checkAndRepair(_ setup: Setup) -> String? {
+        if Shell.run("/usr/sbin/diskutil", ["verifyVolume", setup.mountPoint], timeout: 3600).ok { return nil }
+        Log.warn("Encrypted store has errors: repairing")
+        _ = Shell.run("/usr/sbin/diskutil", ["repairVolume", setup.mountPoint], timeout: 7200)
+        let again = Shell.run("/usr/sbin/diskutil", ["verifyVolume", setup.mountPoint], timeout: 3600)
+        if again.ok { Log.info("Encrypted store repaired"); return nil }
+        return String((again.stderr + again.stdout).split(separator: "\n").last ?? "verifica non riuscita")
+    }
+
+    // MARK: - Giving freed space back to the disk
+
+    static func compactFlag(volume: String) -> String { AppIdentity.dataDir + "/store-\(volume).compact" }
+    static let compactingLock = AppIdentity.dataDir + "/compacting.lock"
+
+    /// Called when snapshots are deleted under `destination` (a path inside /Volumes/<volume>).
+    static func markSpaceFreed(destination: URL) {
+        let comps = destination.standardized.pathComponents
+        guard comps.count > 2, comps[1] == "Volumes", comps[2].hasPrefix(AppIdentity.name + "-") else { return }
+        try? FileManager.default.createDirectory(atPath: AppIdentity.dataDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: compactFlag(volume: comps[2]), contents: Data())
+    }
+
+    static func needsCompaction(_ setup: Setup) -> Bool { FileManager.default.fileExists(atPath: compactFlag(volume: setup.volume)) }
+
+    static var compactionRunning: Bool {
+        guard let text = try? String(contentsOfFile: compactingLock, encoding: .utf8), let pid = Int32(text) else { return false }
+        return kill(pid, 0) == 0
+    }
+
+    /// Closes the store, compacts it (freed space goes back to the disk), opens it again.
+    /// The caller makes sure nothing is using it. Returns the bytes given back.
+    @discardableResult
+    static func compact(_ setup: Setup, password: String) throws -> UInt64 {
+        try String(ProcessInfo.processInfo.processIdentifier).write(toFile: compactingLock, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: compactingLock) }
+        let before = allocatedSize(setup.container)
+        guard close(setup) else { throw StoreError.tool("in uso: non lo compatto ora") }
+        let r = Shell.run("/usr/bin/hdiutil", ["compact", "-stdinpass", setup.container], timeout: 7200, stdin: password)
+        try open(setup, password: password)
+        guard r.ok else { throw StoreError.tool("compattazione non riuscita: \(r.stderr.suffix(160))") }
+        try? FileManager.default.removeItem(atPath: compactFlag(volume: setup.volume))
+        let after = allocatedSize(setup.container)
+        return before > after ? before - after : 0
+    }
+
+    static func allocatedSize(_ path: String) -> UInt64 {
+        let r = Shell.run("/usr/bin/du", ["-sk", path], timeout: 600)
+        return (UInt64(r.stdout.split(separator: "\t").first ?? "0") ?? 0) * 1024
     }
 
     /// Closes the image (before ejecting its disk).
@@ -123,7 +211,9 @@ enum EncryptedStore {
         if force { args = ["unmount", "force", setup.mountPoint] }
         let r = Shell.run("/usr/sbin/diskutil", args, timeout: 60)
         if force && r.ok { _ = Shell.run("/usr/sbin/diskutil", ["eject", setup.mountPoint], timeout: 60) }
-        return r.ok || !isOpen(setup)
+        let closed = r.ok || !isOpen(setup)
+        if closed { try? FileManager.default.removeItem(atPath: openMarker(setup)) }   // closed by us: clean
+        return closed
     }
 
     // MARK: - Keychain (through /usr/bin/security, see the type comment)
@@ -188,6 +278,7 @@ enum EncryptedStore {
     static func ensureOpen(_ config: Config?) throws {
         guard let setup = config?.encryption.setup, !isOpen(setup) else { return }
         guard FileManager.default.fileExists(atPath: setup.container) else { return }   // disk not attached
+        guard !compactionRunning else { throw StoreError.busyCompacting }
         guard !keychainLocked else { throw StoreError.keychainLocked }
         guard let password = readPassword(for: setup) else { throw StoreError.noPassword(setup.volume) }
         try open(setup, password: password)

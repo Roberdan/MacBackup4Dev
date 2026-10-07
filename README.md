@@ -141,7 +141,11 @@ the space of its content and keeps hard links, so snapshots work exactly as on a
   offered too (one checkbox each), so a new Mac is usable straight away.
 - **Existing setups:** the menu shows *Backup non cifrati → Cifra*. The first encrypted backup
   is a full one; the old unencrypted snapshots stay where they are until you delete them.
-- **Eject** closes the image before ejecting the disk.
+- **Eject** closes the image before ejecting the disk. **Pulled out without ejecting?** The
+  store is checked (and repaired if needed) when it is opened again; nothing is written into
+  it until it passes. Completed snapshots are never at risk (APFS never overwrites them in place).
+- **Space:** the image grows with its content; when old snapshots are deleted, the app gives
+  the space back to the disk by compacting the image when nothing is running.
 - The Keychain item is read through `/usr/bin/security` (trusted in its access list): the app
   is ad-hoc signed, and reading it directly would make macOS ask for the Keychain password
   after every update — and block the scheduled backup.
@@ -629,7 +633,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 133 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 136 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
