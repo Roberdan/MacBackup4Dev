@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.0.1] - 2026-10-07
+
+### Fixed
+- **The app comes back after an update.** It was relaunched by a helper process that macOS
+  closes together with the app, so 3.3.0 installed 4.0.0 and never restarted. Now the new copy
+  is started by macOS (LaunchServices), the old one quits only once the new one is running,
+  and a new copy asks any older one to quit (never a backup running from the command line).
+  Checked on a real Mac with `MacBackup4Dev relaunch-test`.
+- **Your edits to config.toml are no longer undone.** *Aggiungi* / *Ignora* on a coverage
+  warning and *Esegui ora* saved the copy of the config loaded at launch, silently dropping
+  anything changed in the file since. They now re-read the file first.
+- **The advanced restore no longer replaces your config.** At the end it generated a fresh
+  default config over the existing one; now only when there is none.
+
 ## [4.0.0] - 2026-10-07
 
 ### Changed

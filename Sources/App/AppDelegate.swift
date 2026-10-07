@@ -37,6 +37,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ProcessInfo.processInfo.disableAutomaticTermination("Menu bar app must stay alive")
         ProcessInfo.processInfo.disableSuddenTermination()
         Log.info("App launched")
+        // After an update (or a double launch) only the newest copy stays: ask any other
+        // running instance to quit. A polite request: a backup running from the command
+        // line has no event loop and is never touched.
+        for other in NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            where other.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            Log.info("Another instance (pid \(other.processIdentifier)) asked to quit")
+            other.terminate()
+        }
         // Installed by a 3.x updater under the old name: rename and relaunch.
         if AutoUpdater.relocateFromLegacyName() { return }
 
@@ -455,9 +463,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         treeWindowController = treeWC
     }
 
+    /// The config as it is on disk now. The copy loaded at launch can be stale (the file may
+    /// have been edited since): saving it would silently undo those edits (seen 2026-10-07).
+    private func freshConfig() -> Config? {
+        (try? Config.load(from: Config.defaultPath)) ?? config
+    }
+
     private func startBackup(selectedPaths: [String], includeRightsManagedFiles: Bool) {
         guard !uiState.isCleaning else { return }
-        guard var pending = config else { return }
+        guard var pending = freshConfig() else { return }
         pending.source.paths = selectedPaths
         pending.protection.includeRightsManagedFiles = includeRightsManagedFiles
         do {
@@ -681,9 +695,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.uiState.restoreResult = nil
                 }
 
-                let backupDir = snapshotURL.deletingLastPathComponent()
-                let newConfig = generateDefaultConfig(backupPath: backupDir.path)
-                try? newConfig.save(to: Config.defaultPath)
+                // Only a Mac with no config gets one generated: never replace the user's own.
+                if !FileManager.default.fileExists(atPath: Config.defaultPath.path) {
+                    let backupDir = snapshotURL.deletingLastPathComponent()
+                    try? generateDefaultConfig(backupPath: backupDir.path).save(to: Config.defaultPath)
+                }
                 self?.config = try? Config.load(from: Config.defaultPath)
                 self?.pollStatus()
             }
@@ -950,7 +966,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCoverage(_ gap: CoverageGap, ignore: Bool) {
-        guard var pending = config else { return }
+        guard var pending = freshConfig() else { return }
         if ignore {
             if !pending.coverage.ignore.contains(gap.path) { pending.coverage.ignore.append(gap.path) }
         } else if gap.kind == .database {

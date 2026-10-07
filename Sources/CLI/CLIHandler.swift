@@ -47,6 +47,8 @@ enum CLIHandler {
             case "restore-file": try runRestoreFile(subArgs: subArgs, configPath: configPath)
             case "undo": try runUndo(subArgs: subArgs)
             case "new-mac": try runNewMac(subArgs: subArgs, configPath: configPath)
+            case "relaunch-test":
+                MainActor.assumeIsolated { relaunchTest() }
             case "render-restore":
                 guard args.count > 2 else { print("render-restore <backup-dir> <out-dir>"); return }
                 MainActor.assumeIsolated { renderRestore(backup: args[1], to: args[2]) }
