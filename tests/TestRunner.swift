@@ -31,6 +31,7 @@ struct TestRunner {
         let coverageNoise = CoverageNoiseTests()
         let picker = PickerTests()
         let updater = UpdaterTests()
+        let stages = NewMacStageTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -70,6 +71,13 @@ struct TestRunner {
             ("Updater.validateRejectsWrongBuilds", updater.test_validateRejectsWrongBuilds),
             ("Updater.swapWhole", updater.test_swapReplacesTheAppWholeAndLeavesNothingBehind),
             ("Updater.failedSwapKeepsOld", updater.test_failedSwapKeepsTheOldApp),
+            ("NewMac.loginItemsNeverInFilePhase", stages.test_loginItemsAreNeverInAFilePhase),
+            ("NewMac.brokenShellUndoes", stages.test_brokenShellUndoesItsPhase),
+            ("NewMac.realShellCheck", stages.test_realShellCheckCatchesExitAndPassesHealthy),
+            ("NewMac.phaseUndoAlone", stages.test_eachPhaseUndoesOnItsOwn),
+            ("NewMac.serviceHealth", stages.test_serviceHealthFromLaunchctl),
+            ("NewMac.serviceMovedAside", stages.test_removedServiceIsMovedAsideNotDeleted),
+            ("NewMac.ignoredApps", stages.test_ignoredAppsAreNeverListedAndSurviveSave),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

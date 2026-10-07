@@ -64,6 +64,9 @@ struct Config {
         out.append("ignore = [")
         for path in coverage.ignore { out.append("    \"\(Self.escape(path))\",") }
         out.append("]")
+        out.append("ignore_apps = [")
+        for app in coverage.ignoreApps { out.append("    \"\(Self.escape(app))\",") }
+        out.append("]")
         out.append("")
         if !topics.isEmpty {
             out.append("[topics]")
@@ -182,6 +185,7 @@ struct Config {
         case "databases.sqlite": config.databases.sqlite = values
         case "databases.postgres": config.databases.postgres = values
         case "coverage.ignore": config.coverage.ignore = values
+        case "coverage.ignore_apps": config.coverage.ignoreApps = values
         default: break
         }
     }
@@ -266,6 +270,8 @@ struct SourceConfig {
 /// Folders the coverage audit must not report (the user said "non mi interessa").
 struct CoverageConfig: Equatable {
     var ignore: [String] = []
+    /// Apps of the old Mac the user does not want back: never listed as missing.
+    var ignoreApps: [String] = []
 }
 
 struct DestinationConfig {
