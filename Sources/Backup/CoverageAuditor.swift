@@ -85,6 +85,11 @@ enum CoverageAuditor {
             guard !ConfigDiscovery.isForbidden(path),
                   !ConfigDiscovery.isDeniedHidden(relative: rel),
                   !filter.isExcluded(relativePath: rel) else { continue }
+            // A linked git worktree (".git" is a file) is temporary and its commits live in
+            // the main repository, which the git safety net already bundles (2026-10-07: a
+            // job's worktree was added, then deleted mid-backup).
+            var gitIsDir: ObjCBool = false
+            if fm.fileExists(atPath: path + "/.git", isDirectory: &gitIsDir), !gitIsDir.boolValue { continue }
             guard let newest = newestModification(in: path, filter: filter, home: home, after: cutoff) else { continue }
             gaps.append(CoverageGap(kind: .folder, path: ConfigDiscovery.contract(path),
                                     lastModified: ISO8601DateFormatter().string(from: newest),

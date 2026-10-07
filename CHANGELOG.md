@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.1.1] - 2026-10-07
+
+### Fixed
+- The coverage audit no longer suggests linked git worktrees: they are temporary (a job's
+  worktree was added, then deleted during the backup, making it incomplete) and their
+  commits are already saved through the main repository.
+- Build and test scripts find Xcode wherever it is installed (e.g. `/Applications/Dev`), not
+  only in `/Applications`.
+
 ## [3.1.0] - 2026-10-07
 
 ### Changed
