@@ -108,4 +108,54 @@ struct EncryptionTests {
         try expectEqual(again, first, "the existing store is reused, not replaced")
         try expect(FileManager.default.fileExists(atPath: again.destination + "/keep"), "its content is still there")
     }
+
+    /// Deleted snapshots give their space back to the disk after a compaction.
+    func test_compactionGivesSpaceBack() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let s = setup(box.root)
+        try FileManager.default.createDirectory(atPath: (s.container as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        defer { EncryptedStore.close(s, force: true); try? FileManager.default.removeItem(atPath: EncryptedStore.compactFlag(volume: s.volume)) }
+        try EncryptedStore.create(s, password: "una frase lunga", sizeBytes: 5 * 1_073_741_824)
+        try EncryptedStore.open(s, password: "una frase lunga")
+        _ = Shell.run("/bin/dd", ["if=/dev/urandom", "of=\(s.mountPoint)/old-snapshot", "bs=1m", "count=300"], timeout: 120)
+        try FileManager.default.removeItem(atPath: s.mountPoint + "/old-snapshot")
+        EncryptedStore.markSpaceFreed(destination: URL(fileURLWithPath: s.mountPoint + "/MacBackup4Dev"))
+        Thread.sleep(forTimeInterval: 20)   // APFS hands freed blocks back shortly after a delete
+        let freed = try EncryptedStore.compact(s, password: "una frase lunga")
+        try expect(freed > 200 * 1_048_576, "most of the 300 MB came back: \(freed)")
+        try expect(EncryptedStore.isOpen(s), "open again after compacting")
+        try expect(!EncryptedStore.compactionRunning, "no compaction lock left behind")
+    }
+
+    /// A store that vanished without being closed (disk pulled out) is checked when reopened.
+    func test_pulledOutStoreIsCheckedOnReopen() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let s = setup(box.root)
+        try FileManager.default.createDirectory(atPath: (s.container as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        defer { EncryptedStore.close(s, force: true); try? FileManager.default.removeItem(atPath: EncryptedStore.openMarker(s)) }
+        try EncryptedStore.create(s, password: "una frase lunga", sizeBytes: 1_073_741_824)
+        try EncryptedStore.open(s, password: "una frase lunga")
+        try expect(FileManager.default.fileExists(atPath: EncryptedStore.openMarker(s)), "open store is marked")
+        try expect(EncryptedStore.close(s), "clean close")
+        try expect(!EncryptedStore.wasLeftOpen(s), "clean close clears the mark")
+        try EncryptedStore.open(s, password: "una frase lunga")
+        // Pulled out: unmounted behind our back, the mark stays.
+        _ = Shell.run("/usr/sbin/diskutil", ["unmount", "force", s.mountPoint], timeout: 60)
+        _ = Shell.run("/usr/sbin/diskutil", ["eject", s.mountPoint], timeout: 60)
+        _ = Shell.run("/usr/bin/hdiutil", ["detach", "-force", s.mountPoint], timeout: 60)
+        try expect(!EncryptedStore.isOpen(s), "gone")
+        try expect(EncryptedStore.wasLeftOpen(s), "the mark tells it was not closed by us")
+        try EncryptedStore.open(s, password: "una frase lunga")   // runs the volume check first
+        try expect(EncryptedStore.isOpen(s), "checked and reopened")
+        try expectNil(EncryptedStore.checkAndRepair(s), "a sound volume passes the check")
+    }
+
+    func test_freedSpaceIsFlaggedOnlyForStores() throws {
+        let vol = "MacBackup4Dev-zz\(Int.random(in: 1000...9999))"
+        defer { try? FileManager.default.removeItem(atPath: EncryptedStore.compactFlag(volume: vol)) }
+        EncryptedStore.markSpaceFreed(destination: URL(fileURLWithPath: "/Volumes/RoberdanBCK/RustyMacBackup"))
+        try expect(!FileManager.default.fileExists(atPath: EncryptedStore.compactFlag(volume: "RoberdanBCK")), "a plain disk is never flagged")
+        EncryptedStore.markSpaceFreed(destination: URL(fileURLWithPath: "/Volumes/\(vol)/MacBackup4Dev"))
+        try expect(EncryptedStore.needsCompaction(EncryptedStore.Setup(container: "/x", volume: vol)), "a store is flagged")
+    }
 }

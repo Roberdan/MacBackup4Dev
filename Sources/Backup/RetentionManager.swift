@@ -152,6 +152,9 @@ enum RetentionManager {
                 try FileManager.default.removeItem(at: staged)
                 removed.append(backup.name)
                 Log.info("Pruned: \(backup.name)")
+                // Inside an encrypted store the freed space returns to the disk only after a
+                // compaction: remember that there is some (the app compacts when idle).
+                EncryptedStore.markSpaceFreed(destination: destination)
             } catch {
                 throw NSError(domain: "SnapshotCleanup", code: 2, userInfo: [
                     NSLocalizedDescriptionKey:

@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.1.1] - 2026-10-07
+
+### Added
+- **Freed space goes back to the disk.** Deleting old snapshots inside the encrypted store did
+  not shrink it on the disk. Now, when snapshots are deleted, the app compacts the store once
+  nothing is running (close, `hdiutil compact`, reopen) and says how much came back. A
+  scheduled backup that starts meanwhile waits for the next round instead of colliding.
+- **Disk pulled out without ejecting:** the store remembers it was open; if it disappears
+  without being closed in the same boot, it is checked with `diskutil verifyVolume` when
+  reopened (and repaired if needed). Nothing is written into a store that fails the check.
+  A restart or shutdown is a clean close and triggers no check.
+
 ## [4.1.0] - 2026-10-07
 
 ### Added
