@@ -65,13 +65,17 @@ enum EncryptedStore {
 
     /// Creates the encrypted image (not opened). `sizeBytes`: its maximum size.
     static func create(_ setup: Setup, password: String, sizeBytes: Int64) throws {
-        let r: Shell.Result
+        // diskutil image (newer macOS; APFS is its default) and hdiutil (always there) both
+        // work; the options of `diskutil image` differ between macOS versions (macOS 14 has
+        // no --fs), so a refused usage falls back to hdiutil (found on CI, 2026-10-07).
+        var r = Shell.Result(status: -1, stdout: "", stderr: "")
         if hasDiskutilImage {
             r = Shell.run("/usr/sbin/diskutil", ["image", "create", "blank", "--encrypt", "--stdinpass",
-                                                 "--size", String(sizeBytes), "--volumeName", setup.volume,
-                                                 "--fs", "APFS", setup.container],
+                                                 "--size", String(sizeBytes), "--volumeName", setup.volume, setup.container],
                           timeout: 300, stdin: password)
-        } else {
+        }
+        if !r.ok || !FileManager.default.fileExists(atPath: setup.container) {
+            try? FileManager.default.removeItem(atPath: setup.container)
             r = Shell.run("/usr/bin/hdiutil", ["create", "-size", "\(sizeBytes / 1_048_576)m", "-type", "SPARSEBUNDLE",
                                                "-fs", "APFS", "-encryption", "AES-256", "-stdinpass",
                                                "-volname", setup.volume, setup.container],
@@ -91,11 +95,13 @@ enum EncryptedStore {
     static func open(_ setup: Setup, password: String) throws {
         guard !isOpen(setup) else { return }
         guard FileManager.default.fileExists(atPath: setup.container) else { throw StoreError.containerMissing(setup.container) }
-        let r: Shell.Result
+        var r = Shell.Result(status: -1, stdout: "", stderr: "")
         if hasDiskutilImage {
             r = Shell.run("/usr/sbin/diskutil", ["image", "attach", "--stdinpass", "--nobrowse", setup.container],
                           timeout: 120, stdin: password)
-        } else {
+        }
+        // Older `diskutil image` without these options: hdiutil, which every macOS has.
+        if !r.ok && !isOpen(setup) && (!hasDiskutilImage || (r.stderr + r.stdout).contains("--help")) {
             r = Shell.run("/usr/bin/hdiutil", ["attach", "-stdinpass", "-nobrowse", "-noautoopen", setup.container],
                           timeout: 120, stdin: password)
         }
@@ -128,6 +134,10 @@ enum EncryptedStore {
     /// (review 4.1 B1). Base64 is plain ASCII and needs no quoting.
     static func savePassword(_ password: String, for setup: Setup) throws {
         guard !keychainLocked else { throw StoreError.keychainLocked }
+        // Already there: never rewrite it (changing an existing item makes macOS ask for
+        // confirmation in a window — the test hung on it, 2026-10-07).
+        if readPassword(for: setup) == password { return }
+        if readPassword(for: setup) != nil { deletePassword(for: setup) }
         let encoded = "b64:" + Data(password.utf8).base64EncodedString()
         let command = "add-generic-password -U -a \"\(setup.volume)\" -s \"\(keychainService)\" "
             + "-l \"\(keychainService) (\(setup.volume))\" -T /usr/bin/security -w \"\(encoded)\"\n"
