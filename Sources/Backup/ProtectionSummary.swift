@@ -18,6 +18,7 @@ struct ProtectionSummary: Equatable {
     var days: [DayMark]                // oldest → newest, 14 entries
     var reposWithSavedCommits: Int
     var databasesSaved: Int
+    var filesInLastComplete: Int64? = nil
 
     static func build(destination: URL, now: Date = Date(), staleAfter: TimeInterval = 36 * 3600) -> ProtectionSummary {
         let all = SnapshotCatalog.list(at: destination)
@@ -42,7 +43,8 @@ struct ProtectionSummary: Equatable {
                                   looksLikeNewMac: latest?.manifest?.shrinkWarning != nil,
                                   days: days,
                                   reposWithSavedCommits: complete?.manifest?.git.filter { $0.bundle != nil }.count ?? 0,
-                                  databasesSaved: complete?.manifest?.databases.filter { $0.file != nil }.count ?? 0)
+                                  databasesSaved: complete?.manifest?.databases.filter { $0.file != nil }.count ?? 0,
+                                  filesInLastComplete: complete?.manifest?.filesProcessed)
 
         if s.looksLikeNewMac {
             s.level = .unprotected
@@ -52,8 +54,7 @@ struct ProtectionSummary: Equatable {
         }
         if let complete {
             let age = now.timeIntervalSince(complete.timestamp)
-            let files = complete.manifest.map { "\($0.filesProcessed) file" } ?? ""
-            s.detail = [Self.dateLabel(complete.timestamp), files, "0 errori"].filter { !$0.isEmpty }.joined(separator: " · ")
+            s.detail = Self.dateLabel(complete.timestamp) + " · 0 errori"
             if s.latestIsIncomplete {
                 s.level = .attention
                 s.headline = "Attenzione · ultimo completo \(Self.ago(age))"
