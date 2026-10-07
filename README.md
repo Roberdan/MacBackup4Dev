@@ -111,24 +111,48 @@ in two passes:
 Folders that hold credentials (`.ssh`, `.gnupg`, `.aws`, `.azure`, `.docker`, `.npmrc`) are
 detected but left **off by default** — you opt into them explicitly, exactly as before.
 
-### What It Will Never Touch
+### What It Will Never Touch, and why
 
-These paths are hardcoded as forbidden and enforced at both the UI and engine level —
-including the "Aggiungi percorso" picker, which now rejects them on add instead of
-listing them as if they were backupable:
+Nothing here is lost data: each exclusion is either rebuilt better than copied, already
+somewhere else, or dangerous to put back on another Mac.
 
-```
-~/Library/Mail         ~/Library/Messages      ~/Library/Safari
-~/Library/Containers   ~/Library/Caches
-/Library   /System   /etc   /Applications   /usr   /opt   /private
-```
-
-`~/Library/CloudStorage` (OneDrive, Dropbox, Google Drive, …) is forbidden by the same
-rule but for a different reason: not a daemon-crash risk, a *provider* one (a sync client
-re-uploading a local copy, a company's DLP policy blocking the copy). See `[protection]`
-below for the config-only opt-in.
+| Path | Why it is not copied | How you get it back on a new Mac |
+|---|---|---|
+| `~/Library/Mail`, `~/Library/Messages`, `~/Library/Safari` | Reading them needs Full Disk Access (often blocked on company Macs) and they live on a server anyway | Sign in: Exchange/IMAP, iCloud Messages, Safari sync |
+| `~/Library/Caches` | Rebuilt by each app | Nothing to do |
+| `/System`, `/Library`, `/etc`, `/usr`, `/private` | macOS itself: copied from another Mac or macOS version they can stop it from starting | Comes with macOS |
+| `/Applications`, `/opt` (Homebrew) | Programs, not your data; a copy would be old and tied to the old Mac | Their list is saved at every backup; *Nuovo Mac → Programmi* reinstalls them one by one, current versions |
+| `~/Library/Containers` | Sandboxed apps' private data, protected by macOS; most of it syncs through iCloud | Signing in to the app (the only gap: apps keeping data only locally) |
+| `~/Library/CloudStorage` (OneDrive, Dropbox, …) | Already in the cloud; copying it can make the sync client re-upload, and company DLP may block it | Sign in to the provider. Config-only opt-in under `[protection]` |
 
 No Full Disk Access required. No TCC prompts. No system file access.
+
+### Encrypted backups (4.1)
+
+Backups are encrypted by the app, whatever the disk: snapshots live inside an encrypted APFS
+disk image (`MacBackup4Dev.sparsebundle`, AES-256) on the backup disk. The image only takes
+the space of its content and keeps hard links, so snapshots work exactly as on a plain disk.
+
+- **Your password**, chosen by you (at least 10 characters: a phrase you remember is fine).
+  It stays in this Mac's login Keychain, so scheduled backups open the image by themselves;
+  on a new Mac you type it once. Without it the backups cannot be opened: keep it somewhere
+  outside the Mac (e.g. Apple Passwords).
+- **Credentials included:** with the backup encrypted, SSH keys, `gh` and other tokens are
+  offered too (one checkbox each), so a new Mac is usable straight away.
+- **Existing setups:** the menu shows *Backup non cifrati → Cifra*. The first encrypted backup
+  is a full one; the old unencrypted snapshots stay where they are until you delete them.
+- **Eject** closes the image before ejecting the disk.
+- The Keychain item is read through `/usr/bin/security` (trusted in its access list): the app
+  is ad-hoc signed, and reading it directly would make macOS ask for the Keychain password
+  after every update — and block the scheduled backup.
+
+### A new Mac with another user name
+
+Configuration files often contain the old home written in full (`/Users/olduser/...`:
+LaunchAgents, shell files, tool configs). On restore, text files and property lists get the old
+home replaced by the new one (only whole path components); binary files are copied as they are.
+Snapshots record their home since 4.1; for older ones it is inferred from their LaunchAgents
+and shell files.
 
 ---
 
@@ -605,7 +629,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 123 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 133 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?

@@ -122,7 +122,8 @@ enum NewMacRestore {
             report.log("  \(onlyNew.items.count) file da aggiungere, \(plan.toReplace) già presenti e diversi (lasciati come sono)", sink)
             if !dryRun, !onlyNew.items.isEmpty {
                 do {
-                    let (r, undo) = try SelectiveRestore.apply(onlyNew, undoRoot: URL(fileURLWithPath: home + "/.rustybackup-pre-restore"))
+                    let (r, undo) = try SelectiveRestore.apply(onlyNew, undoRoot: URL(fileURLWithPath: home + "/.rustybackup-pre-restore"),
+                                                               rewrite: HomeRewrite.make(snapshot: snapshot, newHome: home))
                     report.log("  aggiunti \(r.restored), falliti \(r.failed)\(undo.map { " · annullabile da \($0.path)" } ?? "")", sink)
                     if r.failed > 0 { report.failures.append("\(r.failed) file di configurazione non ripristinati") }
                 } catch {
@@ -376,14 +377,17 @@ enum NewMacRestore {
     static func availableLaunchAgents(snapshot: URL) -> [LaunchAgentInfo] {
         let dir = snapshot.appendingPathComponent("Library/LaunchAgents")
         let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasSuffix(".plist") }
+        let rewrite = HomeRewrite.make(snapshot: snapshot, newHome: FileManager.default.homeDirectoryForCurrentUser.path)
         return files.sorted().compactMap { name in
             let url = dir.appendingPathComponent(name)
             guard let dict = NSDictionary(contentsOf: url) as? [String: Any],
                   let label = dict["Label"] as? String else { return nil }
             let args = dict["ProgramArguments"] as? [String] ?? []
-            let program = (dict["Program"] as? String)
+            let found = (dict["Program"] as? String)
                 ?? args.first(where: { $0.hasPrefix("/") && !$0.hasPrefix("/bin/") && !$0.hasPrefix("/usr/") })
                 ?? args.first
+            // Another user name on this Mac: look for the program where it will be after restore.
+            let program = found.map { rewrite?.apply(to: $0) ?? $0 }
             return LaunchAgentInfo(label: label, plist: url, program: program)
         }
     }
@@ -396,6 +400,9 @@ enum NewMacRestore {
         do {
             try FileManager.default.createDirectory(atPath: home + "/Library/LaunchAgents", withIntermediateDirectories: true)
             try FileManager.default.copyItem(atPath: agent.plist.path, toPath: target)
+            // The snapshot root is two levels above Library/LaunchAgents/<file>.
+            let snapshot = agent.plist.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            HomeRewrite.make(snapshot: snapshot, newHome: home)?.rewriteFile(atPath: target)
         } catch { return "\(agent.label): non copiato (\(error.localizedDescription))" }
         let domain = "gui/\(getuid())"
         _ = Shell.run("/bin/launchctl", ["enable", "\(domain)/\(agent.label)"])

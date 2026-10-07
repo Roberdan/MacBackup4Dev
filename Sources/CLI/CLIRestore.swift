@@ -21,6 +21,7 @@ extension CLIHandler {
 
     static func destination(_ configPath: String?) throws -> (Config, URL) {
         let cfg = try loadConfig(configPath: configPath)
+        try EncryptedStore.ensureOpen(cfg)
         let dest = URL(fileURLWithPath: cfg.destination.path)
         guard FileManager.default.fileExists(atPath: dest.path) else {
             throw err("Disco di backup non collegato: \(cfg.destination.path)")

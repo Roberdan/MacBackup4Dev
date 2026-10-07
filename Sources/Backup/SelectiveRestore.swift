@@ -265,7 +265,8 @@ enum SelectiveRestore {
     /// Apply a plan. Each file is written next to its target and renamed into place, so a
     /// half-written file never replaces a good one. Replaced files are kept for undo, and
     /// the undo record is saved as the restore goes, not only at the end.
-    static func apply(_ plan: RestorePlan, undoRoot: URL = RestoreEngine.preRestoreBaseURL) throws -> (result: RestoreResult, undoDir: URL?) {
+    static func apply(_ plan: RestorePlan, undoRoot: URL = RestoreEngine.preRestoreBaseURL,
+                      rewrite: HomeRewrite? = nil) throws -> (result: RestoreResult, undoDir: URL?) {
         let fm = FileManager.default
         var result = RestoreResult()
         let formatter = DateFormatter()
@@ -290,6 +291,8 @@ enum SelectiveRestore {
                     try fm.copyItem(at: dst, to: keep)
                 }
                 try HardLinker.copyFile(from: src.path, to: temp.path)
+                // Another user name on this Mac: old home paths inside config files follow.
+                rewrite?.rewriteFile(atPath: temp.path)
                 if item.action == .replace {
                     _ = try fm.replaceItemAt(dst, withItemAt: temp)
                     manifest.replaced.append(item.relativePath)

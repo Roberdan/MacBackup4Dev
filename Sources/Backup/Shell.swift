@@ -12,7 +12,8 @@ enum Shell {
     }
 
     static func run(_ executable: String, _ arguments: [String], cwd: String? = nil,
-                    timeout: TimeInterval = 300, environment: [String: String]? = nil) -> Result {
+                    timeout: TimeInterval = 300, environment: [String: String]? = nil,
+                    stdin: String? = nil) -> Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -28,7 +29,10 @@ enum Shell {
         let outPipe = Pipe(), errPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
-        process.standardInput = FileHandle.nullDevice
+        // stdin: secrets (a disk image password) go here, never in the arguments, which
+        // anyone on the Mac can read in the process list.
+        let inPipe = stdin.map { _ in Pipe() }
+        process.standardInput = inPipe ?? FileHandle.nullDevice
 
         // Drain both pipes while the process runs: a full pipe would block it forever.
         // Handlers run serially per handle, so chunks keep their order.
@@ -48,6 +52,10 @@ enum Shell {
         }
         do {
             try process.run()
+            if let inPipe, let stdin {
+                inPipe.fileHandleForWriting.write(Data(stdin.utf8))
+                try? inPipe.fileHandleForWriting.close()
+            }
         } catch {
             outPipe.fileHandleForReading.readabilityHandler = nil
             errPipe.fileHandleForReading.readabilityHandler = nil

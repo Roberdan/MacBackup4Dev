@@ -7,6 +7,9 @@ struct MachineID: Codable {
     let macOSVersion: String
     let arch: String
     let timestamp: String
+    /// Home folder of the Mac that made the snapshot (4.1): a new Mac with another user name
+    /// rewrites it in restored configuration files (HomeRewrite). nil in older snapshots.
+    var home: String? = nil
 }
 
 /// Captures a portable snapshot of the dev environment before each backup.
@@ -79,7 +82,8 @@ enum EnvironmentSnapshot {
             serialNumber: serialNumber(),
             macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
             arch: machineArch(),
-            timestamp: ISO8601DateFormatter().string(from: Date())
+            timestamp: ISO8601DateFormatter().string(from: Date()),
+            home: NSHomeDirectory()
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

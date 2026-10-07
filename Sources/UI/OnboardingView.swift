@@ -30,9 +30,17 @@ final class OnboardingModel: ObservableObject {
     @Published var preparing = false
     /// Backups found on connected disks (for "Questo è un Mac nuovo").
     @Published var existingBackups: [(volume: String, backupDir: URL, snapshots: [String])] = []
+    /// Encrypted backups found on connected disks (container path, volume name, disk name).
+    @Published var encryptedBackups: [(container: String, volume: String, disk: String)] = []
+    @Published var typedKey = ""
+    @Published var keyError = ""
+    @Published var password = ""
+    @Published var confirm = ""
 
     var onFinish: ((Config, Int??) -> Void)?
     var onRestoreNewMac: ((URL) -> Void)?
+    /// New Mac: the adopted store becomes this Mac's backup (so it keeps backing up into it).
+    var onAdopted: ((Config) -> Void)?
 
     func refreshDisks() {
         let vols = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeNameKey],
@@ -40,6 +48,39 @@ final class OnboardingModel: ObservableObject {
         volumes = vols.filter { $0.path.hasPrefix("/Volumes/") && $0.path != "/" }
         if volume == nil || !volumes.contains(volume!) { volume = volumes.first }
         existingBackups = RestoreEngine.findBackupSnapshots()
+        encryptedBackups = volumes.compactMap { vol in
+            let container = vol.appendingPathComponent(EncryptedStore.imageName).path
+            guard FileManager.default.fileExists(atPath: container),
+                  let name = EncryptedStore.volumeName(ofContainer: container) else { return nil }
+            return (container, name, vol.lastPathComponent)
+        }
+    }
+
+    /// New Mac: opens the encrypted backup with the recovery key and goes to the restore.
+    func openEncrypted(_ found: (container: String, volume: String, disk: String)) {
+        keyError = ""
+        let key = typedKey
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let setup = try EncryptedStore.adopt(container: found.container, volume: found.volume, password: key)
+                // Same folders and databases as the last complete backup of the old Mac.
+                let dest = URL(fileURLWithPath: setup.destination)
+                let manifest = SnapshotCatalog.latestComplete(at: dest).flatMap { SnapshotManifest.read(from: $0.url) }
+                var config = Config(source: SourceConfig(paths: manifest?.sources ?? []),
+                                    destination: DestinationConfig(path: setup.destination),
+                                    exclude: ExcludeConfig(patterns: defaultExcludePatterns),
+                                    retention: RetentionConfig())
+                config.encryption = EncryptionConfig(container: setup.container, volume: setup.volume)
+                config.databases.postgres = manifest?.databases.filter { $0.kind == "postgres" }.map(\.source) ?? []
+                DispatchQueue.main.async {
+                    self.typedKey = ""
+                    self.onAdopted?(config)
+                    self.onRestoreNewMac?(dest)
+                }
+            } catch {
+                DispatchQueue.main.async { self.keyError = error.localizedDescription }
+            }
+        }
     }
 
     func startScan() {
@@ -48,7 +89,9 @@ final class OnboardingModel: ObservableObject {
             let result = DevEnvironment.scan()
             DispatchQueue.main.async {
                 self.scan = result
-                self.selected = result.defaultSelection
+                // The backup is encrypted: credentials are proposed too (that is what makes a
+                // new Mac fast), still one checkbox each.
+                self.selected = result.defaultSelection.union(result.allItems.filter(\.sensitive).map(\.id))
                 self.scanning = false
                 self.step = .choose
             }
@@ -57,17 +100,24 @@ final class OnboardingModel: ObservableObject {
 
     var selectedItems: [DevItem] { scan.allItems.filter { selected.contains($0.id) } }
 
+    /// Creates the encrypted store on the chosen disk with the user's password, then starts.
     func finish() {
-        guard let volume else { return }
+        guard let volume, EncryptedStore.passwordProblem(password, confirm: confirm) == nil else { return }
         preparing = true
-        let scan = self.scan, selected = self.selected, option = schedule.option
+        keyError = ""
+        let scan = self.scan, selected = self.selected, password = self.password, option = schedule.option
         DispatchQueue.global(qos: .userInitiated).async {
-            let folder = AppIdentity.backupFolder(on: volume)
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let config = DevEnvironment.config(from: scan, selected: selected, backupPath: folder.path)
-            DispatchQueue.main.async {
-                self.preparing = false
-                self.onFinish?(config, option)
+            do {
+                let setup = try EncryptedStore.createOrAdopt(on: volume, password: password)
+                var config = DevEnvironment.config(from: scan, selected: selected, backupPath: setup.destination)
+                config.encryption = EncryptionConfig(container: setup.container, volume: setup.volume)
+                DispatchQueue.main.async {
+                    self.preparing = false
+                    self.password = ""; self.confirm = ""
+                    self.onFinish?(config, option)
+                }
+            } catch {
+                DispatchQueue.main.async { self.preparing = false; self.keyError = error.localizedDescription }
             }
         }
     }
@@ -121,7 +171,27 @@ struct OnboardingView: View {
             choiceCard(symbol: "shield.lefthalf.filled", title: "Proteggere questo Mac",
                        text: "Trovo da solo progetti, configurazioni di terminale, editor, assistenti AI, linguaggi, database e programmi installati. Tu scegli cosa tenere.",
                        action: "Analizza questo Mac", busy: model.scanning) { model.startScan() }
-            if let backup = model.existingBackups.first {
+            if let found = model.encryptedBackups.first {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "lock.laptopcomputer").font(.system(size: 26)).foregroundColor(.accentColor).frame(width: 36)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Questo è un Mac nuovo").font(.headline)
+                        Text("Su \(found.disk) c'è un backup cifrato. Scrivi la sua password per aprirlo: poi lo rimetto una fase alla volta.")
+                            .font(.callout).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            SecureField("Password del backup", text: $model.typedKey)
+                                .textFieldStyle(.roundedBorder).font(.system(.body, design: .monospaced)).frame(maxWidth: 380)
+                            Button("Apri il backup") { model.openEncrypted(found) }
+                                .buttonStyle(.borderedProminent).disabled(model.typedKey.isEmpty)
+                        }
+                        if !model.keyError.isEmpty { Text(model.keyError).font(.caption).foregroundColor(.red) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(16)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separatorColor)))
+            } else if let backup = model.existingBackups.first {
                 choiceCard(symbol: "laptopcomputer.and.arrow.down", title: "Questo è un Mac nuovo",
                            text: "Ho trovato un backup su \(backup.volume) (\(backup.snapshots.count) copie). Lo rimetto una fase alla volta: progetti, configurazioni, database e programmi da reinstallare. Niente parte da solo senza il tuo consenso.",
                            action: "Rimetti questo Mac com'era", busy: false) { model.onRestoreNewMac?(backup.backupDir) }
@@ -270,11 +340,21 @@ struct OnboardingView: View {
         return VStack(alignment: .leading, spacing: 12) {
             Text("Tutto pronto").font(.title3.weight(.semibold))
             summaryRow("folder", "\(items.count - dbs) cose da salvare")
-            if dbs > 0 { summaryRow("cylinder.split.1x2", "\(dbs) database, copiati in modo coerente") }
+            if dbs > 0 { summaryRow("cylinder.split.1x2", dbs == 1 ? "1 database, copiato in modo coerente" : "\(dbs) database, copiati in modo coerente") }
             if creds > 0 { summaryRow("key.fill", "\(creds) credenziali scelte da te (il disco deve essere cifrato)") }
             summaryRow("externaldrive", "Disco: \(model.volume?.lastPathComponent ?? "-")")
             summaryRow("clock", "Frequenza: \(model.schedule.rawValue)")
             summaryRow("hammer", "Elenco dei programmi installati: salvato a ogni backup")
+            summaryRow("lock.fill", "Backup cifrato dall'app (AES-256) con una password che scegli tu")
+            SecureField("Password (almeno \(EncryptedStore.minimumPasswordLength) caratteri, anche una frase)", text: $model.password)
+                .textFieldStyle(.roundedBorder).frame(maxWidth: 420)
+            SecureField("Ripeti la password", text: $model.confirm).textFieldStyle(.roundedBorder).frame(maxWidth: 420)
+            Text("Resta nel Portachiavi di questo Mac. Su un Mac nuovo te la chiedo: senza, i backup non si aprono.")
+                .font(.caption).foregroundColor(.secondary)
+            if let problem = EncryptedStore.passwordProblem(model.password, confirm: model.confirm), !model.password.isEmpty {
+                Text(problem).font(.caption).foregroundColor(.orange)
+            }
+            if !model.keyError.isEmpty { Text(model.keyError).font(.caption).foregroundColor(.red) }
             Spacer()
             HStack {
                 Button("Indietro") { model.step = .schedule }
@@ -282,7 +362,8 @@ struct OnboardingView: View {
                 if model.preparing { ProgressView().controlSize(.small); Text("Preparo…").font(.caption).foregroundColor(.secondary) }
                 Button("Inizia il primo backup") { model.finish() }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-                    .disabled(model.preparing || model.volume == nil)
+                    .disabled(model.preparing || model.volume == nil
+                              || EncryptedStore.passwordProblem(model.password, confirm: model.confirm) != nil)
             }
         }
     }

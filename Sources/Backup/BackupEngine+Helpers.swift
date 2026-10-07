@@ -8,9 +8,10 @@ extension BackupEngine {
     // F-03: Verify via mountedVolumeURLs — statfs() passes on stale /Volumes/ mountpoints
     // that point to internal disk paths, causing backup to silently target the wrong disk.
     static func isVolumeReallyMounted(_ path: String) -> Bool {
+        // Hidden volumes included: the encrypted store is mounted "nobrowse" (not in the Finder).
         guard let vols = FileManager.default.mountedVolumeURLs(
             includingResourceValuesForKeys: nil,
-            options: [.skipHiddenVolumes]) else { return false }
+            options: []) else { return false }
         let target = URL(fileURLWithPath: path).standardized.path
         return vols.contains { vol in
             let vp = vol.standardized.path

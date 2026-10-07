@@ -16,7 +16,7 @@ bundle identifier (update continuity, notification permission), everything on th
 
 ```bash
 ./build.sh              # compile + sign → build/RustyMacBackup.app
-./run-tests.sh          # 123 tests → build/RustyMacBackupTests
+./run-tests.sh          # 133 tests → build/RustyMacBackupTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -27,14 +27,14 @@ Version is set in one place: `VERSION` default in `build.sh`. `build-pkg.sh` rea
 ```
 Sources/
   App/          AppDelegate, AppIdentity, main, StatusManager, AutoUpdater, UpdateSignature, IconManager
-  Backup/       BackupEngine(+Helpers), HardLinker, FileScanner, RestoreEngine,
+  Backup/       BackupEngine(+Helpers), EncryptedStore, HomeRewrite, HardLinker, FileScanner, RestoreEngine,
                 RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
                 SelectiveRestore (+Topics, FileVersions), NewMacRestore, NewMacStages, ToolInventory, ProtectionSummary, Shell
   Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager
   CLI/          CLIHandler, CLIRestore (3.0 commands), PruneOptions
   Diagnostics/  Log, ErrorReporter, DiskDiagnostics, FDACheck
-  UI/           PopoverView, OnboardingView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
+  UI/           PopoverView, OnboardingView, EncryptionSetupView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
                 SnapshotPickerView, DesignTokens, TreeWindowController, PopoverViewController
 ```
 
@@ -99,6 +99,13 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   LaunchServices (a child process dies with the app). One copy at a time via a distributed
   notification registered `.deliverImmediately` (never NSRunningApplication.terminate:
   silently blocked; plain observers: suspended for a menu-bar app).
+- **Encrypted store (4.1):** destination lives inside `/Volumes/<encryption.volume>`, an
+  encrypted sparsebundle on the disk (`Config.diskURL` = the physical disk: name it, measure
+  it, eject it — closing the store first). Password chosen by the user, in the login Keychain,
+  ALWAYS read/written via `/usr/bin/security` (stdin for writes): never SecItem from the app
+  (ad-hoc signature changes at each update → prompts → scheduled backup blocked). Secrets go
+  to child processes on stdin, never in arguments. `isVolumeReallyMounted` includes hidden
+  volumes (the store is nobrowse).
 - **Updates install only if signed by the release key** (`UpdateSignature.publicKeyBase64`;
   private key = GitHub secret `UPDATE_SIGNING_KEY`, backup in the maintainer's Keychain as
   "RustyMacBackup update signing key (Ed25519)"). Rotating the key means shipping the new
@@ -155,6 +162,6 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (123 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh` (133 tests). No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.
