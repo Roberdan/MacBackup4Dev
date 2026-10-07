@@ -13,6 +13,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusManager = StatusManager()
     private var iconManager: IconManager!
     private var pollTimer: Timer?
+    private var updateTimer: Timer?
+    /// A version that failed verification: never retried automatically (no hourly alarms).
+    private var rejectedUpdate: String?
     private let popover = NSPopover()
     private var outsideClickMonitor: Any?
     private var uiState: AppUIState!
@@ -71,6 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.onSelectDisk = { [weak self] url in self?.handleSelectDisk(url) }
         uiState.onRequestUndoRestore = { [weak self] in self?.handleUndoRestore() }
         uiState.onRequestUpdate = { [weak self] in self?.handleRequestUpdate() }
+        uiState.onRequestUpdateMenu = { [weak self] in self?.handleRequestUpdateMenu() }
         uiState.onSetSchedule = { [weak self] option in self?.handleSetSchedule(option) }
         uiState.onRequestScheduleMenu = { [weak self] in self?.handleRequestScheduleMenu() }
         uiState.onRequestCleanupMenu = { [weak self] in self?.handleRequestCleanupMenu() }
@@ -163,14 +167,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pollTimer?.tolerance = 5.0
         pollStatus()
 
-        // Check for updates 5s after launch (non-blocking).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            Task {
-                if let version = await AutoUpdater.checkForUpdate() {
-                    DispatchQueue.main.async { self?.uiState.updateAvailable = version }
-                }
-            }
-        }
+        startUpdateSchedule()
     }
 
     // MARK: - Popover
@@ -661,28 +658,139 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Auto-update
 
+    /// Checks at launch (after 30 s) and then every hour tick; asks GitHub at most every
+    /// `AutoUpdater.checkInterval`. A found update installs on its own when nothing is running.
+    private func startUpdateSchedule() {
+        if let previous = AutoUpdater.consumeUpdatedFrom() {
+            sendNotification(title: "RustyMacBackup aggiornato",
+                             body: "Dalla \(previous) alla \(AutoUpdater.currentVersion). Le novità sono nelle note di rilascio su GitHub.")
+        }
+        uiState.autoInstallUpdates = AutoUpdater.autoInstall
+        guard AutoUpdater.isInstalledCopy else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in self?.updateTick(force: true) }
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateTick(force: false) }
+        }
+        updateTimer?.tolerance = 300
+    }
+
+    private func updateTick(force: Bool) {
+        if let version = uiState.updateAvailable {
+            if AutoUpdater.autoInstall && version != rejectedUpdate { installUpdate(version, userInitiated: false) }
+            return
+        }
+        let due = force || (AutoUpdater.lastCheck.map { Date().timeIntervalSince($0) >= AutoUpdater.checkInterval } ?? true)
+        guard due else { return }
+        Task { [weak self] in
+            let found = await AutoUpdater.checkForUpdate()
+            DispatchQueue.main.async {
+                guard let self, let found else { return }
+                Log.info("Update available: \(found)")
+                self.uiState.updateAvailable = found
+                if AutoUpdater.autoInstall { self.installUpdate(found, userInitiated: false) }
+            }
+        }
+    }
+
+    /// Something is writing to the disk or the app: an update would interrupt it.
+    private var isBusyForUpdate: Bool {
+        if uiState.isUpdating || uiState.isCleaning { return true }
+        if [.running, .stopping, .restoring].contains(uiState.appState) { return true }
+        guard let config else { return false }
+        let lockPath = config.destination.path + "/rustymacbackup.lock"
+        if let content = try? String(contentsOfFile: lockPath, encoding: .utf8),
+           let pid = Int32(content.split(separator: "\n").first.map(String.init) ?? ""),
+           kill(pid, 0) == 0 { return true }
+        return false
+    }
+
     private func handleRequestUpdate() {
         guard let version = uiState.updateAvailable else { return }
+        installUpdate(version, userInitiated: true)
+    }
+
+    private func installUpdate(_ version: String, userInitiated: Bool) {
+        guard !uiState.isUpdating else { return }
+        if isBusyForUpdate {
+            // Automatic: try again at the next tick. Asked by hand: say why not now.
+            if userInitiated {
+                sendNotification(title: "Aggiornamento rimandato",
+                                 body: "C'è un backup o un ripristino in corso: aggiorno appena finisce.")
+            }
+            return
+        }
+        // Not ours to replace and nobody asked: keep the banner, never pop the Installer unasked.
+        if !userInitiated && !AutoUpdater.canReplaceInPlace() { return }
         uiState.isUpdating = true
         uiState.updatePhase = .downloading
         Task { [weak self] in
             do {
-                try await AutoUpdater.downloadAndInstall(version: version) { [weak self] phase in
+                try await AutoUpdater.install(version: version) { [weak self] phase in
                     DispatchQueue.main.async { self?.uiState.updatePhase = phase }
                 }
+            } catch AutoUpdater.UpdateError.needsInstaller(let pkg) {
                 DispatchQueue.main.async {
                     self?.uiState.isUpdating = false
                     self?.uiState.updatePhase = nil
+                    NSWorkspace.shared.open(pkg)
+                    self?.sendNotification(title: "Conferma l'aggiornamento",
+                                           body: "Si apre l'Installer: serve la password una volta sola. Poi gli aggiornamenti si installano da soli.")
                 }
             } catch {
                 Log.error("Update failed: \(error.localizedDescription)")
+                let permanent = (error as? AutoUpdater.UpdateError)?.isPermanent ?? false
                 DispatchQueue.main.async {
                     self?.uiState.isUpdating = false
                     self?.uiState.updatePhase = nil
-                    self?.sendNotification(title: "Aggiornamento fallito", body: error.localizedDescription)
+                    if permanent { self?.rejectedUpdate = version }
+                    // Network hiccups on an automatic attempt stay quiet: the next tick retries.
+                    if userInitiated || permanent {
+                        self?.sendNotification(title: "Aggiornamento non installato", body: error.localizedDescription)
+                    }
                 }
             }
         }
+    }
+
+    private func handleRequestUpdateMenu() {
+        let menu = NSMenu()
+        let fmt = DateFormatter(); fmt.dateFormat = "dd/MM HH:mm"
+        let checked = AutoUpdater.lastCheck.map { "ultimo controllo \(fmt.string(from: $0))" } ?? "mai controllato"
+        let info = NSMenuItem(title: "Versione \(AutoUpdater.currentVersion) · \(checked)", action: nil, keyEquivalent: "")
+        info.isEnabled = false
+        menu.addItem(info)
+        menu.addItem(.separator())
+        let now = NSMenuItem(title: "Cerca aggiornamenti ora", action: #selector(checkUpdatesNow), keyEquivalent: "")
+        now.target = self
+        menu.addItem(now)
+        let auto = NSMenuItem(title: "Installa automaticamente", action: #selector(toggleAutoInstall), keyEquivalent: "")
+        auto.target = self
+        auto.state = AutoUpdater.autoInstall ? .on : .off
+        menu.addItem(auto)
+        if let button = statusItem.button {
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.frame.height + 4), in: button)
+        }
+    }
+
+    @objc private func checkUpdatesNow() {
+        Task { [weak self] in
+            let found = await AutoUpdater.checkForUpdate()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let found {
+                    self.uiState.updateAvailable = found
+                    self.installUpdate(found, userInitiated: true)
+                } else {
+                    self.sendNotification(title: "Nessun aggiornamento",
+                                          body: "Hai già l'ultima versione (\(AutoUpdater.currentVersion)).")
+                }
+            }
+        }
+    }
+
+    @objc private func toggleAutoInstall() {
+        AutoUpdater.autoInstall.toggle()
+        uiState.autoInstallUpdates = AutoUpdater.autoInstall
     }
 
     // MARK: - Volume notifications

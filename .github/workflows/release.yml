@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-14
@@ -23,20 +27,40 @@ jobs:
       - name: Build + package (pkg + app.zip)
         run: VERSION="${{ steps.version.outputs.VERSION }}" bash build-pkg.sh
 
+      - name: Sign update archives (Ed25519)
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          VER="${{ steps.version.outputs.VERSION }}"
+          PUB=$(sed -n 's/.*publicKeyBase64 = "\(.*\)"/\1/p' Sources/App/UpdateSignature.swift)
+          swift tools/sign-update.swift "RustyMacBackup-${VER}.app.zip" "$PUB"
+          swift tools/sign-update.swift "RustyMacBackup-${VER}-arm64.pkg" "$PUB"
+          shasum -a 256 "RustyMacBackup-${VER}.app.zip" "RustyMacBackup-${VER}-arm64.pkg" > SHA256SUMS.txt
+
       - name: Verify artifacts
         run: |
           VER="${{ steps.version.outputs.VERSION }}"
-          test -f "RustyMacBackup-${VER}-arm64.pkg" || { echo "❌ pkg missing"; exit 1; }
-          test -f "RustyMacBackup-${VER}.app.zip"    || { echo "❌ app.zip missing"; exit 1; }
-          echo "✅ pkg:     $(du -sh RustyMacBackup-${VER}-arm64.pkg | cut -f1)"
-          echo "✅ app.zip: $(du -sh RustyMacBackup-${VER}.app.zip | cut -f1)"
+          for f in "RustyMacBackup-${VER}-arm64.pkg" "RustyMacBackup-${VER}.app.zip" \
+                   "RustyMacBackup-${VER}-arm64.pkg.sig" "RustyMacBackup-${VER}.app.zip.sig" SHA256SUMS.txt; do
+            test -s "$f" || { echo "❌ $f missing"; exit 1; }
+            echo "✅ $f ($(du -sh "$f" | cut -f1))"
+          done
+
+      - name: Release notes from CHANGELOG
+        run: |
+          VER="${{ steps.version.outputs.VERSION }}"
+          awk -v v="$VER" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ {if (f) exit} f' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "❌ CHANGELOG has no section for ${VER}"; exit 1; }
+          printf '\n**Installazione:** chi ha già la 3.2 o successiva si aggiorna da sola. Altrimenti scarica il `.pkg` e aprilo (firma ad-hoc: tasto destro → Apri). Gli aggiornamenti sono firmati (Ed25519, file `.sig`); le impronte sono in `SHA256SUMS.txt`.\n' >> notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "v${{ steps.version.outputs.VERSION }}"
-          generate_release_notes: true
+          body_path: notes.md
           files: |
             RustyMacBackup-${{ steps.version.outputs.VERSION }}-arm64.pkg
+            RustyMacBackup-${{ steps.version.outputs.VERSION }}-arm64.pkg.sig
             RustyMacBackup-${{ steps.version.outputs.VERSION }}.app.zip
-
+            RustyMacBackup-${{ steps.version.outputs.VERSION }}.app.zip.sig
+            SHA256SUMS.txt

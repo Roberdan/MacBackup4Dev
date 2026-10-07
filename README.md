@@ -103,7 +103,7 @@ No Full Disk Access required. No TCC prompts. No system file access.
 **From the pkg installer (recommended):** download `RustyMacBackup-<version>-arm64.pkg` from
 [Releases](https://github.com/Roberdan/RustyMacBackup/releases) and open it. The build is
 ad-hoc signed: if macOS says the developer cannot be verified, right-click the file → Open.
-Quit and reopen the menu-bar app after updating.
+Install once: from 3.2 the app updates itself (see [Auto-Update](#auto-update)).
 
 **From source:**
 
@@ -213,7 +213,7 @@ No Full Disk Access required. No TCC prompts. No system file access.
 **From the pkg installer (recommended):** download `RustyMacBackup-<version>-arm64.pkg` from
 [Releases](https://github.com/Roberdan/RustyMacBackup/releases) and open it. The build is
 ad-hoc signed: if macOS says the developer cannot be verified, right-click the file → Open.
-Quit and reopen the menu-bar app after updating.
+Install once: from 3.2 the app updates itself (see [Auto-Update](#auto-update)).
 
 **From source:**
 
@@ -508,7 +508,8 @@ Sources/
 ├── App/
 │   ├── AppDelegate.swift       # Menu bar, popover lifecycle, backup/restore/eject actions
 │   ├── StatusManager.swift     # Polls status.json, manages AppState
-│   ├── AutoUpdater.swift       # GitHub release check, codesign verify, atomic install
+│   ├── AutoUpdater.swift       # Scheduled check, verify, rename swap, relaunch
+│   ├── UpdateSignature.swift   # Ed25519 verification of update archives
 │   ├── IconManager.swift       # Animated menu-bar icon
 │   └── main.swift              # Entry point: CLI dispatch or NSApplication.main()
 ├── Backup/
@@ -563,9 +564,9 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 96 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 101 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
-VERSION=3.1.3 ./build-pkg.sh    # specific version
+VERSION=3.2.0 ./build-pkg.sh    # specific version
 build/RustyMacBackup.app/Contents/MacOS/RustyMacBackup measure-menu   # real popover fits?
 ```
 
@@ -603,14 +604,32 @@ naming it with `--snapshot` and prints a warning.
 
 ## Auto-Update
 
-On launch, the app checks `https://github.com/Roberdan/RustyMacBackup/releases/latest` in the background. When a newer version is found:
+The app updates itself, Sparkle-style, with no admin password and nothing to click.
 
-1. A blue banner appears in the popover with an **Installa** button (and a **×** to dismiss)
-2. Clicking install: downloads `.app.zip`, verifies codesign + bundle ID, extracts over the running app
-3. Progress shown inline: *Scaricamento… → Verifica firma… → Installazione…*
-4. On failure: the previous `.app` is restored from a rollback copy
+- **When:** 30 s after launch, then at most every 6 hours (an hourly tick that asks GitHub only
+  when due). Drafts and pre-releases are ignored.
+- **Only genuine updates:** every `.app.zip` and `.pkg` on GitHub ships with a `.sig`, the
+  Ed25519 signature made by the release workflow with a key that exists only as a GitHub
+  Actions secret (`UPDATE_SIGNING_KEY`, with a backup in the maintainer's Keychain). The app
+  embeds the public key (`UpdateSignature.swift`) and installs nothing unsigned or signed by
+  another key. On top: `codesign --verify`, same bundle identifier, version equal to the
+  release's and newer than the running one (no downgrades). `SHA256SUMS.txt` lists the hashes.
+- **Never in the middle of work:** an update waits while a backup (also a scheduled one), a
+  restore or a cleanup is running, and retries at the next tick.
+- **Never half-installed:** the new app is copied beside the old one and swapped in with two
+  renames in `/Applications`; if the second fails the old app is put back. A backup that
+  started from the old binary keeps running. Then the app relaunches and notifies
+  *RustyMacBackup aggiornato*.
+- **Installed by an administrator?** If the app is not the user's to replace (e.g. installed
+  by a pkg before 3.2), the app does not install on its own: the banner offers the update, and
+  clicking it opens the signed `.pkg` in Installer. The pkg hands the app to the logged-in user,
+  so from then on updates are automatic.
+- **Your choice:** the footer shows the version and the mode; click it for *Cerca aggiornamenti
+  ora* and *Installa automaticamente* (on by default; off = banner only).
 
-FDA permissions are preserved because the update replaces the bundle in-place without reinstalling the LaunchAgent.
+Releasing: push a `v*` tag. The workflow runs the tests, builds, signs both archives (it
+fails if the secret does not match the public key in the app), writes `SHA256SUMS.txt` and
+takes the release notes from the version's `CHANGELOG.md` section (it fails if there is none).
 
 ---
 

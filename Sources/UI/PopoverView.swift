@@ -509,8 +509,15 @@ struct PopoverView: View {
 
     private var footer: some View {
         HStack {
-            Text("Solo gli snapshot completi contano come protezione")
+            Button { state.onRequestUpdateMenu?() } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: state.autoInstallUpdates ? "arrow.triangle.2.circlepath" : "arrow.down.circle")
+                    Text("v\(AutoUpdater.currentVersion) · " + (state.autoInstallUpdates ? "aggiornamenti automatici" : "aggiornamenti manuali"))
+                }
                 .font(.system(size: 10)).foregroundColor(Look.tertiaryText)
+            }
+            .buttonStyle(.plain)
+            .help("Aggiornamenti")
             Spacer()
             Button { state.onRequestQuit?() } label: {
                 HStack(spacing: 4) { Image(systemName: "power"); Text("Esci") }
