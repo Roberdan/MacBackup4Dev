@@ -223,15 +223,22 @@ enum AutoUpdater {
         return true
     }
 
-    /// Starts the new copy once this process has exited, then quits.
+    /// Starts the new copy, then quits. Asked to macOS (LaunchServices), not to a child
+    /// process: a child of the app dies with it, which is why 3.3.0 never came back after
+    /// installing 4.0.0 (2026-10-07). The new copy asks this one to quit as it starts; this
+    /// one quits only if the new one really started, otherwise it keeps running.
     static func relaunch(_ appURL: URL = Bundle.main.bundleURL) {
-        let pid = ProcessInfo.processInfo.processIdentifier
-        let app = appURL.path
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"", app]
-        try? p.run()
-        DispatchQueue.main.async { NSApp.terminate(nil) }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        configuration.activates = false
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { app, error in
+            if let error {
+                Log.error("Relaunch of \(appURL.path) failed: \(error.localizedDescription) — staying open")
+                return
+            }
+            Log.info("Relaunched as pid \(app?.processIdentifier ?? 0)")
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
     }
 
     // MARK: - Helpers

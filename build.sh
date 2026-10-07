@@ -14,7 +14,7 @@ if [ -z "${DEVELOPER_DIR:-}" ] && [[ "$(xcode-select -p 2>/dev/null)" == *Comman
 fi
 
 APP_NAME="MacBackup4Dev"
-VERSION="${VERSION:-4.0.0}"
+VERSION="${VERSION:-4.0.1}"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 BINARY="$BUILD_DIR/$APP_NAME"

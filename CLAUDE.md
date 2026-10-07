@@ -94,6 +94,9 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   Dropbox, iCloud) and never proposes credentials (`DevEnvironment.looksSecret`, token-bearing
   `~/.config` tools). The scan does not measure sizes (0.4 s); `config(from:)` measures only
   what was chosen. Installed programs are inventoried, not copied (`ToolInventory`).
+- **Never save the config loaded at launch:** re-read it (`freshConfig()`); never generate a
+  default config over an existing file. The relaunch after an update goes through
+  LaunchServices (a child process dies with the app).
 - **Updates install only if signed by the release key** (`UpdateSignature.publicKeyBase64`;
   private key = GitHub secret `UPDATE_SIGNING_KEY`, backup in the maintainer's Keychain as
   "RustyMacBackup update signing key (Ed25519)"). Rotating the key means shipping the new
