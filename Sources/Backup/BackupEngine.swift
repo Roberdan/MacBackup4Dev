@@ -97,6 +97,8 @@ enum BackupEngine {
                 Log.info("Skipping missing path: \(path)")
             }
         }
+        // Encrypted store: open it first (password from the Keychain) when its disk is there.
+        try EncryptedStore.ensureOpen(config)
         guard isVolumeReallyMounted(destPath) else { throw BackupError.volumeNotMounted(destPath) }
         // Security warning if backup disk is not encrypted
         if !DiskDiagnostics.checkEncryption(volume: destPath) {

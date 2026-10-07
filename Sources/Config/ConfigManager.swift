@@ -8,6 +8,8 @@ struct Config {
     var protection: ProtectionConfig = ProtectionConfig()
     var databases: DatabaseConfig = DatabaseConfig()
     var coverage: CoverageConfig = CoverageConfig()
+    /// Encrypted store on the backup disk (4.1). Empty = plain folder (3.x setups).
+    var encryption: EncryptionConfig = EncryptionConfig()
     /// User-defined restore topics; they extend (and can override) the built-in ones.
     var topics: [String: [String]] = [:]
 
@@ -48,6 +50,12 @@ struct Config {
         out.append("weekly = \(retention.weekly)")
         out.append("monthly = \(retention.monthly)")
         out.append("")
+        if let setup = encryption.setup {
+            out.append("[encryption]")
+            out.append("container = \"\(Self.escape(setup.container))\"")
+            out.append("volume = \"\(Self.escape(setup.volume))\"")
+            out.append("")
+        }
         out.append("[protection]")
         out.append("include_rights_managed_files = \(protection.includeRightsManagedFiles)")
         out.append("include_cloud_storage = \(protection.includeCloudStorage)")
@@ -158,6 +166,8 @@ struct Config {
         switch "\(section).\(key)" {
         case "source.path": config.source.legacyPath = stringValue
         case "destination.path": config.destination.path = stringValue
+        case "encryption.container": config.encryption.container = stringValue
+        case "encryption.volume": config.encryption.volume = stringValue
         default: break
         }
     }
@@ -264,6 +274,25 @@ struct SourceConfig {
 
     func allExpandedPaths() -> [String] {
         paths.map { ConfigDiscovery.expand($0) }
+    }
+}
+
+extension Config {
+    /// The physical backup disk: the one holding the encrypted store, or the one holding the
+    /// backup folder of a plain setup. What the menu names, measures and ejects.
+    var diskURL: URL {
+        if let setup = encryption.setup { return URL(fileURLWithPath: setup.container).deletingLastPathComponent() }
+        return URL(fileURLWithPath: destination.path).deletingLastPathComponent()
+    }
+}
+
+/// The encrypted store a config writes into: the image on the backup disk and the volume
+/// inside it. `destination.path` then points inside the opened volume.
+struct EncryptionConfig: Equatable {
+    var container: String = ""
+    var volume: String = ""
+    var setup: EncryptedStore.Setup? {
+        container.isEmpty || volume.isEmpty ? nil : EncryptedStore.Setup(container: container, volume: volume)
     }
 }
 

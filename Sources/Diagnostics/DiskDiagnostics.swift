@@ -18,24 +18,16 @@ enum DiskDiagnostics {
         }
     }
 
-    static func checkEncryption(volume: String) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
-        process.arguments = ["info", volume]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            return output.contains("Encrypted: Yes") || output.contains("FileVault: Yes")
-        } catch {
-            return false
-        }
+    /// True when the volume holding `path` is encrypted (FileVault / APFS encryption).
+    /// Asked to the file system for the volume itself: the old check ran `diskutil info` on
+    /// the backup folder (not a disk, so it always failed) and looked for "FileVault: Yes"
+    /// with one space, while diskutil aligns columns: an encrypted disk was reported as
+    /// "NOT encrypted" at every backup (found 2026-10-07).
+    static func checkEncryption(volume path: String) -> Bool {
+        let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.volumeIsEncryptedKey])
+        return values?.volumeIsEncrypted ?? false
     }
+
 
     static func diskSpace(at path: String) -> (free: UInt64, total: UInt64) {
         guard let attrs = try? FileManager.default.attributesOfFileSystem(forPath: path),

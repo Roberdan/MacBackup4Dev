@@ -34,6 +34,8 @@ struct TestRunner {
         let power = PowerGateTests()
         let stages = NewMacStageTests()
         let onboarding = OnboardingTests()
+        let encryption = EncryptionTests()
+        let homeRewrite = HomeRewriteTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -95,6 +97,15 @@ struct TestRunner {
             ("Rename.scheduleKeepsWrapper", onboarding.test_legacyScheduleKeepsWrapperAndFlags),
             ("Onboarding.credentialFolder", onboarding.test_folderWithACredentialIsACredential),
             ("Recovery.appKeptCurrent", onboarding.test_recoveryAppIsKeptCurrent),
+            ("Encryption.passwordRules", encryption.test_passwordRules),
+            ("Encryption.storeBasics", encryption.test_storeEncryptsKeepsHardLinksAndRefusesWrongPassword),
+            ("Encryption.realBackup", encryption.test_realBackupIntoTheEncryptedStore),
+            ("Encryption.keychainAndEnsureOpen", encryption.test_keychainRoundTripAndEnsureOpen),
+            ("Encryption.configSection", encryption.test_configKeepsTheEncryptionSection),
+            ("NewUser.wholeComponents", homeRewrite.test_onlyWholePathComponentsAreReplaced),
+            ("NewUser.textAndPlist", homeRewrite.test_textAndBinaryPlistAreRewrittenOthersLeftAlone),
+            ("NewUser.restoreRewrites", homeRewrite.test_newUserGetsRewrittenConfigOnRestore),
+            ("NewUser.guessOldHome", homeRewrite.test_oldHomeGuessedForOlderSnapshots),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

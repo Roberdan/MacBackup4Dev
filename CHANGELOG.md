@@ -1,8 +1,30 @@
 # Changelog
 
-## [Unreleased]
+## [4.1.0] - 2026-10-07
+
+### Added
+- **Backups encrypted by the app, whatever the disk.** Snapshots go into an encrypted APFS disk
+  image (AES-256) on the backup disk, opened automatically before each backup and closed before
+  ejecting. Password chosen by the user (at least 10 characters), kept in the login Keychain
+  (read through `/usr/bin/security`, so updates and scheduled backups never prompt), typed once
+  on a new Mac. New setups are encrypted from the first backup; existing ones get a *Cifra*
+  card in the menu (old unencrypted snapshots are left untouched).
+- **Credentials can be backed up** once the backup is encrypted: SSH keys, `gh` and other
+  tokens are offered one checkbox each, so a new Mac is usable straight away.
+- **New Mac, other user name:** restored text files and property lists get the old home
+  (`/Users/olduser`) replaced by the new one; services look for their program at the new path.
+- On a new Mac, the first screen finds an encrypted backup on the attached disk and opens it
+  with its password.
+
+### Fixed
+- **"Backup disk is NOT encrypted" at every backup, on an encrypted disk.** The check ran
+  `diskutil info` on the backup folder (not a disk) and looked for "FileVault: Yes" with one
+  space. Now it asks the file system about the volume itself.
 
 ### Docs
+- README: why each excluded path is excluded and how it comes back on a new Mac; encrypted
+  backups; restoring to another user name.
+
 - README screenshots of the menu and of the first launch, made from sample data
   (`MB4D_DEMO=1 MacBackup4Dev render-menu|render-onboarding <dir>`): never a real disk,
   folder or database.

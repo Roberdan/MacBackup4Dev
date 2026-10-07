@@ -208,7 +208,10 @@ extension NewMacRestore {
             log("  \(onlyNew.items.count) file da aggiungere, \(plan.toReplace) già presenti e diversi (lasciati come sono)")
             guard !dryRun, !onlyNew.items.isEmpty else { break }
             do {
-                let (r, undo) = try SelectiveRestore.apply(onlyNew, undoRoot: URL(fileURLWithPath: home + "/.rustybackup-pre-restore"))
+                let rewrite = HomeRewrite.make(snapshot: snapshot, newHome: home)
+                if let rewrite { log("  percorsi del vecchio utente aggiornati: \(rewrite.from) → \(rewrite.to)") }
+                let (r, undo) = try SelectiveRestore.apply(onlyNew, undoRoot: URL(fileURLWithPath: home + "/.rustybackup-pre-restore"),
+                                                           rewrite: rewrite)
                 out.undoDir = undo
                 log("  aggiunti \(r.restored), falliti \(r.failed)")
                 if r.failed > 0 { out.ok = false }

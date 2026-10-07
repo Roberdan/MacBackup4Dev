@@ -94,8 +94,8 @@ struct PopoverView: View {
 
     @ViewBuilder
     private func diskPill(_ config: Config) -> some View {
-        let (free, total) = DiskDiagnostics.diskSpace(at: config.destination.path)
-        let vol = URL(fileURLWithPath: config.destination.path).deletingLastPathComponent().lastPathComponent
+        let (free, total) = DiskDiagnostics.diskSpace(at: config.diskURL.path)
+        let vol = config.diskURL.lastPathComponent
         HStack(spacing: 5) {
             Image(systemName: total > 0 ? "externaldrive.fill" : "externaldrive.badge.xmark")
                 .font(.system(size: 10))
@@ -271,6 +271,12 @@ struct PopoverView: View {
                              title: "Ultimo backup incompleto",
                              detail: p.latestReasons.prefix(2).joined(separator: " "),
                              primary: ("Riprova", { state.onRequestBackup?() }), secondary: nil))
+        }
+        if let config = state.config, config.encryption.setup == nil, state.appState != .needsSetup {
+            out.append(Issue(id: "encrypt", icon: "lock.open.fill", tint: Look.orange,
+                             title: "Backup non cifrati",
+                             detail: "Chi ha il disco può leggerli. Cifrali: poi potrai salvare anche le credenziali.",
+                             primary: ("Cifra", { state.onRequestEncryption?() }), secondary: nil))
         }
         for gap in state.coverageGaps {
             out.append(Issue(id: "gap-\(gap.path)",

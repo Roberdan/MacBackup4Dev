@@ -15,6 +15,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pollTimer: Timer?
     private var updateTimer: Timer?
     private var onboardingWC: OnboardingWindowController?
+    private var encryptionWC: EncryptionSetupWindowController?
+    /// Last encrypted-store error notified (said once, not every 30 s).
+    private var lastStoreError: String?
     /// A version that failed verification: never retried automatically (no hourly alarms).
     private var rejectedUpdate: String?
     private let popover = NSPopover()
@@ -80,6 +83,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.onRequestUpdate = { [weak self] in self?.handleRequestUpdate() }
         uiState.onRequestUpdateMenu = { [weak self] in self?.handleRequestUpdateMenu() }
         uiState.onRequestOnboarding = { [weak self] in self?.showOnboarding() }
+        uiState.onRequestEncryption = { [weak self] in self?.showEncryptionSetup() }
         uiState.onSetSchedule = { [weak self] option in self?.handleSetSchedule(option) }
         uiState.onRequestScheduleMenu = { [weak self] in self?.handleRequestScheduleMenu() }
         uiState.onRequestCleanupMenu = { [weak self] in self?.handleRequestCleanupMenu() }
@@ -225,6 +229,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    // MARK: - Encrypted backups (4.1)
+
+    /// Moves backups into an encrypted store on the same disk. Old snapshots stay where they are.
+    private func showEncryptionSetup() {
+        guard let config = freshConfig(), config.encryption.setup == nil else { return }
+        guard FileManager.default.fileExists(atPath: config.diskURL.path) else {
+            sendNotification(title: "Disco di backup non collegato", body: "Collegalo per cifrare i backup.")
+            return
+        }
+        popover.performClose(nil)
+        let model = EncryptionSetupModel(disk: config.diskURL, baseConfig: { [weak self] in self?.freshConfig() })
+        model.onDone = { [weak self] newConfig in
+            guard let self else { return }
+            do {
+                try newConfig.save(to: Config.defaultPath)
+                self.config = try Config.load(from: Config.defaultPath)
+            } catch {
+                self.sendNotification(title: "Configurazione non salvata", body: error.localizedDescription)
+                return
+            }
+            self.encryptionWC?.window?.close()
+            self.encryptionWC = nil
+            Log.info("Backups now encrypted: \(newConfig.encryption.container)")
+            self.sendNotification(title: "Backup cifrati attivi", body: "Il primo backup cifrato parte ora.")
+            self.pollStatus(forceProtection: true)
+            self.handleRequestBackup()
+        }
+        let wc = EncryptionSetupWindowController(model: model)
+        wc.showWindow(nil)
+        wc.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        encryptionWC = wc
+    }
+
     // MARK: - First launch
 
     private func showOnboarding() {
@@ -263,7 +301,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingWC = nil
         Log.info("Onboarding done: \(newConfig.source.paths.count) paths, \(newConfig.databases.postgres.count) databases")
         sendNotification(title: "Primo backup avviato",
-                         body: "\(newConfig.source.paths.count) cartelle e \(newConfig.databases.postgres.count) database su \(URL(fileURLWithPath: newConfig.destination.path).deletingLastPathComponent().lastPathComponent).")
+                         body: "\(newConfig.source.paths.count) cartelle e \(newConfig.databases.postgres.count) database su \(newConfig.diskURL.lastPathComponent).")
         pollStatus()
         handleRequestBackup()
     }
@@ -575,7 +613,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleEject() {
         guard !uiState.isCleaning else { return }
         guard let config = config else { return }
-        let volumePath = URL(fileURLWithPath: config.destination.path).deletingLastPathComponent()
+        let volumePath = config.diskURL
         let volumeName = volumePath.lastPathComponent
         popover.performClose(nil)
         // Never pull the disk from under a backup, also one the schedule started on its own.
@@ -589,7 +627,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         Log.info("Ejecting: \(volumePath.path)")
 
+        let store = config.encryption.setup
         DispatchQueue.global(qos: .userInitiated).async {
+            // The encrypted store lives on the disk: close it first, or the disk stays busy.
+            if let store, !EncryptedStore.close(store) {
+                Log.error("Encrypted store did not close: forcing")
+                EncryptedStore.close(store, force: true)
+            }
             var success = Self.runDiskutil(["eject", volumePath.path])
             var holders = ""
             if !success {
@@ -921,6 +965,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Status polling
 
     private func pollStatus(forceProtection: Bool = false) {
+        // Encrypted store: open it as soon as its disk is there (password from the Keychain).
+        do { try EncryptedStore.ensureOpen(config) } catch {
+            if lastStoreError != error.localizedDescription {
+                lastStoreError = error.localizedDescription
+                Log.error("Encrypted store: \(error.localizedDescription)")
+                sendNotification(title: "Backup cifrato non aperto", body: error.localizedDescription)
+            }
+        }
         let newState = statusManager.poll(config: config)
         // F-14: don't clobber .stopping/.restoring set by action handlers
         if newState != .running || (uiState.appState != .stopping && uiState.appState != .restoring) {

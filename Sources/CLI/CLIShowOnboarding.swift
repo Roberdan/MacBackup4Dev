@@ -39,8 +39,25 @@ extension CLIHandler {
         snap("2-scelta")
         model.step = .disk; snap("3-disco")
         model.step = .schedule; snap("4-frequenza")
-        model.step = .summary; snap("5-riepilogo")
+        model.step = .summary; model.password = "una frase"; model.confirm = "una frase"; snap("5-riepilogo")
         wc.close()
+        // The "Backup cifrati" window, with sample credentials.
+        let enc = EncryptionSetupModel(disk: URL(fileURLWithPath: "/Volumes/Backup"), baseConfig: { nil })
+        let ewc = EncryptionSetupWindowController(model: enc)
+        ewc.showWindow(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(1.5))
+        enc.credentials = [DevItem(id: "~/.ssh", name: ".ssh", paths: ["~/.ssh"], sensitive: true),
+                           DevItem(id: "~/.config/gh", name: "gh", paths: ["~/.config/gh"], sensitive: true)]
+        enc.chosenCredentials = ["~/.ssh", "~/.config/gh"]
+        enc.password = "una frase che ricordo"; enc.confirm = "una frase che ricordo"
+        RunLoop.main.run(until: Date().addingTimeInterval(1.0))
+        if let view = ewc.window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.cacheDisplay(in: view.bounds, to: rep)
+            let url = URL(fileURLWithPath: dir).appendingPathComponent("cifratura.png")
+            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+            print(url.path)
+        }
+        ewc.close()
     }
 
     static func demoScan() -> DevScan {
