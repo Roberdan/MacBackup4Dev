@@ -21,6 +21,8 @@
   LaunchAgent at once, and all of them started at the next login (scar 2026-10-06: after the
   reboot the Mac did not get back to a usable login). The *Servizi automatici* topic is gone.
 - *App del vecchio Mac* now finds apps kept in folders (`/Applications/Dev`, `/Applications/AI`).
+- Apps you do not want back are no longer listed as missing: *Non mi servono* in the window,
+  or `ignore_apps` under `[coverage]` in config.toml.
 
 ## [3.2.0] - 2026-10-07
 

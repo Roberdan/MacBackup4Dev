@@ -108,4 +108,19 @@ struct NewMacStageTests {
         try expect(FileManager.default.fileExists(atPath: NewMacRestore.movedAsideRoot(home: f.home) + "/LaunchAgents/\(label).plist"),
                    "kept aside")
     }
+
+    func test_ignoredAppsAreNeverListedAndSurviveSave() throws {
+        let f = try fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        try write("Ghostty\nMicrosoft OneNote\nNonEsiste\n", f.snap.path + "/_environment/installed-apps.txt")
+        let item = NewMacRestore.checklist(snapshot: f.snap, home: f.home, ignoredApps: ["Ghostty", "Microsoft OneNote"])
+            .first { $0.title == "App del vecchio Mac" }
+        try expectEqual(item?.missingApps ?? [], ["NonEsiste"], "ignored apps not listed: \(String(describing: item))")
+
+        let url = f.root.appendingPathComponent("config.toml")
+        try "[destination]\npath = \"/Volumes/X/RustyMacBackup\"\n".write(to: url, atomically: true, encoding: .utf8)
+        var config = try Config.load(from: url)
+        config.coverage.ignoreApps = ["Ghostty", "Microsoft OneNote"]
+        try config.save(to: url)
+        try expectEqual(try Config.load(from: url).coverage.ignoreApps, ["Ghostty", "Microsoft OneNote"], "survives save + load")
+    }
 }

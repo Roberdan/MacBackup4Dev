@@ -568,7 +568,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 107 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 108 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=3.3.0 ./build-pkg.sh    # specific version
 build/RustyMacBackup.app/Contents/MacOS/RustyMacBackup measure-menu   # real popover fits?

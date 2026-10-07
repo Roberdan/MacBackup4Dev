@@ -22,6 +22,8 @@ enum NewMacRestore {
         let title: String
         let ok: Bool
         let hint: String
+        /// Apps still missing (only for the apps item), so the window can offer "Non mi servono".
+        var missingApps: [String] = []
     }
 
     struct RepoReport: Equatable {
@@ -41,7 +43,8 @@ enum NewMacRestore {
 
     // MARK: - Checklist (read-only)
 
-    static func checklist(snapshot: URL, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [CheckItem] {
+    static func checklist(snapshot: URL, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                          ignoredApps: [String] = []) -> [CheckItem] {
         let fm = FileManager.default
         var items: [CheckItem] = []
 
@@ -84,10 +87,11 @@ enum NewMacRestore {
                 }
             }
             let missing = apps.split(separator: "\n").map(String.init).filter { name in
-                !name.isEmpty && !roots.contains { fm.fileExists(atPath: "\($0)/\(name).app") }
+                !name.isEmpty && !ignoredApps.contains(name) && !roots.contains { fm.fileExists(atPath: "\($0)/\(name).app") }
             }
             items.append(CheckItem(title: "App del vecchio Mac", ok: missing.isEmpty,
-                                   hint: missing.isEmpty ? "tutte presenti" : "Mancano: " + missing.joined(separator: ", ")))
+                                   hint: missing.isEmpty ? "tutte presenti" : "Mancano: " + missing.joined(separator: ", "),
+                                   missingApps: missing))
         }
         return items
     }

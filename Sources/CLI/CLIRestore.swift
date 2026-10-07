@@ -222,7 +222,7 @@ extension CLIHandler {
         let stages = NewMacRestore.stages(snapshot: snap.url, config: config)
         guard let wanted = flags.values["--stage"] else {
             print(bold("Controlli"))
-            for item in NewMacRestore.checklist(snapshot: snap.url) {
+            for item in NewMacRestore.checklist(snapshot: snap.url, ignoredApps: config.coverage.ignoreApps) {
                 print("  \(item.ok ? green("✓") : yellow("!")) \(item.title): \(item.hint)")
             }
             print(bold("\nFasi, nell'ordine consigliato") + " (una alla volta: new-mac --stage <id> [--yes])")

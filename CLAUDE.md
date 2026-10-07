@@ -10,7 +10,7 @@ Native macOS backup app (Swift, AppKit/SwiftUI). Single `.app` binary that acts 
 
 ```bash
 ./build.sh              # compile + sign → build/RustyMacBackup.app
-./run-tests.sh          # 107 tests → build/RustyMacBackupTests
+./run-tests.sh          # 108 tests → build/RustyMacBackupTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -140,6 +140,6 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (107 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh` (108 tests). No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.

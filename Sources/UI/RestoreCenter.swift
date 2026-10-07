@@ -143,12 +143,22 @@ final class RestoreCenterModel: ObservableObject {
         guard let snap = snapshotURL else { return }
         busy = true
         DispatchQueue.global(qos: .userInitiated).async {
-            let items = NewMacRestore.checklist(snapshot: snap)
+            let items = NewMacRestore.checklist(snapshot: snap, ignoredApps: self.ignoredApps)
             DispatchQueue.main.async { self.checklist = items; self.busy = false }
         }
     }
 
     var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
+
+    /// Apps the user said they do not want back (config.toml [coverage] ignore_apps).
+    var ignoredApps: [String] { (try? Config.load(from: Config.defaultPath))?.coverage.ignoreApps ?? config?.coverage.ignoreApps ?? [] }
+
+    func ignoreApps(_ apps: [String]) {
+        guard var cfg = try? Config.load(from: Config.defaultPath) else { return }
+        cfg.coverage.ignoreApps = Array(Set(cfg.coverage.ignoreApps + apps)).sorted()
+        do { try cfg.save(to: Config.defaultPath) } catch { message = "Non salvato: \(error.localizedDescription)"; return }
+        loadChecklist()
+    }
 
     func loadStages() {
         guard let snap = snapshotURL else { return }
@@ -441,6 +451,12 @@ struct RestoreCenterView: View {
                             VStack(alignment: .leading) {
                                 Text(item.title).font(.callout)
                                 Text(item.hint).font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                            if !item.missingApps.isEmpty {
+                                Spacer()
+                                Button("Non mi servono") { model.ignoreApps(item.missingApps) }
+                                    .controlSize(.small)
+                                    .help("Non segnalarle più come mancanti")
                             }
                         }
                     }

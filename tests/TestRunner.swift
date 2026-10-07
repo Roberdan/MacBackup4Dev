@@ -77,6 +77,7 @@ struct TestRunner {
             ("NewMac.phaseUndoAlone", stages.test_eachPhaseUndoesOnItsOwn),
             ("NewMac.serviceHealth", stages.test_serviceHealthFromLaunchctl),
             ("NewMac.serviceMovedAside", stages.test_removedServiceIsMovedAsideNotDeleted),
+            ("NewMac.ignoredApps", stages.test_ignoredAppsAreNeverListedAndSurviveSave),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),
