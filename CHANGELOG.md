@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Docs
+- README screenshots of the menu and of the first launch, made from sample data
+  (`MB4D_DEMO=1 MacBackup4Dev render-menu|render-onboarding <dir>`): never a real disk,
+  folder or database.
+
 ## [4.0.3] - 2026-10-07
 
 ### Fixed

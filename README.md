@@ -9,6 +9,14 @@ to it, and an onboarding tool for the next Mac.
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![Swift](https://img.shields.io/badge/Swift-5.9-orange) ![License](https://img.shields.io/badge/license-MIT-green) [![Release](https://img.shields.io/github/v/release/Roberdan/MacBackup4Dev)](https://github.com/Roberdan/MacBackup4Dev/releases/latest)
 
+<p align="center">
+  <img src="docs/screenshots/menu.png" width="330" alt="MacBackup4Dev menu: protected, last complete backup 2 hours ago, 14-day history, actions">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/first-launch.png" width="520" alt="First launch: the developer environment found on this Mac, grouped, credentials never pre-selected">
+</p>
+
+<p align="center"><em>The menu-bar panel, and the first launch choosing what to back up (sample data).</em></p>
+
 ## First launch
 
 The app finds your development environment by itself (under a second) and lets you choose:

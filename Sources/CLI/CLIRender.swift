@@ -18,7 +18,15 @@ extension CLIHandler {
                                      .complete, .none, .complete, .incomplete, .complete, .complete],
                               reposWithSavedCommits: 6, databasesSaved: 3, filesInLastComplete: 171_604)
         }
-        let cfg = try? Config.load(from: Config.defaultPath)
+        // MB4D_DEMO=1: sample data only (README screenshots never show a real disk or folder).
+        let demo = ProcessInfo.processInfo.environment["MB4D_DEMO"] != nil
+        var cfg = try? Config.load(from: Config.defaultPath)
+        if demo {
+            let disk = FileManager.default.temporaryDirectory.appendingPathComponent("Backup/MacBackup4Dev")
+            try? FileManager.default.createDirectory(at: disk, withIntermediateDirectories: true)
+            if cfg == nil { cfg = try? Config.load(from: Config.defaultPath) }
+            cfg?.destination.path = disk.path
+        }
         let states: [(String, (AppUIState) -> Void)] = [
             ("protetto", { s in
                 s.appState = .idle
@@ -30,7 +38,7 @@ extension CLIHandler {
                 var st = BackupStatusFile()
                 st.state = "running"; st.filesDone = 144_500; st.filesTotal = 171_000
                 st.bytesPerSec = 7_300; st.etaSecs = 85
-                st.currentFile = "GitHub/MirrorHR_Set/research-cloud-api/data/A13A-CB806E0D8DF4.json"
+                st.currentFile = demo ? "GitHub/my-app/src/components/Header.tsx" : "GitHub/MirrorHR_Set/research-cloud-api/data/A13A-CB806E0D8DF4.json"
                 s.status = st
             }),
             ("avvisi", { s in
