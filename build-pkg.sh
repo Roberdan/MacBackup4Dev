@@ -14,7 +14,7 @@ VERSION="$VERSION" ./build.sh
 
 # Step 2: Create .app.zip for auto-update (in-place, no admin required)
 echo "  Creating .app.zip…"
-(cd build && zip -qr "../$APP_NAME-$VERSION.app.zip" "$APP_NAME.app")
+ditto -c -k --keepParent "build/$APP_NAME.app" "$APP_NAME-$VERSION.app.zip"
 echo "  ✅ $APP_NAME-$VERSION.app.zip ($(du -sh "$APP_NAME-$VERSION.app.zip" | cut -f1))"
 
 # Step 3: Create staging directory for .pkg
@@ -25,11 +25,21 @@ trap "rm -rf $PKG_ROOT $SCRIPTS_DIR" EXIT
 mkdir -p "$PKG_ROOT/Applications"
 cp -R "build/$APP_NAME.app" "$PKG_ROOT/Applications/"
 
-# Step 4: postinstall — open FDA settings and launch
+# Step 4: postinstall — hand the app to the logged-in user (so automatic updates can
+# replace it without a password, like Sparkle expects) and restart only the menu-bar app.
 cat > "$SCRIPTS_DIR/postinstall" << 'POSTINSTALL'
 #!/bin/bash
-open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || true
-open "/Applications/RustyMacBackup.app" 2>/dev/null || true
+APP="/Applications/RustyMacBackup.app"
+BIN="$APP/Contents/MacOS/RustyMacBackup"
+CONSOLE_USER=$(stat -f%Su /dev/console)
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ "$CONSOLE_USER" != "loginwindow" ]; then
+    USER_ID=$(id -u "$CONSOLE_USER")
+    chown -R "$CONSOLE_USER":admin "$APP"
+    # The menu-bar app runs with no arguments; a running backup ("… backup") is left alone.
+    for pid in $(pgrep -U "$USER_ID" -fx "$BIN"); do kill "$pid" 2>/dev/null; done
+    sleep 1
+    launchctl asuser "$USER_ID" sudo -u "$CONSOLE_USER" /usr/bin/open "$APP" 2>/dev/null || true
+fi
 exit 0
 POSTINSTALL
 chmod +x "$SCRIPTS_DIR/postinstall"

@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.2.0] - 2026-10-07
+
+### Added
+- **Automatic, signed updates.** The app checks GitHub at launch and every 6 hours and
+  installs new versions by itself when no backup, restore or cleanup is running, then
+  relaunches and notifies. Every update archive is signed by the release workflow (Ed25519,
+  Sparkle-style `.sig`); the app installs nothing unsigned, signed by another key, older than
+  itself, of another app or failing `codesign --verify`.
+- The footer shows the version and the update mode; its menu has *Cerca aggiornamenti ora* and
+  *Installa automaticamente* (on by default).
+- Releases carry `.sig` files, `SHA256SUMS.txt` and notes taken from this changelog.
+
+### Changed
+- The app is replaced with two renames in `/Applications` (rollback if the second fails)
+  instead of an `rsync` over the running bundle.
+- The pkg installer gives the app to the logged-in user, so later updates need no password,
+  and restarts only the menu-bar app (a running backup is left alone). It no longer opens
+  the Full Disk Access settings, which the app does not need.
+- The `.app.zip` is made with `ditto`, which keeps the code signature intact.
+
+### Upgrading from 3.1.x
+- Install the 3.2.0 pkg once by hand (3.1.x cannot verify signatures and was installed by
+  the administrator). From 3.2.0 on, updates are automatic.
+
 ## [3.1.3] - 2026-10-07
 
 ### Fixed

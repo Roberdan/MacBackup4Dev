@@ -30,6 +30,7 @@ struct TestRunner {
         let realRun = RealRunTests()
         let coverageNoise = CoverageNoiseTests()
         let picker = PickerTests()
+        let updater = UpdaterTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
@@ -64,6 +65,11 @@ struct TestRunner {
             ("Coverage.noNoise", coverageNoise.test_noSecretsParkedCopiesOrToolDatabases),
             ("Picker.configuredFoldersSurvive", picker.test_configuredFoldersSurviveThePicker),
             ("Picker.selectAllSkipsCredentials", picker.test_selectAllSkipsCredentials),
+            ("Updater.signatureOnlyReleaseKey", updater.test_signatureAcceptsOnlyTheReleaseKey),
+            ("Updater.versionsNeverGoBack", updater.test_versionsNeverGoBack),
+            ("Updater.validateRejectsWrongBuilds", updater.test_validateRejectsWrongBuilds),
+            ("Updater.swapWhole", updater.test_swapReplacesTheAppWholeAndLeavesNothingBehind),
+            ("Updater.failedSwapKeepsOld", updater.test_failedSwapKeepsTheOldApp),
             ("Cleanup.ageBoundaries", cleanup.test_ageBoundariesAndPreview),
             ("Cleanup.onlySnapshots", cleanup.test_latestAndNonSnapshotsSurvive),
             ("Cleanup.hardLinks", cleanup.test_hardLinksAndOriginalSurvive),

@@ -10,7 +10,7 @@ Native macOS backup app (Swift, AppKit/SwiftUI). Single `.app` binary that acts 
 
 ```bash
 ./build.sh              # compile + sign → build/RustyMacBackup.app
-./run-tests.sh          # 96 tests → build/RustyMacBackupTests
+./run-tests.sh          # 101 tests → build/RustyMacBackupTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -20,7 +20,7 @@ Version is set in one place: `VERSION` default in `build.sh`. `build-pkg.sh` rea
 
 ```
 Sources/
-  App/          AppDelegate, main, StatusManager, AutoUpdater, IconManager, MenuBuilder
+  App/          AppDelegate, main, StatusManager, AutoUpdater, UpdateSignature, IconManager, MenuBuilder
   Backup/       BackupEngine(+Helpers), HardLinker, FileScanner, RestoreEngine,
                 RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
@@ -78,13 +78,19 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   .preferredContentSize`). Never wrap it in another view controller: NSPopover then stays at
   320×320 and clips. Check layout changes with `RustyMacBackup measure-menu` (real popover),
   not only `render-menu` (content only).
+- **Updates install only if signed by the release key** (`UpdateSignature.publicKeyBase64`;
+  private key = GitHub secret `UPDATE_SIGNING_KEY`, backup in the maintainer's Keychain as
+  "RustyMacBackup update signing key (Ed25519)"). Rotating the key means shipping the new
+  public key in a release signed with the OLD key first. Never install during a backup,
+  never downgrade, never rsync over the running bundle.
 - **The coverage audit never suggests credentials, `_parked` folders, caches/profiles or
   databases inside a tool's hidden folder** (`CoverageAuditor.isNoise`).
 
 ## Known Critical Issues (from 2026-03-20 audit)
 
-Status 2026-10-06: P0.1, P0.2, P0.3, P0.5, P0.6 fixed (F-01…F-06); P0.4 mitigated (codesign
-verify + rsync rollback; identity pinning still missing because CI releases are ad-hoc signed).
+Status 2026-10-07: all P0 fixed. P0.4 closed in 3.2.0: updates are Ed25519-signed by the
+release workflow and verified against the public key in `UpdateSignature.swift`, then
+swapped in with renames (no rsync).
 
 ### P0 — Must fix before wide distribution
 
@@ -128,6 +134,6 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (96 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh` (101 tests). No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.
