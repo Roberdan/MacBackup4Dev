@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.1.3] - 2026-10-07
+
+### Fixed
+- **The menu popover was still clipped on every side.** The 3.0.2 fix did not work in the real
+  app: the popover's controller wrapped a SwiftUI hosting controller and never passed its
+  size on, so the popover stayed at macOS's default 320×320 whatever it contained. The
+  popover's controller is now the hosting controller itself; measured on the real popover:
+  380×432 with the disk absent, growing to 380×477 when a backup starts.
+
+### Added
+- `measure-menu` (debug): opens the real popover and prints its size against the size its
+  content needs (`OK` / `TAGLIATO`). `render-menu` only draws the content, so it cannot
+  catch a popover that is too small.
+
 ## [3.1.2] - 2026-10-07
 
 ### Fixed
