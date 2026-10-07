@@ -133,7 +133,7 @@ final class ProtectionSummaryTests {
         var s = ProtectionSummary.build(destination: dest, now: now)
         try expectEqual(s.level, .attention, "only unverified snapshots: attention")
 
-        try safety.makeSnapshot(dest, name(now.addingTimeInterval(-7_200)), complete: true)
+        try safety.makeSnapshot(dest, name(now.addingTimeInterval(-7_500)), complete: true)  // 2 h 05: names drop sub-seconds
         s = ProtectionSummary.build(destination: dest, now: now)
         try expectEqual(s.level, .protected, "recent complete snapshot: protected")
         try expect(s.headline.contains("2 ore fa"), "headline says how long ago: \(s.headline)")
