@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.0.2] - 2026-10-07
+
+### Fixed
+- **Only one copy in the menu bar after an update.** 4.0.1 asked the older copy to quit with
+  an Apple event, which macOS blocked silently: two icons stayed. Now the new copy announces
+  itself with a distributed notification received even in the background
+  (`.deliverImmediately`, a menu-bar app is never frontmost). An idle older copy quits; an
+  older copy in the middle of a backup, restore or cleanup stays and the new one quits.
+  Both cases checked on a real Mac with `MacBackup4Dev relaunch-test`.
+
 ## [4.0.1] - 2026-10-07
 
 ### Fixed

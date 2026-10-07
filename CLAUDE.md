@@ -96,7 +96,9 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   what was chosen. Installed programs are inventoried, not copied (`ToolInventory`).
 - **Never save the config loaded at launch:** re-read it (`freshConfig()`); never generate a
   default config over an existing file. The relaunch after an update goes through
-  LaunchServices (a child process dies with the app).
+  LaunchServices (a child process dies with the app). One copy at a time via a distributed
+  notification registered `.deliverImmediately` (never NSRunningApplication.terminate:
+  silently blocked; plain observers: suspended for a menu-bar app).
 - **Updates install only if signed by the release key** (`UpdateSignature.publicKeyBase64`;
   private key = GitHub secret `UPDATE_SIGNING_KEY`, backup in the maintainer's Keychain as
   "RustyMacBackup update signing key (Ed25519)"). Rotating the key means shipping the new
