@@ -48,8 +48,15 @@ struct TestRunner {
         let encryption = EncryptionTests()
         let homeRewrite = HomeRewriteTests()
         let optimization = BackupOptimizationTests()
+        let ejection = EjectionTests()
 
         let suites: [(String, TestClosure)] = [
+            ("Ejection.plainSuccess", ejection.test_plainDiskProgressAndSuccess),
+            ("Ejection.encryptedOrder", ejection.test_encryptedStoreClosesFirst),
+            ("Ejection.busyStore", ejection.test_busyStoreNeverEjects),
+            ("Ejection.indexerFallback", ejection.test_indexersOnlyAllowFallback),
+            ("Ejection.failureIsNotSuccess", ejection.test_failureAndMountedSuccessStayUnsafe),
+            ("Ejection.feedbackLifecycle", ejection.test_feedbackLifecycle),
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
             ("Optimization.backgroundPolicy", optimization.test_backgroundPolicyNeverRaisesExistingPriority),
             ("Optimization.diskPolicyRestored", optimization.test_diskPolicyUsesSDKAndRestores),

@@ -32,6 +32,7 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 16) {
             headerSection
             updateBanner
+            if let feedback = state.ejection { ejectionCard(feedback) }
             if state.appState == .needsSetup {
                 diskSetupSection
             } else {
@@ -39,11 +40,11 @@ struct PopoverView: View {
                 if let phase = state.cleanupPhase { cleanupRow(phase) }
                 if state.appState == .error { errorCard }
                 if let result = state.restoreResult { restoreResultCard(result) }
-                issuesList
+                issuesList.disabled(state.isEjecting)
                 if let p = state.protection, state.appState != .diskAbsent { timeline(p) }
             }
-            primaryActions.disabled(state.isCleaning)
-            tiles.disabled(state.isCleaning)
+            primaryActions.disabled(state.isCleaning || state.isEjecting)
+            tiles.disabled(state.isCleaning || state.isEjecting)
             footer
         }
         .padding(18)
@@ -415,6 +416,42 @@ struct PopoverView: View {
         .background(glassCard(radius: 12))
     }
 
+    private func ejectionCard(_ feedback: EjectionFeedback) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            if feedback.phase.isBusy {
+                ProgressView().controlSize(.small).frame(width: 30, height: 30)
+                    .accessibilityLabel(feedback.title)
+            } else {
+                iconTile(feedback.phase == .succeeded ? "checkmark" : "exclamationmark",
+                         feedback.phase == .succeeded ? Look.green : Look.orange, size: 30)
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(feedback.title).font(.system(size: 12, weight: .semibold)).foregroundColor(Look.text)
+                Text(feedback.detail).font(.system(size: 11)).foregroundColor(Look.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                if case .failed = feedback.phase {
+                    Button("Riprova") { state.onRequestEject?() }
+                        .buttonStyle(.plain).foregroundColor(Look.blue)
+                        .font(.system(size: 11, weight: .semibold))
+                        .disabled(state.isRunning || state.isCleaning || state.isUpdating)
+                }
+            }
+            Spacer(minLength: 0)
+            if !feedback.phase.isBusy {
+                Button { state.dismissEjection() } label: {
+                    Image(systemName: "xmark").font(.system(size: 10)).foregroundColor(Look.secondaryText)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Chiudi il risultato dell'espulsione")
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(glassCard(radius: 12))
+    }
+
     // MARK: - Actions
 
     private func gradientButton(_ title: String, icon: String, colors: [Color], action: @escaping () -> Void) -> some View {
@@ -532,7 +569,7 @@ struct PopoverView: View {
                     .font(.system(size: 11, weight: .medium)).foregroundColor(Look.secondaryText)
             }
             .buttonStyle(.plain)
-            .disabled(state.isCleaning)
+            .disabled(state.isCleaning || state.isEjecting)
         }
     }
 
@@ -553,7 +590,7 @@ struct PopoverView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(state.isUpdating)
+                .disabled(state.isUpdating || state.isEjecting)
                 Spacer()
                 if state.isUpdating { ProgressView().controlSize(.small) } else {
                     Button { state.dismissedUpdateVersion = version } label: {

@@ -567,7 +567,11 @@ colour, sized to its content.
   items that hold credentials (SSH keys, tokens): those are chosen one by one.
 - **Ripristina…** opens the restore window: *Argomento*, *File* (every version), *Nuovo Mac*.
 - **Espelli disco** refuses while a backup runs (also a scheduled one), says which apps keep
-  the disk busy, and forces the unmount only when only Spotlight's indexers are left.
+  the disk busy, and forces the unmount only for recognized read-only indexers or antivirus.
+  The menu stays open with a spinner during encrypted-store closure and disk ejection.
+  *Disco espulso — Puoi scollegare il disco* appears only after the physical volume is
+  unmounted; a failure stays visible with *Riprova*. The result survives closing and
+  reopening the menu, and the success message clears when the disk is reconnected.
 - Problems appear with the button that fixes them: *Riprova* for an incomplete backup,
   *Aggiungi* / *Ignora* for a folder or database that is not backed up. The audit never
   suggests credentials, parked folders (`_name`), caches, a tool's own databases or git
@@ -647,7 +651,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 157 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 163 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
