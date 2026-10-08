@@ -154,12 +154,23 @@ struct EncryptionTests {
         defer { EncryptedStore.close(s, force: true); try? FileManager.default.removeItem(atPath: EncryptedStore.compactFlag(volume: s.volume)) }
         try EncryptedStore.create(s, password: "una frase lunga", sizeBytes: 5 * 1_073_741_824)
         try EncryptedStore.open(s, password: "una frase lunga")
-        _ = Shell.run("/bin/dd", ["if=/dev/urandom", "of=\(s.mountPoint)/old-snapshot", "bs=1m", "count=300"], timeout: 120)
+        let snapshotPath = s.mountPoint + "/old-snapshot"
+        let write = Shell.run("/bin/dd", ["if=/dev/urandom", "of=\(snapshotPath)", "bs=1m", "count=300"], timeout: 120)
+        try expect(write.ok, "the 300 MB fixture was written: \(write.stderr)")
+        let fixture = try FileHandle(forWritingTo: URL(fileURLWithPath: snapshotPath))
+        try fixture.synchronize()
+        try fixture.close()
+        let bytes = try FileManager.default.attributesOfItem(atPath: snapshotPath)[.size] as? UInt64
+        try expectEqual(bytes, 300 * 1_048_576, "the full fixture exists before deletion")
+        let allocatedWithSnapshot = EncryptedStore.allocatedSize(s.container)
         try FileManager.default.removeItem(atPath: s.mountPoint + "/old-snapshot")
         EncryptedStore.markSpaceFreed(destination: URL(fileURLWithPath: s.mountPoint + "/MacBackup4Dev"))
         Thread.sleep(forTimeInterval: 20)   // APFS hands freed blocks back shortly after a delete
-        let freed = try EncryptedStore.compact(s, password: "una frase lunga")
-        try expect(freed > 100 * 1_048_576, "most of the 300 MB came back: \(freed)")
+        _ = try EncryptedStore.compact(s, password: "una frase lunga")
+        // Newer image drivers can reclaim blocks after deletion, before compact() begins.
+        let allocatedAfterCompact = EncryptedStore.allocatedSize(s.container)
+        try expect(allocatedWithSnapshot > allocatedAfterCompact + 100 * 1_048_576,
+                   "most of the 300 MB came back: \(allocatedWithSnapshot) -> \(allocatedAfterCompact)")
         try expect(EncryptedStore.isOpen(s), "open again after compacting")
         try expect(!EncryptedStore.compactionRunning, "no compaction lock left behind")
     }

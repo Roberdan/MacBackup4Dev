@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [4.1.6] - 2026-10-08
 
 ### Fixed
 - Eject keeps the menu open, shows encrypted-store closure and disk ejection progress,
@@ -8,6 +8,9 @@
   confirmed only after the physical volume is no longer mounted.
 - Conflicting menu actions, automatic store opening and status reads wait for ejection.
   Unknown encrypted-store holders no longer qualify for forced closure.
+- The encrypted-store compaction regression checks the complete 300 MB fixture and
+  measures reclaimed space from before deletion, including blocks already returned by
+  newer image drivers before compaction starts. The recovery threshold is unchanged.
 
 ## [4.1.5] - 2026-10-08
 
