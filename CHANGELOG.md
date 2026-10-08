@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.1.3] - 2026-10-08
+
+### Fixed
+- Restore undo folders no longer make otherwise successful backups incomplete when
+  removed. They are mandatory exclusions even with older configurations; excluded
+  source roots are filtered before existence checks and manifest recording.
+- Hourly schedules use fixed calendar times instead of drifting with backup duration.
+  Existing compatible interval schedules migrate only while idle; daily times,
+  wrappers and arbitrary custom intervals are preserved.
+- Progress no longer invents a total or countdown during discovery. Counts reflect
+  completed workers; known-total copy estimates include hard links, and final checks
+  display their own phase. Restore and cancellation retain distinct progress.
+- Exclusion matching no longer allocates a character-by-character matrix for every
+  rule and file. Matching preserves Unicode characters and path separator boundaries,
+  with differential tests against the previous algorithm.
+
 ## [4.1.2] - 2026-10-07
 
 ### Fixed

@@ -9,7 +9,8 @@ final class ExcludeFilterTests {
                      "GitHub/app/.pytest_cache/data", "GitHub/app/.ruff_cache/data",
                      "GitHub/app/.mypy_cache/data", "GitHub/app/__pycache__/mod.pyc",
                      "GitHub/app/.cache/data", "GitHub/app/.next/cache/data",
-                     "GitHub/app/.turbo/data", "GitHub/app/file.tmp", "GitHub/app/file.swp"] {
+                     "GitHub/app/.turbo/data", "GitHub/app/file.tmp", "GitHub/app/file.swp",
+                     ".rustybackup-pre-restore", ".rustybackup-pre-restore/old/undo.json"] {
             try expect(filter.isExcluded(relativePath: path), "Mandatory exclusion: \(path)")
             try expect(filter.shouldSkipDirectory(relativePath: path), "Prune excluded subtree: \(path)")
         }
@@ -119,5 +120,51 @@ final class ExcludeFilterTests {
         try expect(filter.isExcluded(relativePath: ".DS_Store"), ".DS_Store should match")
         try expect(filter.isExcluded(relativePath: "some/dir/.DS_Store"), "nested .DS_Store should match")
         try expect(filter.isExcluded(relativePath: ".Spotlight-V100"), ".Spotlight-* should match")
+    }
+
+    func test_globMatchesOriginalSemantics() throws {
+        func strings(_ alphabet: [String], depth: Int) -> [String] {
+            var all = [""]
+            var level = [""]
+            for _ in 0..<depth {
+                level = level.flatMap { prefix in alphabet.map { prefix + $0 } }
+                all.append(contentsOf: level)
+            }
+            return all
+        }
+        let patterns = strings(["a", "/", "*", "?"], depth: 4)
+        let texts = strings(["a", "b", "/"], depth: 4)
+        for pattern in patterns {
+            for text in texts {
+                try expectEqual(ExcludeFilter.globMatch(pattern: pattern, text: text),
+                                referenceGlob(pattern: pattern, text: text),
+                                "glob semantics: \(pattern) vs \(text)")
+            }
+        }
+        for (pattern, text) in [("?.txt", "é.txt"), ("?.txt", "👩‍💻.txt"),
+                                ("*.tmp", "*x.tmp"), ("**/*.txt", "a/b/c.txt"),
+                                ("a*?b", "a/b"), ("a/*/b", "a/x/y/b")] {
+            try expectEqual(ExcludeFilter.globMatch(pattern: pattern, text: text),
+                            referenceGlob(pattern: pattern, text: text), "Unicode and slash boundaries")
+        }
+    }
+
+    private func referenceGlob(pattern: String, text: String) -> Bool {
+        let p = Array(pattern), t = Array(text)
+        var dp = Array(repeating: Array(repeating: false, count: t.count + 1), count: p.count + 1)
+        dp[0][0] = true
+        for i in p.indices {
+            if p[i] == "*" { dp[i + 1][0] = dp[i][0] }
+            for j in t.indices {
+                if p[i] == "*" {
+                    dp[i + 1][j + 1] = dp[i][j + 1] || (t[j] != "/" && dp[i + 1][j])
+                } else if p[i] == "?" {
+                    dp[i + 1][j + 1] = t[j] != "/" && dp[i][j]
+                } else {
+                    dp[i + 1][j + 1] = p[i] == t[j] && dp[i][j]
+                }
+            }
+        }
+        return dp[p.count][t.count]
     }
 }

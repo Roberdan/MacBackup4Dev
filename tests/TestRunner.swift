@@ -137,6 +137,7 @@ struct TestRunner {
             ("ExcludeFilter.notExcluded", exclude.test_notExcluded),
             ("ExcludeFilter.directorySkip", exclude.test_directorySkip),
             ("ExcludeFilter.dotPatterns", exclude.test_dotPatterns),
+            ("ExcludeFilter.globEquivalent", exclude.test_globMatchesOriginalSemantics),
             ("ExcludeFilter.checkoutsMandatory", exclude.test_checkoutsAreMandatoryExcludedEvenWithOldConfig),
             ("ExcludeFilter.pluginCacheDirMandatory", exclude.test_pluginCacheDirIsMandatoryExcludedDistinctFromDotCache),
             ("ExcludeFilter.sitePackagesOfficeAssets", exclude.test_sitePackagesOfficeAssetsAreMandatoryExcluded),

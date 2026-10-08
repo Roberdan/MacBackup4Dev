@@ -45,20 +45,26 @@ struct ExcludeFilter {
     /// difference between seconds and minutes on a large tree.
     private let literalComponents: Set<String>
     /// Everything else: wildcards and multi-component paths.
-    private let complexPatterns: [String]
+    private struct ComplexPattern {
+        let value: String
+        let components: [String]
+        let literalPrefix: String?
+    }
+    private let complexPatterns: [ComplexPattern]
 
     init(patterns: [String]) {
         let effective = Array(Set(patterns + Self.mandatoryPatterns)).sorted()
         self.patterns = effective
         var literals: Set<String> = []
-        var complex: [String] = []
+        var complex: [ComplexPattern] = []
         for raw in effective {
             let pattern = Self.normalizePath(raw)
             if pattern.isEmpty { continue }
             if !Self.hasWildcards(pattern) && !pattern.contains("/") {
                 literals.insert(pattern)
             } else {
-                complex.append(pattern)
+                complex.append(ComplexPattern(value: pattern, components: Self.pathComponents(pattern),
+                                              literalPrefix: Self.hasWildcards(pattern) ? nil : pattern + "/"))
             }
         }
         self.literalComponents = literals
@@ -82,12 +88,13 @@ struct ExcludeFilter {
             return true
         }
 
-        for pattern in complexPatterns {
+        for entry in complexPatterns {
+            let pattern = entry.value
             // 1) Full path match (glob) + direct subtree inclusion for literal paths.
             if Self.globMatch(pattern: pattern, text: path) {
                 return true
             }
-            if Self.isLiteralBoundaryPrefix(pattern: pattern, path: path) {
+            if let prefix = entry.literalPrefix, path.hasPrefix(prefix) {
                 return true
             }
 
@@ -97,7 +104,8 @@ struct ExcludeFilter {
             }
 
             // 3) Directory prefix match on component boundaries.
-            if Self.componentPrefixMatch(pattern: pattern, path: path) {
+            if entry.components.count > 1,
+               Self.componentPrefixMatch(patternComponents: entry.components, pathComponents: pathComponents) {
                 return true
             }
         }
@@ -115,7 +123,8 @@ struct ExcludeFilter {
             return true
         }
 
-        for pattern in complexPatterns {
+        for entry in complexPatterns {
+            let pattern = entry.value
             // Direct directory match.
             if Self.globMatch(pattern: pattern, text: path) {
                 return true
@@ -127,7 +136,8 @@ struct ExcludeFilter {
             }
 
             // Match pattern as a path prefix at component boundaries.
-            if Self.componentPrefixMatch(pattern: pattern, path: path) {
+            if entry.components.count > 1,
+               Self.componentPrefixMatch(patternComponents: entry.components, pathComponents: pathComponents) {
                 return true
             }
         }
@@ -139,40 +149,42 @@ struct ExcludeFilter {
     /// * matches any sequence of characters (including empty)
     /// ? matches exactly one character
     static func globMatch(pattern: String, text: String) -> Bool {
+        guard hasWildcards(pattern) else { return pattern == text }
+        if !pattern.contains("?") {
+            if pattern.first == "*", !pattern.dropFirst().contains("*") {
+                let suffix = String(pattern.dropFirst())
+                return text.hasSuffix(suffix) && !text.dropLast(suffix.count).contains("/")
+            }
+            if pattern.last == "*", !pattern.dropLast().contains("*") {
+                let prefix = String(pattern.dropLast())
+                return text.hasPrefix(prefix) && !text.dropFirst(prefix.count).contains("/")
+            }
+        }
         let p = Array(pattern)
         let t = Array(text)
-        let m = p.count
-        let n = t.count
-
-        var dp = Array(repeating: Array(repeating: false, count: n + 1), count: m + 1)
-        dp[0][0] = true
-
-        if m > 0 {
-            for i in 1...m where p[i - 1] == "*" {
-                dp[i][0] = dp[i - 1][0]
+        var pi = 0
+        var ti = 0
+        var star: Int?
+        var starEnd = 0
+        while ti < t.count {
+            if pi < p.count, p[pi] == "*" {
+                star = pi
+                starEnd = ti
+                pi += 1
+            } else if pi < p.count, p[pi] == t[ti] || (p[pi] == "?" && t[ti] != "/") {
+                pi += 1
+                ti += 1
+            } else if let star, starEnd < t.count, t[starEnd] != "/" {
+                // Retry only within this path component: '*' must never consume '/'.
+                starEnd += 1
+                ti = starEnd
+                pi = star + 1
+            } else {
+                return false
             }
         }
-
-        if m > 0, n > 0 {
-            for i in 1...m {
-                for j in 1...n {
-                    let pc = p[i - 1]
-                    let tc = t[j - 1]
-
-                    if pc == "*" {
-                        // '*' cannot cross path separators.
-                        dp[i][j] = dp[i - 1][j] || (tc != "/" && dp[i][j - 1])
-                    } else if pc == "?" {
-                        // '?' cannot match path separators.
-                        dp[i][j] = tc != "/" && dp[i - 1][j - 1]
-                    } else {
-                        dp[i][j] = (pc == tc) && dp[i - 1][j - 1]
-                    }
-                }
-            }
-        }
-
-        return dp[m][n]
+        while pi < p.count, p[pi] == "*" { pi += 1 }
+        return pi == p.count
     }
 
     private static func normalizePath(_ value: String) -> String {
@@ -195,24 +207,7 @@ struct ExcludeFilter {
         pattern.contains("*") || pattern.contains("?")
     }
 
-    private static func isLiteralBoundaryPrefix(pattern: String, path: String) -> Bool {
-        guard !pattern.isEmpty, !hasWildcards(pattern) else {
-            return false
-        }
-        if pattern == path {
-            return true
-        }
-        guard path.count > pattern.count, path.hasPrefix(pattern) else {
-            return false
-        }
-        let idx = path.index(path.startIndex, offsetBy: pattern.count)
-        return path[idx] == "/"
-    }
-
-    private static func componentPrefixMatch(pattern: String, path: String) -> Bool {
-        let patternComponents = pathComponents(pattern)
-        let pathComponents = pathComponents(path)
-
+    private static func componentPrefixMatch(patternComponents: [String], pathComponents: [String]) -> Bool {
         guard !patternComponents.isEmpty, patternComponents.count <= pathComponents.count else {
             return false
         }

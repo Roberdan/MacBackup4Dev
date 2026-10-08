@@ -16,7 +16,7 @@ bundle identifier (update continuity, notification permission), everything on th
 
 ```bash
 ./build.sh              # compile + sign → build/MacBackup4Dev.app
-./run-tests.sh          # 137 tests → build/MacBackup4DevTests
+./run-tests.sh          # tests → build/MacBackup4DevTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -59,6 +59,12 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
 - **8 parallel workers**: `TaskGroup` bounded to 8 concurrent `processFile` tasks.
 - **Status file**: `~/.local/share/macbackup4dev/status.json` — updated every 500 files.
+- **Progress (4.1.3):** `scan_finished` must be true before showing a backup percentage
+  or copy estimate. Discovery totals are actual counts, never padding. Finalization
+  has no copy countdown; restore progress has its own known total.
+- **Schedule (4.1.3):** whole-minute intervals dividing a day use fixed calendar slots.
+  Existing interval schedules migrate only when idle; arbitrary intervals and daily
+  times are preserved. Never bootout a running backup to migrate its schedule.
 - **Config**: `~/.config/macbackup4dev/config.toml` (3.x paths are links to these, see `AppIdentity`)
 - **Lock file**: `<destination>/rustymacbackup.lock` (PID-based, stale detection via `kill(pid, 0)`).
   "Interrompi" sends SIGTERM to that PID when the backup runs in its own process (scheduled);
@@ -71,6 +77,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 - **A snapshot is good only if its manifest says `complete: true`.** `SnapshotCatalog` is the
   single source for "which snapshot is good": restore defaults, retention protection and the
   menu all ask it. Never pick "the newest directory" anywhere else.
+- **Excluded source roots are not missing protected sources.** Filter them before
+  existence checks and manifest recording. Restore undo data (`~/.rustybackup-pre-restore`)
+  is always excluded, even with old configs. Other missing protected sources still make
+  snapshots incomplete. Glob optimization must preserve Unicode and slash boundaries.
 - **The scanner → copy queue must never drop entries.** `AsyncStream` stays `.unbounded`,
   bounded by the `QUEUE_LIMIT` semaphore. `bufferingNewest`/`bufferingOldest` drop silently.
 - **Never fall back to the bare file name for a relative path** (`FileScanner`): use
