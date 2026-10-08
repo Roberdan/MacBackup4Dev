@@ -61,8 +61,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               !EncryptedStore.isOpen(setup), FileManager.default.fileExists(atPath: setup.container) else { return }
         storeOpening = true
         DispatchQueue.global(qos: .utility).async {
-            var failure: String?
-            do { try EncryptedStore.ensureOpen(config) } catch { failure = error.localizedDescription }
+            let failure: String?
+            do { try EncryptedStore.ensureOpen(config); failure = nil }
+            catch { failure = error.localizedDescription }
             DispatchQueue.main.async {
                 self.storeOpening = false
                 if let failure {
@@ -732,7 +733,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     EncryptedStore.close(store, force: true)
                 }
                 if EncryptedStore.isOpen(store) {
-                    DispatchQueue.main.async {
+                    DispatchQueue.main.async { [holders] in
                         self.sendNotification(title: "Disco non espulso",
                                               body: "Il backup cifrato è in uso\(holders.isEmpty ? "" : " da: " + holders). Riprova quando ha finito.")
                     }
@@ -749,7 +750,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     success = Self.runDiskutil(["unmount", "force", volumePath.path])
                 }
             }
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [success, holders] in
                 if success {
                     Log.info("Disk ejected: \(volumeName)")
                     self.sendNotification(title: "Disco espulso", body: "\(volumeName) si può scollegare.")
@@ -831,7 +832,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // 1. Brew FIRST — installs missing tools before restoring their configs
             var brewOK = true
             if brewInstall {
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     self?.sendNotification(title: "Programmi Homebrew…",
                                            body: "Installazione in corso (qualche minuto)…")
                     if var s = self?.uiState.status {
@@ -846,7 +847,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let result = RestoreEngine.restore(snapshotURL: snapshotURL, items: items,
                                                destinationOverrides: overrides) { item, done, total in
                 Log.info("Restoring [\(done)/\(total)] \(item)")
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     guard var s = self?.uiState.status else { return }
                     s.state = "running"
                     s.currentFile = item
@@ -857,7 +858,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self, brewOK] in
                 self?.iconManager.setState(.idle)
                 let brewMsg = brewInstall ? (brewOK ? "\nProgrammi Homebrew installati." : "\nHomebrew con errori.") : ""
                 let backupMsg = result.backedUpTo.isEmpty ? "" : "\nLe versioni precedenti sono annullabili dal menu."
@@ -870,7 +871,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.uiState.restoreResult = RestoreResultSummary(
                     restored: result.restored, overwritten: result.overwritten,
                     failed: result.failed, backedUpTo: result.backedUpTo)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
                     self?.uiState.restoreResult = nil
                 }
 
@@ -892,7 +893,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let outcome = (try? SelectiveRestore.undoDetailed(undoDir)) ?? UndoOutcome(failed: 1)
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     var body = "\(outcome.restored) file rimessi com'erano"
                     if !outcome.keptBecauseChanged.isEmpty {
                         body += ", \(outcome.keptBecauseChanged.count) lasciati perché modificati dopo il ripristino"
@@ -913,7 +914,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = RestoreEngine.undoRestore(from: backupDir)
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 self?.iconManager.setState(.idle)
                 Log.info("Undo complete: \(result.restored) restored, \(result.failed) failed")
                 self?.sendNotification(

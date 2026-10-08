@@ -14,7 +14,7 @@ if [ -z "${DEVELOPER_DIR:-}" ] && [[ "$(xcode-select -p 2>/dev/null)" == *Comman
 fi
 
 APP_NAME="MacBackup4Dev"
-VERSION="${VERSION:-4.1.4}"
+VERSION="${VERSION:-4.1.5}"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 BINARY="$BUILD_DIR/$APP_NAME"
@@ -43,6 +43,7 @@ mkdir -p "$BUILD_DIR"
 echo "  Compiling..."
 swiftc \
     -O \
+    -warnings-as-errors \
     -target "$MACOS_TARGET" \
     -import-objc-header Sources/Backup/KeychainStatus.h \
     -framework Cocoa \
