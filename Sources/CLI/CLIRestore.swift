@@ -252,7 +252,7 @@ extension CLIHandler {
                 continue
             }
             let out = NewMacRestore.runStage(stage, snapshot: snap.url, home: home, dryRun: !yes,
-                                             services: agents, packages: packages) { print($0) }
+                                             services: agents, packages: packages, sink: { print($0) })
             if yes && stage.restartAfter && out.ok { print(yellow("Riavvia il Mac prima della fase successiva.")) }
             if !out.ok { print(red("Fase \(id) con problemi: leggi le righe sopra.")) }
         }

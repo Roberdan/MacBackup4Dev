@@ -227,9 +227,9 @@ final class RestoreCenterModel: ObservableObject {
         busy = true
         DispatchQueue.global(qos: .userInitiated).async {
             let out = NewMacRestore.runStage(stage, snapshot: snap, home: home, dryRun: dryRun,
-                                             services: services, packages: stage.kind == .packages ? packages : []) { line in
+                                             services: services, packages: stage.kind == .packages ? packages : [], sink: { line in
                 DispatchQueue.main.async { self.log.append(line) }
-            }
+            })
             let progress = NewMacRestore.progress(home: home)
             let installed = stage.kind == .packages && !dryRun ? ToolInventory.installed(ToolInventory.packages(snapshot: snap)) : nil
             DispatchQueue.main.async {

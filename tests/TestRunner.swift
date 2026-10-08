@@ -4,9 +4,20 @@ typealias TestClosure = () throws -> Void
 
 @main
 struct TestRunner {
-    static func main() {
+    static func main() throws {
         Log.logURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("rmb-tests-\(ProcessInfo.processInfo.processIdentifier).log")
+        let storeState = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mb4d-store-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: storeState, withIntermediateDirectories: true)
+        EncryptedStore.stateDirectory = storeState.path
+        defer {
+            do { try FileManager.default.removeItem(at: storeState) }
+            catch {
+                print("Encrypted-store test cleanup failed: \(error)")
+                exit(1)
+            }
+        }
         var passed = 0
         var failed = 0
         var failedNames: [String] = []
@@ -92,6 +103,8 @@ struct TestRunner {
             ("Schedule.wallClockIntervals", power.test_intervalUsesWallClockCalendar),
             ("Schedule.customIntervalsPreserved", power.test_nonCalendarIntervalsArePreserved),
             ("Schedule.calendarMigration", power.test_calendarMigrationPreservesJob),
+            ("Schedule.migrationLocksBackup", power.test_calendarMigrationSerializesWithBackup),
+            ("Schedule.rollbackKeepsLock", power.test_calendarMigrationRollbackHoldsLock),
             ("Progress.unknownTotal", backup.test_progressUnknownUntilScanFinishes),
             ("Progress.hardlinksAndFinalization", backup.test_progressKnownCountsHardlinksAndFinalization),
             ("Progress.legacyEta", backup.test_oldStatusDoesNotDisplayInventedEta),
@@ -113,6 +126,8 @@ struct TestRunner {
             ("Onboarding.credentialFolder", onboarding.test_folderWithACredentialIsACredential),
             ("Recovery.appKeptCurrent", onboarding.test_recoveryAppIsKeptCurrent),
             ("Encryption.passwordRules", encryption.test_passwordRules),
+            ("Encryption.keychainStatus", encryption.test_keychainStatusFailsClosed),
+            ("Encryption.isolatedState", encryption.test_stateDirectoryIsolatesLocksAndMarkers),
             ("Encryption.storeBasics", encryption.test_storeEncryptsKeepsHardLinksAndRefusesWrongPassword),
             ("Encryption.realBackup", encryption.test_realBackupIntoTheEncryptedStore),
             ("Encryption.keychainAndEnsureOpen", encryption.test_keychainRoundTripAndEnsureOpen),

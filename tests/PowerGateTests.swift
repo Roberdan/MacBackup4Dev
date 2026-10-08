@@ -80,6 +80,66 @@ struct PowerGateTests {
                         "daily scheduling remains unchanged")
     }
 
+    func test_calendarMigrationSerializesWithBackup() throws {
+        let safety = SafetyTests()
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let destination = URL(fileURLWithPath: box.dest)
+        let path = box.root.appendingPathComponent("schedule.plist")
+        let old = try PropertyListSerialization.data(fromPropertyList: ["StartInterval": 3600], format: .xml, options: 0)
+        try old.write(to: path)
+        var installs = 0
+        let install: (String) throws -> Void = { xml in
+            installs += 1
+            do {
+                _ = try DestinationLock(at: destination)
+                try fail("migration must hold the backup lock while changing the schedule")
+            } catch BackupError.lockExists {}
+            try xml.write(to: path, atomically: true, encoding: .utf8)
+        }
+        do {
+            let backup = try DestinationLock(at: destination)
+            try withExtendedLifetime(backup) {
+                do {
+                    _ = try ScheduleManager.migrateIntervalScheduleWhenIdle(destination: destination, path: path, install: install)
+                    try fail("a running backup must defer migration")
+                } catch BackupError.lockExists {}
+            }
+        }
+        try expectEqual(installs, 0, "never bootout a running backup")
+        try expectEqual(try Data(contentsOf: path), old, "a busy schedule remains unchanged")
+        try expect(try ScheduleManager.migrateIntervalScheduleWhenIdle(destination: destination, path: path, install: install),
+                   "migration succeeds once the backup is idle")
+        try expectEqual(installs, 1, "install only once")
+        _ = try DestinationLock(at: destination)
+    }
+
+    func test_calendarMigrationRollbackHoldsLock() throws {
+        let safety = SafetyTests()
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let destination = URL(fileURLWithPath: box.dest)
+        let path = box.root.appendingPathComponent("schedule.plist")
+        let old = try PropertyListSerialization.data(fromPropertyList: ["StartInterval": 3600], format: .xml, options: 0)
+        try old.write(to: path)
+        var installs = 0
+        do {
+            _ = try ScheduleManager.migrateIntervalScheduleWhenIdle(destination: destination, path: path, install: { xml in
+                installs += 1
+                do {
+                    _ = try DestinationLock(at: destination)
+                    try fail("rollback must retain the backup lock")
+                } catch BackupError.lockExists {}
+                try xml.write(to: path, atomically: true, encoding: .utf8)
+                if installs == 1 { throw POSIXError(.EIO) }
+            })
+            try fail("a failed install must report its error")
+        } catch let error as POSIXError {
+            try expectEqual(error.code, .EIO, "preserve the original install error")
+        }
+        try expectEqual(installs, 2, "retry the original schedule as rollback")
+        try expectEqual(try Data(contentsOf: path), old, "restore the original schedule")
+        _ = try DestinationLock(at: destination)
+    }
+
     private func plistDictionary(_ xml: String) throws -> [String: Any] {
         let obj = try PropertyListSerialization.propertyList(from: Data(xml.utf8), format: nil)
         guard let dict = obj as? [String: Any] else { throw TestFailure.failed("invalid schedule plist") }

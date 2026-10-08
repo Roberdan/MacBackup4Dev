@@ -21,17 +21,18 @@ echo "  ✅ $APP_NAME-$VERSION.app.zip ($(du -sh "$APP_NAME-$VERSION.app.zip" | 
 # Bridge for 3.x updaters: they download "RustyMacBackup-<v>.app.zip" and expect a
 # "RustyMacBackup.app" inside. Same signed app, old folder name; on first launch the app
 # renames itself to MacBackup4Dev.app (AutoUpdater.relocateFromLegacyName).
-BRIDGE_DIR=$(mktemp -d)
+PACKAGE_TEMP=$(mktemp -d)
+trap 'rm -rf "$PACKAGE_TEMP"' EXIT
+BRIDGE_DIR="$PACKAGE_TEMP/bridge"
+PKG_ROOT="$PACKAGE_TEMP/root"
+SCRIPTS_DIR="$PACKAGE_TEMP/scripts"
+COMPONENT_PLIST="$PACKAGE_TEMP/component.plist"
+mkdir -p "$BRIDGE_DIR" "$PKG_ROOT" "$SCRIPTS_DIR"
 ditto "build/$APP_NAME.app" "$BRIDGE_DIR/$LEGACY_NAME.app"
 ditto -c -k --keepParent "$BRIDGE_DIR/$LEGACY_NAME.app" "$LEGACY_NAME-$VERSION.app.zip"
-rm -rf "$BRIDGE_DIR"
 echo "  ✅ $LEGACY_NAME-$VERSION.app.zip (ponte per gli aggiornamenti dalla 3.x)"
 
 # Step 3: Create staging directory for .pkg
-PKG_ROOT=$(mktemp -d)
-SCRIPTS_DIR=$(mktemp -d)
-trap "rm -rf $PKG_ROOT $SCRIPTS_DIR" EXIT
-
 mkdir -p "$PKG_ROOT/Applications"
 cp -R "build/$APP_NAME.app" "$PKG_ROOT/Applications/"
 
@@ -63,7 +64,6 @@ chmod +x "$SCRIPTS_DIR/postinstall"
 
 # Step 5: Build .pkg. Not relocatable: with the same bundle id, Installer would otherwise
 # "upgrade" /Applications/RustyMacBackup.app in place instead of installing MacBackup4Dev.app.
-COMPONENT_PLIST=$(mktemp -t component).plist
 pkgbuild --analyze --root "$PKG_ROOT" "$COMPONENT_PLIST" >/dev/null
 plutil -replace 0.BundleIsRelocatable -bool NO "$COMPONENT_PLIST"
 pkgbuild \

@@ -44,6 +44,7 @@ echo "  Compiling..."
 swiftc \
     -O \
     -target "$MACOS_TARGET" \
+    -import-objc-header Sources/Backup/KeychainStatus.h \
     -framework Cocoa \
     -framework SwiftUI \
     -framework UserNotifications \
@@ -75,5 +76,5 @@ codesign --force --deep --options runtime \
 
 echo ""
 echo "Build complete: $APP_BUNDLE"
-echo "CLI: $($BINARY version 2>/dev/null || echo 'N/A')"
+echo "CLI: $("$APP_BUNDLE/Contents/MacOS/$APP_NAME" version)"
 echo "Signed: $SIGN_LABEL"

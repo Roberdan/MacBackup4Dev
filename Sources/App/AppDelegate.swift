@@ -383,7 +383,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         do {
-            if try ScheduleManager.migrateIntervalScheduleWhenIdle() { refreshScheduleLabel() }
+            if let current = freshConfig(),
+               try ScheduleManager.migrateIntervalScheduleWhenIdle(destination: URL(fileURLWithPath: current.destination.path)) {
+                refreshScheduleLabel()
+            }
+        } catch BackupError.lockExists {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.migrateLegacyScheduleWhenIdle() }
+            return
         } catch {
             Log.error("Calendar schedule migration failed: \(error.localizedDescription)")
             sendNotification(title: "Pianificazione non aggiornata", body: error.localizedDescription)

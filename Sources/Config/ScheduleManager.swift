@@ -72,22 +72,26 @@ enum ScheduleManager {
         return new
     }
 
-    /// Called only when no backup is running: bootout must never interrupt a snapshot.
-    static func migrateIntervalScheduleWhenIdle() throws -> Bool {
-        guard FileManager.default.fileExists(atPath: plistPath.path) else { return false }
-        let data = try Data(contentsOf: plistPath)
+    /// Holds the backup's operation lock through bootout and bootstrap, including rollback.
+    static func migrateIntervalScheduleWhenIdle(destination: URL, path: URL = plistPath,
+                                               install: (String) throws -> Void = installSchedule) throws -> Bool {
+        guard FileManager.default.fileExists(atPath: path.path),
+              FileManager.default.fileExists(atPath: destination.path) else { return false }
+        let data = try Data(contentsOf: path)
         guard let old = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let new = calendarPlist(from: old) else { return false }
         let converted = try PropertyListSerialization.data(fromPropertyList: new, format: .xml, options: 0)
         guard let xml = String(data: converted, encoding: .utf8) else {
             throw scheduleError("Cannot encode calendar schedule")
         }
+        let operationLock = try DestinationLock(at: destination)
+        defer { withExtendedLifetime(operationLock) {} }
         do {
-            try installSchedule(plistContent: xml)
+            try install(xml)
         } catch {
             let originalError = error
             guard let original = String(data: data, encoding: .utf8) else { throw originalError }
-            do { try installSchedule(plistContent: original) }
+            do { try install(original) }
             catch { Log.error("Schedule rollback failed: \(error.localizedDescription)") }
             throw originalError
         }

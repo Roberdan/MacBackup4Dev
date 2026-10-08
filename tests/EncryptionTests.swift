@@ -17,6 +17,43 @@ struct EncryptionTests {
         try expectNotNil(EncryptedStore.passwordProblem("una frase\nlunga!", confirm: "una frase\nlunga!"), "a newline is refused")
     }
 
+    func test_keychainStatusFailsClosed() throws {
+        let unlocked = UInt32(kSecUnlockStateStatus)
+        try expect(!MB4DKeychainStatusIsLocked(errSecSuccess, unlocked), "an unlocked Keychain permits access")
+        try expect(MB4DKeychainStatusIsLocked(errSecSuccess, 0), "a locked Keychain prevents access")
+        try expect(MB4DKeychainStatusIsLocked(errSecNoSuchKeychain, unlocked), "missing Keychain fails closed")
+        try expect(MB4DKeychainStatusIsLocked(errSecInvalidKeychain, unlocked), "status errors fail closed")
+    }
+
+    func test_stateDirectoryIsolatesLocksAndMarkers() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let original = EncryptedStore.stateDirectory
+        defer { EncryptedStore.stateDirectory = original }
+        let external = box.root.appendingPathComponent("external-state")
+        let isolated = box.root.appendingPathComponent("test-state")
+        try FileManager.default.createDirectory(at: external, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: isolated, withIntermediateDirectories: true)
+        let pid = String(ProcessInfo.processInfo.processIdentifier)
+        let externalLock = external.appendingPathComponent("compacting.lock")
+        try pid.write(to: externalLock, atomically: true, encoding: .utf8)
+
+        EncryptedStore.stateDirectory = external.path
+        try expect(EncryptedStore.compactionRunning, "a live compaction is detected in its own state directory")
+        EncryptedStore.stateDirectory = isolated.path
+        try expect(!EncryptedStore.compactionRunning, "a different store's compaction cannot block the test")
+        let s = EncryptedStore.Setup(container: box.root.appendingPathComponent("image").path,
+                                     volume: AppIdentity.name + "-isolated")
+        EncryptedStore.writeOpenMarker(s)
+        EncryptedStore.markSpaceFreed(destination: URL(fileURLWithPath: s.destination))
+        try expect(EncryptedStore.wasLeftOpen(s), "the open marker is read from the isolated directory")
+        try expect(EncryptedStore.needsCompaction(s), "the compaction flag is read from the isolated directory")
+        try expect(!FileManager.default.fileExists(atPath: external.appendingPathComponent("store-\(s.volume).open").path),
+                   "the other state directory receives no open marker")
+        try expect(!FileManager.default.fileExists(atPath: external.appendingPathComponent("store-\(s.volume).compact").path),
+                   "the other state directory receives no compaction flag")
+        try expectEqual(try String(contentsOf: externalLock, encoding: .utf8), pid, "the other compaction lock is unchanged")
+    }
+
     func test_storeEncryptsKeepsHardLinksAndRefusesWrongPassword() throws {
         let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
         let s = setup(box.root)

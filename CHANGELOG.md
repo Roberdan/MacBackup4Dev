@@ -17,9 +17,6 @@
 - Disk I/O policy uses the SDK's disk-type constant instead of an incorrect hardcoded
   value; setting failures are reported instead of silently ignored.
 
-## [4.1.3] - 2026-10-08
-
-### Fixed
 - Restore undo folders no longer make otherwise successful backups incomplete when
   removed. They are mandatory exclusions even with older configurations; excluded
   source roots are filtered before existence checks and manifest recording.
@@ -32,6 +29,12 @@
 - Exclusion matching no longer allocates a character-by-character matrix for every
   rule and file. Matching preserves Unicode characters and path separator boundaries,
   with differential tests against the previous algorithm.
+- Encrypted-store tests use their own state directory, so a running compaction cannot
+  block a test or have its lock and recovery markers changed by the test suite.
+- Package staging files, including the component property list, are removed together
+  when packaging ends or fails.
+- Schedule migration holds the same operation lock as a backup, including rollback,
+  so a newly starting backup cannot be interrupted between the idle check and reload.
 
 ## [4.1.2] - 2026-10-07
 
