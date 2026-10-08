@@ -55,9 +55,12 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 ## Architecture Decisions
 
 - **Single binary**: CLI mode detected via `ProcessInfo.processInfo.arguments`. If args present → CLI, otherwise → menu bar app.
-- **Hard links for deduplication**: `HardLinker.shouldHardLink()` checks size + mtime delta < 1.0s. Files identical to previous snapshot get hard-linked (zero space cost).
+- **Hard links for deduplication**: `HardLinker.shouldHardLink()` checks POSIX size + mtime delta < 0.001s. Only regular previous files are reused (never symlinks).
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
-- **8 parallel workers**: `TaskGroup` bounded to 8 concurrent `processFile` tasks.
+- **4 parallel workers (4.1.4)**: backup entry points, scanner and copy tasks use background
+  priority. Disk I/O uses the SDK constants, preserves an existing passive/throttled policy
+  and restores the process policy on exit. Prepared directories are cached only within a run;
+  copy failures invalidate the cache and a missing directory is recreated once.
 - **Status file**: `~/.local/share/macbackup4dev/status.json` — updated every 500 files.
 - **Progress (4.1.3):** `scan_finished` must be true before showing a backup percentage
   or copy estimate. Discovery totals are actual counts, never padding. Finalization

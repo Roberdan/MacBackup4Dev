@@ -55,6 +55,8 @@ enum BackupEngine {
     static let STATUS_UPDATE_INTERVAL: Int = 500
     static let DISK_CHECK_INTERVAL: Int = 100
     static let MIN_FREE_SPACE: UInt64 = 1_073_741_824
+    static let WORK_PRIORITY: TaskPriority = .background
+    static let MAX_WORKERS = 4
     /// How many discovered files may wait for a copy worker. The walker blocks beyond
     /// this instead of dropping entries.
     static let QUEUE_LIMIT: Int = 4_096
@@ -116,10 +118,6 @@ enum BackupEngine {
         if isiCloudDesktopActive() {
             Log.warn("iCloud Desktop & Documents sync is ACTIVE -- using bird-safe mode")
         }
-        // Throttle I/O on battery; use default priority on AC power
-        let onBattery = IOPriority.isOnBattery()
-        IOPriority.setIOPriority(throttle: onBattery)
-        Log.info("I/O priority: \(onBattery ? "throttled (battery)" : "full speed (AC)")")
         guard preflightWriteTest(at: destURL) else { throw BackupError.notWritable(destPath) }
 
         let operationLock = try DestinationLock(at: destURL)
@@ -127,6 +125,14 @@ enum BackupEngine {
         let lockPath = destURL.appendingPathComponent("rustymacbackup.lock").path
         try acquireLock(at: lockPath)
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
+
+        let onBattery = IOPriority.isOnBattery()
+        let previousIOPolicy = try IOPriority.beginBackup(onBattery: onBattery)
+        defer {
+            do { try IOPriority.setDiskPolicy(previousIOPolicy) }
+            catch { Log.error("Cannot restore disk I/O priority: \(error.localizedDescription)") }
+        }
+        Log.info("Backup priorities: CPU=\(Task.currentPriority.rawValue), disk=\(IOPriority.backupPolicy(onBattery: onBattery, previous: previousIOPolicy)), workers=\(MAX_WORKERS)")
 
         let previousComplete = SnapshotCatalog.latestComplete(at: destURL)
         // Without a verified snapshot yet (first 3.0 run), compare with the newest old one,
@@ -213,7 +219,7 @@ enum BackupEngine {
         let (stream, continuation) = AsyncStream<FileEntry>.makeStream(bufferingPolicy: .unbounded)
         let slots = QueueGate(limit: QUEUE_LIMIT)
 
-        let walkerTask = Task.detached(priority: .utility) {
+        let walkerTask = Task.detached(priority: WORK_PRIORITY) {
             FileScanner.walk(sources: sourceURLs, basePaths: homeBasePaths,
                            excludeFilter: excludeFilter,
                            onTraversalError: { path, error in
@@ -237,7 +243,7 @@ enum BackupEngine {
         var completedCount: UInt64 = 0
         var vanishedCount = 0
         let VANISHED_THRESHOLD = 3
-        let maxWorkers = 8  // per spec: TaskGroup concurrency limit
+        let directories = BackupDirectories()
 
         let protectionGuard = RightsManagementGuard(config: config.protection)
         if protectionGuard.isActive {
@@ -282,13 +288,14 @@ enum BackupEngine {
                     let destFile = inProgressURL.appendingPathComponent(file.relativePath).path
                     let prevFile = latestBackup.map { $0.appendingPathComponent(file.relativePath).path }
 
-                    group.addTask {
+                    group.addTask(priority: WORK_PRIORITY) {
                         (await BackupEngine.processFile(entry: file, destFile: destFile,
-                                                        prevFile: prevFile, protectionGuard: protectionGuard), file)
+                                                        prevFile: prevFile, protectionGuard: protectionGuard,
+                                                        directories: directories), file)
                     }
                     inFlight += 1
 
-                    if inFlight >= maxWorkers {
+                    if inFlight >= MAX_WORKERS {
                         if let (result, entry) = try await group.next() {
                             inFlight -= 1
                             handleResult(result, entry: entry)

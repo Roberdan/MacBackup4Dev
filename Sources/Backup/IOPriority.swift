@@ -1,18 +1,29 @@
 import Foundation
+import Darwin
 import IOKit
 import IOKit.ps
 
 enum IOPriority {
-    // From sys/resource.h
-    private static let IOPOL_TYPE_DISK: Int32 = 1
-    private static let IOPOL_SCOPE_PROCESS: Int32 = 0
-    private static let IOPOL_DEFAULT: Int32 = 0
-    private static let IOPOL_THROTTLE: Int32 = 3
+    static func backupPolicy(onBattery: Bool, previous: Int32) -> Int32 {
+        if onBattery || previous == IOPOL_THROTTLE { return IOPOL_THROTTLE }
+        if previous == IOPOL_PASSIVE { return IOPOL_PASSIVE }
+        return IOPOL_UTILITY
+    }
 
-    /// Set disk I/O priority. Throttle on battery for system responsiveness.
-    static func setIOPriority(throttle: Bool) {
-        let policy = throttle ? IOPOL_THROTTLE : IOPOL_DEFAULT
-        setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, policy)
+    /// Never raise a schedule's existing low priority; restore it when the backup ends.
+    static func beginBackup(onBattery: Bool) throws -> Int32 {
+        let previous = getiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS)
+        guard previous >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        try setDiskPolicy(backupPolicy(onBattery: onBattery, previous: previous))
+        return previous
+    }
+
+    static func setDiskPolicy(_ policy: Int32) throws {
+        guard setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, policy) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
     }
 
     /// Detect if running on battery power. Returns false on desktop Macs or when undeterminable.

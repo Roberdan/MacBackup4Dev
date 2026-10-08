@@ -126,8 +126,8 @@ enum FileScanner {
                 // single error. An excluded file sitting next to a real directory (a
                 // `.DS_Store` before `zzArchive/`, a `*.log` before a source folder) was
                 // enough to silently drop everything inside it.
-                if excludeFilter.shouldSkipDirectory(relativePath: relativePath) {
-                    if isDirectory { enumerator.skipDescendants() }
+                if isDirectory && excludeFilter.shouldSkipDirectory(relativePath: relativePath) {
+                    enumerator.skipDescendants()
                     continue
                 }
                 if excludeFilter.isExcluded(relativePath: relativePath) {

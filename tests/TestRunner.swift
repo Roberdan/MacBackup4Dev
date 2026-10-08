@@ -36,9 +36,16 @@ struct TestRunner {
         let onboarding = OnboardingTests()
         let encryption = EncryptionTests()
         let homeRewrite = HomeRewriteTests()
+        let optimization = BackupOptimizationTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
+            ("Optimization.backgroundPolicy", optimization.test_backgroundPolicyNeverRaisesExistingPriority),
+            ("Optimization.diskPolicyRestored", optimization.test_diskPolicyUsesSDKAndRestores),
+            ("Optimization.concurrentDirectories", optimization.test_directoryPreparationIsConcurrentAndRunScoped),
+            ("Optimization.failedDirectories", optimization.test_directoryFailuresAreNotCached),
+            ("Optimization.removedDirectories", optimization.test_copyRecreatesRemovedCachedDirectory),
+            ("Optimization.previousMetadata", optimization.test_previousMetadataRejectsSymlinksAndKeepsTolerance),
             ("Safety.copyErrorMakesIncomplete", safety.test_copyErrorMakesSnapshotIncomplete),
             ("Safety.excludedSourceNotMissing", safety.test_excludedSourceDoesNotMakeSnapshotIncomplete),
             ("Safety.shrinkWarning", safety.test_shrinkWarningOnEmptiedHome),
@@ -138,6 +145,7 @@ struct TestRunner {
             ("ExcludeFilter.directorySkip", exclude.test_directorySkip),
             ("ExcludeFilter.dotPatterns", exclude.test_dotPatterns),
             ("ExcludeFilter.globEquivalent", exclude.test_globMatchesOriginalSemantics),
+            ("ExcludeFilter.compiledEquivalent", exclude.test_compiledFiltersPreserveMatchingAndPruning),
             ("ExcludeFilter.checkoutsMandatory", exclude.test_checkoutsAreMandatoryExcludedEvenWithOldConfig),
             ("ExcludeFilter.pluginCacheDirMandatory", exclude.test_pluginCacheDirIsMandatoryExcludedDistinctFromDotCache),
             ("ExcludeFilter.sitePackagesOfficeAssets", exclude.test_sitePackagesOfficeAssetsAreMandatoryExcluded),

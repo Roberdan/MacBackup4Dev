@@ -237,7 +237,7 @@ enum CLIHandler {
         let sem = DispatchSemaphore(value: 0)
         final class ErrorBox: @unchecked Sendable { var error: Error? }
         let box = ErrorBox()
-        Task {
+        Task(priority: BackupEngine.WORK_PRIORITY) {
             do {
                 if let r = try await BackupEngine.run(config: cfg) {
                     if r.manifest.complete {

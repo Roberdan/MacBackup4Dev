@@ -1,5 +1,21 @@
 import Foundation
 
+/// Only directories created successfully during this snapshot are cached.
+final class BackupDirectories: @unchecked Sendable {
+    private let lock = NSLock()
+    private var prepared: Set<String> = []
+
+    func prepare(_ path: String) throws {
+        if lock.withLock({ prepared.contains(path) }) { return }
+        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        lock.withLock { _ = prepared.insert(path) }
+    }
+
+    func invalidate(_ path: String) {
+        lock.withLock { _ = prepared.remove(path) }
+    }
+}
+
 struct BackupStats {
     var filesHardlinked: UInt64 = 0
     var filesCopied: UInt64 = 0

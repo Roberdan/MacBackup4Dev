@@ -639,7 +639,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Swift 6 concurrency checking.
         let config = pending
 
-        Task.detached {
+        Task.detached(priority: BackupEngine.WORK_PRIORITY) {
             do {
                 let result = try await BackupEngine.run(config: config)
                 await MainActor.run {

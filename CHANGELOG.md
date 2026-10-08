@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.1.4] - 2026-10-08
+
+### Changed
+- Backup tasks and the scanner run at background CPU priority with four copy workers.
+  Disk I/O remains low priority on AC as well as battery; a schedule's stricter policy
+  is preserved and the previous process policy is restored when the backup ends.
+- Exclusion patterns are compiled once and path characters are shared across matching
+  rules. Files no longer undergo directory-pruning checks, and multi-component rules
+  no longer try to match individual components.
+- Each snapshot shares a thread-safe cache of successfully prepared destination
+  directories. Previous-file comparison reads POSIX metadata directly rather than
+  building Foundation attribute dictionaries; symlinks are never reused as files.
+
+### Fixed
+- Disk I/O policy uses the SDK's disk-type constant instead of an incorrect hardcoded
+  value; setting failures are reported instead of silently ignored.
+
 ## [4.1.3] - 2026-10-08
 
 ### Fixed
