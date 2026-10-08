@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.1.5] - 2026-10-08
+
+### Fixed
+- Background store-open, eject, restore and undo callbacks capture immutable results
+  and their own weak app reference. This removes Swift concurrency diagnostics on
+  the macOS 14 release toolchain without changing notifications or restore behavior.
+
+### Changed
+- App and test builds treat compiler warnings as errors, locally and in CI, so a
+  release cannot silently pass with diagnostics that become errors in Swift 6.
+
 ## [4.1.4] - 2026-10-08
 
 ### Changed

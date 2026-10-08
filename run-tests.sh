@@ -34,6 +34,7 @@ fi
 
 echo "  Compiling tests..."
 swiftc \
+    -warnings-as-errors \
     -target arm64-apple-macos14.0 \
     -import-objc-header Sources/Backup/KeychainStatus.h \
     -framework Cocoa \

@@ -20,6 +20,10 @@ bundle identifier (update continuity, notification permission), everything on th
 ./build-pkg.sh          # creates .pkg installer
 ```
 
+App and test compilation use `-warnings-as-errors`, including on the macOS 14 CI
+toolchain. Background UI callbacks capture result values explicitly and use a new
+weak capture at each nested asynchronous boundary.
+
 Version is set in one place: `VERSION` default in `build.sh`. `build-pkg.sh` reads it, the release workflow overrides it from the `v*` tag, and the CLI reads `CFBundleShortVersionString` at runtime.
 
 ## Module Map
