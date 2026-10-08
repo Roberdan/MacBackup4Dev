@@ -16,7 +16,7 @@ bundle identifier (update continuity, notification permission), everything on th
 
 ```bash
 ./build.sh              # compile + sign → build/MacBackup4Dev.app
-./run-tests.sh          # 137 tests → build/MacBackup4DevTests
+./run-tests.sh          # tests → build/MacBackup4DevTests
 ./build-pkg.sh          # creates .pkg installer
 ```
 
@@ -55,10 +55,20 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 ## Architecture Decisions
 
 - **Single binary**: CLI mode detected via `ProcessInfo.processInfo.arguments`. If args present → CLI, otherwise → menu bar app.
-- **Hard links for deduplication**: `HardLinker.shouldHardLink()` checks size + mtime delta < 1.0s. Files identical to previous snapshot get hard-linked (zero space cost).
+- **Hard links for deduplication**: `HardLinker.shouldHardLink()` checks POSIX size + mtime delta < 0.001s. Only regular previous files are reused (never symlinks).
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
-- **8 parallel workers**: `TaskGroup` bounded to 8 concurrent `processFile` tasks.
+- **4 parallel workers (4.1.4)**: backup entry points, scanner and copy tasks use background
+  priority. Disk I/O uses the SDK constants, preserves an existing passive/throttled policy
+  and restores the process policy on exit. Prepared directories are cached only within a run;
+  copy failures invalidate the cache and a missing directory is recreated once.
 - **Status file**: `~/.local/share/macbackup4dev/status.json` — updated every 500 files.
+- **Progress (4.1.4):** `scan_finished` must be true before showing a backup percentage
+  or copy estimate. Discovery totals are actual counts, never padding. Finalization
+  has no copy countdown; restore progress has its own known total.
+- **Schedule (4.1.4):** whole-minute intervals dividing a day use fixed calendar slots.
+  Existing interval schedules migrate only when idle; arbitrary intervals and daily
+  times are preserved. Migration holds `DestinationLock` through install and rollback;
+  a busy destination is retried later. Never bootout a running backup to migrate its schedule.
 - **Config**: `~/.config/macbackup4dev/config.toml` (3.x paths are links to these, see `AppIdentity`)
 - **Lock file**: `<destination>/rustymacbackup.lock` (PID-based, stale detection via `kill(pid, 0)`).
   "Interrompi" sends SIGTERM to that PID when the backup runs in its own process (scheduled);
@@ -71,6 +81,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 - **A snapshot is good only if its manifest says `complete: true`.** `SnapshotCatalog` is the
   single source for "which snapshot is good": restore defaults, retention protection and the
   menu all ask it. Never pick "the newest directory" anywhere else.
+- **Excluded source roots are not missing protected sources.** Filter them before
+  existence checks and manifest recording. Restore undo data (`~/.rustybackup-pre-restore`)
+  is always excluded, even with old configs. Other missing protected sources still make
+  snapshots incomplete. Glob optimization must preserve Unicode and slash boundaries.
 - **The scanner → copy queue must never drop entries.** `AsyncStream` stays `.unbounded`,
   bounded by the `QUEUE_LIMIT` semaphore. `bufferingNewest`/`bufferingOldest` drop silently.
 - **Never fall back to the bare file name for a relative path** (`FileScanner`): use
@@ -80,7 +94,8 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 - **Restore writes beside the target and renames into place; undo.json lists replaced AND
   created files.** Tests must pass a temp `undoRoot`/`home`: never write into the real home.
 - Tests run the real engine with `BackupRunOptions(home:)` and `StatusWriter(directory:)`
-  pointed at a sandbox: never the user's status file.
+  pointed at a sandbox: never the user's status file. `EncryptedStore.stateDirectory`
+  also points at test-only temporary state: never the app's live compaction lock or markers.
 - **The picker must never drop a configured source** (scar 2026-10-07): every
   `enabledPaths` entry discovery does not know is listed under "Le tue cartelle". "Tutti"
   never selects `sensitive` items. "Esegui ora" never opens the picker.
@@ -108,7 +123,9 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   it, eject it — closing the store first). Password chosen by the user, in the login Keychain,
   ALWAYS read/written via `/usr/bin/security` (stdin for writes): never SecItem from the app
   (ad-hoc signature changes at each update → prompts → scheduled backup blocked). Secrets go
-  to child processes on stdin, never in arguments. `isVolumeReallyMounted` includes hidden
+  to child processes on stdin, never in arguments. `KeychainStatus.h` keeps the unavoidable
+  legacy lock-status query behind a read-only compatibility boundary; it never reads secrets
+  or unlocks the Keychain. `isVolumeReallyMounted` includes hidden
   volumes (the store is nobrowse).
 - **Updates install only if signed by the release key** (`UpdateSignature.publicKeyBase64`;
   private key = GitHub secret `UPDATE_SIGNING_KEY`, backup in the maintainer's Keychain as

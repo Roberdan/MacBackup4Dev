@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// Backups encrypted by the app, whatever the disk (4.1). Snapshots live inside an encrypted
 /// APFS disk image (`MacBackup4Dev.sparsebundle`, AES-256) on the backup disk: without the
@@ -15,6 +14,7 @@ import Security
 enum EncryptedStore {
     static let imageName = "\(AppIdentity.name).sparsebundle"
     static let keychainService = "\(AppIdentity.name) backup"
+    static var stateDirectory = AppIdentity.dataDir
 
     struct Setup: Equatable {
         /// Path of the image on the backup disk.
@@ -135,7 +135,7 @@ enum EncryptedStore {
     /// `<data>/store-<volume>.open` holds the boot time while the store is open. Found at the
     /// next open with the same boot time: the store vanished without being closed by us (disk
     /// pulled out). A restart or shutdown closes it cleanly and changes the boot time.
-    static func openMarker(_ setup: Setup) -> String { AppIdentity.dataDir + "/store-\(setup.volume).open" }
+    static func openMarker(_ setup: Setup) -> String { stateDirectory + "/store-\(setup.volume).open" }
 
     static var bootTime: String {
         var tv = timeval(); var size = MemoryLayout<timeval>.size
@@ -144,7 +144,7 @@ enum EncryptedStore {
     }
 
     static func writeOpenMarker(_ setup: Setup) {
-        try? FileManager.default.createDirectory(atPath: AppIdentity.dataDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(atPath: stateDirectory, withIntermediateDirectories: true)
         try? bootTime.write(toFile: openMarker(setup), atomically: true, encoding: .utf8)
     }
 
@@ -164,14 +164,14 @@ enum EncryptedStore {
 
     // MARK: - Giving freed space back to the disk
 
-    static func compactFlag(volume: String) -> String { AppIdentity.dataDir + "/store-\(volume).compact" }
-    static let compactingLock = AppIdentity.dataDir + "/compacting.lock"
+    static func compactFlag(volume: String) -> String { stateDirectory + "/store-\(volume).compact" }
+    static var compactingLock: String { stateDirectory + "/compacting.lock" }
 
     /// Called when snapshots are deleted under `destination` (a path inside /Volumes/<volume>).
     static func markSpaceFreed(destination: URL) {
         let comps = destination.standardized.pathComponents
         guard comps.count > 2, comps[1] == "Volumes", comps[2].hasPrefix(AppIdentity.name + "-") else { return }
-        try? FileManager.default.createDirectory(atPath: AppIdentity.dataDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(atPath: stateDirectory, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: compactFlag(volume: comps[2]), contents: Data())
     }
 
@@ -247,11 +247,7 @@ enum EncryptedStore {
     /// a locked Keychain makes macOS show a password window and the command waits for it —
     /// at every scheduled backup, with nobody at the screen (seen 2026-10-07).
     static var keychainLocked: Bool {
-        var keychain: SecKeychain?
-        guard SecKeychainCopyDefault(&keychain) == errSecSuccess, let keychain else { return true }
-        var status: SecKeychainStatus = 0
-        guard SecKeychainGetStatus(keychain, &status) == errSecSuccess else { return true }
-        return status & UInt32(kSecUnlockStateStatus) == 0
+        MB4DLoginKeychainIsLocked()
     }
 
     static func readPassword(for setup: Setup) -> String? {

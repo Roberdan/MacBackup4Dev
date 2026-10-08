@@ -4,9 +4,20 @@ typealias TestClosure = () throws -> Void
 
 @main
 struct TestRunner {
-    static func main() {
+    static func main() throws {
         Log.logURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("rmb-tests-\(ProcessInfo.processInfo.processIdentifier).log")
+        let storeState = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mb4d-store-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: storeState, withIntermediateDirectories: true)
+        EncryptedStore.stateDirectory = storeState.path
+        defer {
+            do { try FileManager.default.removeItem(at: storeState) }
+            catch {
+                print("Encrypted-store test cleanup failed: \(error)")
+                exit(1)
+            }
+        }
         var passed = 0
         var failed = 0
         var failedNames: [String] = []
@@ -36,10 +47,18 @@ struct TestRunner {
         let onboarding = OnboardingTests()
         let encryption = EncryptionTests()
         let homeRewrite = HomeRewriteTests()
+        let optimization = BackupOptimizationTests()
 
         let suites: [(String, TestClosure)] = [
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
+            ("Optimization.backgroundPolicy", optimization.test_backgroundPolicyNeverRaisesExistingPriority),
+            ("Optimization.diskPolicyRestored", optimization.test_diskPolicyUsesSDKAndRestores),
+            ("Optimization.concurrentDirectories", optimization.test_directoryPreparationIsConcurrentAndRunScoped),
+            ("Optimization.failedDirectories", optimization.test_directoryFailuresAreNotCached),
+            ("Optimization.removedDirectories", optimization.test_copyRecreatesRemovedCachedDirectory),
+            ("Optimization.previousMetadata", optimization.test_previousMetadataRejectsSymlinksAndKeepsTolerance),
             ("Safety.copyErrorMakesIncomplete", safety.test_copyErrorMakesSnapshotIncomplete),
+            ("Safety.excludedSourceNotMissing", safety.test_excludedSourceDoesNotMakeSnapshotIncomplete),
             ("Safety.shrinkWarning", safety.test_shrinkWarningOnEmptiedHome),
             ("Safety.retentionProtectsComplete", safety.test_retentionProtectsLastCompleteSnapshots),
             ("Safety.retentionPausesAfterShrink", safety.test_retentionPausesAfterShrink),
@@ -81,6 +100,15 @@ struct TestRunner {
             ("Power.batteryBlocks", power.test_batteryBlocksScheduled),
             ("Power.unknownBlocks", power.test_unknownBlocksScheduled),
             ("Power.plistPassesFlag", power.test_plistsPassScheduledFlag),
+            ("Schedule.wallClockIntervals", power.test_intervalUsesWallClockCalendar),
+            ("Schedule.customIntervalsPreserved", power.test_nonCalendarIntervalsArePreserved),
+            ("Schedule.calendarMigration", power.test_calendarMigrationPreservesJob),
+            ("Schedule.migrationLocksBackup", power.test_calendarMigrationSerializesWithBackup),
+            ("Schedule.rollbackKeepsLock", power.test_calendarMigrationRollbackHoldsLock),
+            ("Progress.unknownTotal", backup.test_progressUnknownUntilScanFinishes),
+            ("Progress.hardlinksAndFinalization", backup.test_progressKnownCountsHardlinksAndFinalization),
+            ("Progress.legacyEta", backup.test_oldStatusDoesNotDisplayInventedEta),
+            ("Progress.restoreAndStop", backup.test_restoreAndStoppingProgressRemainAccurate),
             ("Power.liveReaderSane", power.test_liveReaderReturnsAValue),
             ("NewMac.loginItemsNeverInFilePhase", stages.test_loginItemsAreNeverInAFilePhase),
             ("NewMac.brokenShellUndoes", stages.test_brokenShellUndoesItsPhase),
@@ -98,6 +126,8 @@ struct TestRunner {
             ("Onboarding.credentialFolder", onboarding.test_folderWithACredentialIsACredential),
             ("Recovery.appKeptCurrent", onboarding.test_recoveryAppIsKeptCurrent),
             ("Encryption.passwordRules", encryption.test_passwordRules),
+            ("Encryption.keychainStatus", encryption.test_keychainStatusFailsClosed),
+            ("Encryption.isolatedState", encryption.test_stateDirectoryIsolatesLocksAndMarkers),
             ("Encryption.storeBasics", encryption.test_storeEncryptsKeepsHardLinksAndRefusesWrongPassword),
             ("Encryption.realBackup", encryption.test_realBackupIntoTheEncryptedStore),
             ("Encryption.keychainAndEnsureOpen", encryption.test_keychainRoundTripAndEnsureOpen),
@@ -129,6 +159,8 @@ struct TestRunner {
             ("ExcludeFilter.notExcluded", exclude.test_notExcluded),
             ("ExcludeFilter.directorySkip", exclude.test_directorySkip),
             ("ExcludeFilter.dotPatterns", exclude.test_dotPatterns),
+            ("ExcludeFilter.globEquivalent", exclude.test_globMatchesOriginalSemantics),
+            ("ExcludeFilter.compiledEquivalent", exclude.test_compiledFiltersPreserveMatchingAndPruning),
             ("ExcludeFilter.checkoutsMandatory", exclude.test_checkoutsAreMandatoryExcludedEvenWithOldConfig),
             ("ExcludeFilter.pluginCacheDirMandatory", exclude.test_pluginCacheDirIsMandatoryExcludedDistinctFromDotCache),
             ("ExcludeFilter.sitePackagesOfficeAssets", exclude.test_sitePackagesOfficeAssetsAreMandatoryExcluded),

@@ -74,6 +74,20 @@ Backups run:
 - **On schedule** — via macOS `LaunchAgent` (hourly, daily, or custom interval)
 - **Automatically stopped** on disk eject or low battery
 
+Hourly and other whole-minute intervals that divide a day use fixed calendar times
+(hourly: at minute 00), not an hour after the previous backup finishes. Existing
+interval schedules are migrated when the app is idle; daily times and arbitrary
+custom intervals are preserved. Calendar jobs missed during sleep run on wake;
+scheduled backups still require AC power and never overlap another backup.
+
+During discovery the menu shows the number of files processed and **Totale in calcolo**,
+without inventing a percentage or countdown. Once the scan finishes, copy progress
+uses the known total and file throughput (including hard links); **Verifica finale**
+replaces the copy estimate while Git, databases and environment information are saved.
+Restore undo data (`~/.rustybackup-pre-restore`) is always excluded, including when
+an older configuration still lists it as a source. Other missing, previously protected
+sources continue to make a snapshot incomplete.
+
 ---
 
 ## What Gets Backed Up
@@ -633,7 +647,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 137 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 157 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?

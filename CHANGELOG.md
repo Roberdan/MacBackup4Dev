@@ -1,5 +1,41 @@
 # Changelog
 
+## [4.1.4] - 2026-10-08
+
+### Changed
+- Backup tasks and the scanner run at background CPU priority with four copy workers.
+  Disk I/O remains low priority on AC as well as battery; a schedule's stricter policy
+  is preserved and the previous process policy is restored when the backup ends.
+- Exclusion patterns are compiled once and path characters are shared across matching
+  rules. Files no longer undergo directory-pruning checks, and multi-component rules
+  no longer try to match individual components.
+- Each snapshot shares a thread-safe cache of successfully prepared destination
+  directories. Previous-file comparison reads POSIX metadata directly rather than
+  building Foundation attribute dictionaries; symlinks are never reused as files.
+
+### Fixed
+- Disk I/O policy uses the SDK's disk-type constant instead of an incorrect hardcoded
+  value; setting failures are reported instead of silently ignored.
+
+- Restore undo folders no longer make otherwise successful backups incomplete when
+  removed. They are mandatory exclusions even with older configurations; excluded
+  source roots are filtered before existence checks and manifest recording.
+- Hourly schedules use fixed calendar times instead of drifting with backup duration.
+  Existing compatible interval schedules migrate only while idle; daily times,
+  wrappers and arbitrary custom intervals are preserved.
+- Progress no longer invents a total or countdown during discovery. Counts reflect
+  completed workers; known-total copy estimates include hard links, and final checks
+  display their own phase. Restore and cancellation retain distinct progress.
+- Exclusion matching no longer allocates a character-by-character matrix for every
+  rule and file. Matching preserves Unicode characters and path separator boundaries,
+  with differential tests against the previous algorithm.
+- Encrypted-store tests use their own state directory, so a running compaction cannot
+  block a test or have its lock and recovery markers changed by the test suite.
+- Package staging files, including the component property list, are removed together
+  when packaging ends or fails.
+- Schedule migration holds the same operation lock as a backup, including rollback,
+  so a newly starting backup cannot be interrupted between the idle check and reload.
+
 ## [4.1.2] - 2026-10-07
 
 ### Fixed

@@ -75,6 +75,21 @@ final class AppUIState: ObservableObject {
 
     var isRunning: Bool { appState == .running || appState == .restoring || appState == .stopping }
 
+    var progressFraction: Double? {
+        guard let status else { return nil }
+        if appState == .running { return status.progressFraction }
+        if appState == .restoring, status.filesTotal > 0 {
+            return min(1, Double(status.filesDone) / Double(status.filesTotal))
+        }
+        return nil
+    }
+
+    var progressDetail: String {
+        if appState == .restoring { return "Ripristino dei file" }
+        if appState == .stopping { return "Chiusura in corso" }
+        return status?.progressDetail ?? ""
+    }
+
     // F-19: hasBackups and canUndo are now cached — no disk I/O on SwiftUI render
     var hasBackups: Bool { cachedHasBackups }
     var canUndo: Bool { cachedCanUndo }

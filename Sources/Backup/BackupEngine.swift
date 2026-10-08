@@ -55,6 +55,8 @@ enum BackupEngine {
     static let STATUS_UPDATE_INTERVAL: Int = 500
     static let DISK_CHECK_INTERVAL: Int = 100
     static let MIN_FREE_SPACE: UInt64 = 1_073_741_824
+    static let WORK_PRIORITY: TaskPriority = .background
+    static let MAX_WORKERS = 4
     /// How many discovered files may wait for a copy worker. The walker blocks beyond
     /// this instead of dropping entries.
     static let QUEUE_LIMIT: Int = 4_096
@@ -76,10 +78,12 @@ enum BackupEngine {
     static func run(config: Config, statusWriter: StatusWriter = StatusWriter(),
                     options: BackupRunOptions = BackupRunOptions()) async throws -> BackupRunResult? {
         let token = CancelToken()
-        currentLock.lock(); current = token; currentLock.unlock()
+        currentLock.withLock { current = token }
         let destPath = config.destination.path
         let destURL = URL(fileURLWithPath: destPath)
         let home = options.home
+        let excludeFilter = ExcludeFilter(patterns: config.exclude.patterns)
+        let homePrefix = home.hasSuffix("/") ? home : home + "/"
 
         // Validate source paths: skip missing, block forbidden
         var allPaths: [String] = []
@@ -89,6 +93,12 @@ enum BackupEngine {
             if ConfigDiscovery.isForbidden(contracted, allowCloudStorage: config.protection.includeCloudStorage) {
                 Log.error("BLOCKED forbidden path: \(path)")
                 throw BackupError.forbiddenPath(path)
+            }
+            let relative = path.hasPrefix(homePrefix)
+                ? String(path.dropFirst(homePrefix.count)) : String(path.drop(while: { $0 == "/" }))
+            if excludeFilter.isExcluded(relativePath: relative) {
+                Log.info("Skipping excluded source: \(contracted)")
+                continue
             }
             if FileManager.default.fileExists(atPath: path) {
                 allPaths.append(path)
@@ -108,10 +118,6 @@ enum BackupEngine {
         if isiCloudDesktopActive() {
             Log.warn("iCloud Desktop & Documents sync is ACTIVE -- using bird-safe mode")
         }
-        // Throttle I/O on battery; use default priority on AC power
-        let onBattery = IOPriority.isOnBattery()
-        IOPriority.setIOPriority(throttle: onBattery)
-        Log.info("I/O priority: \(onBattery ? "throttled (battery)" : "full speed (AC)")")
         guard preflightWriteTest(at: destURL) else { throw BackupError.notWritable(destPath) }
 
         let operationLock = try DestinationLock(at: destURL)
@@ -119,6 +125,14 @@ enum BackupEngine {
         let lockPath = destURL.appendingPathComponent("rustymacbackup.lock").path
         try acquireLock(at: lockPath)
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
+
+        let onBattery = IOPriority.isOnBattery()
+        let previousIOPolicy = try IOPriority.beginBackup(onBattery: onBattery)
+        defer {
+            do { try IOPriority.setDiskPolicy(previousIOPolicy) }
+            catch { Log.error("Cannot restore disk I/O priority: \(error.localizedDescription)") }
+        }
+        Log.info("Backup priorities: CPU=\(Task.currentPriority.rawValue), disk=\(IOPriority.backupPolicy(onBattery: onBattery, previous: previousIOPolicy)), workers=\(MAX_WORKERS)")
 
         let previousComplete = SnapshotCatalog.latestComplete(at: destURL)
         // Without a verified snapshot yet (first 3.0 run), compare with the newest old one,
@@ -166,10 +180,13 @@ enum BackupEngine {
         status.filesTotal = 0
         status.bytesCopied = 0
         status.errors = 0
+        status.filesSkipped = 0
+        status.bytesPerSec = 0
+        status.etaSecs = 0
+        status.scanFinished = false
         status.currentFile = "Avvio backup..."
         do { try statusWriter.write(status: status) } catch { Log.error("Status write failed at start: \(error)") }
 
-        let excludeFilter = ExcludeFilter(patterns: config.exclude.patterns)
         let sourceURLs = allPaths.map { URL(fileURLWithPath: $0) }
         // Always use HOME as basePath so snapshot preserves full relative paths:
         // ~/GitHub/MyRepo/file.swift → snapshot/GitHub/MyRepo/file.swift
@@ -178,9 +195,19 @@ enum BackupEngine {
         // Use a class (heap ref) instead of UnsafeMutablePointer — ARC keeps it alive
         // for as long as the walkerTask closure references it, preventing use-after-free.
         final class Counters: @unchecked Sendable {
-            var discovered: Int64 = 0
-            var walkerDone: Bool = false
-            var traversalErrors: [(path: String, error: Error)] = []
+            private let lock = NSLock()
+            private var discovered: Int64 = 0
+            private var walkerDone = false
+            private var traversalErrors: [(path: String, error: Error)] = []
+
+            func discover() { lock.withLock { discovered += 1 } }
+            func finish(completed: Bool) { lock.withLock { walkerDone = completed } }
+            func recordError(path: String, error: Error) {
+                lock.withLock { traversalErrors.append((path, error)) }
+            }
+            var snapshot: (discovered: Int64, walkerDone: Bool, traversalErrors: [(path: String, error: Error)]) {
+                lock.withLock { (discovered: discovered, walkerDone: walkerDone, traversalErrors: traversalErrors) }
+            }
         }
         let counters = Counters()
 
@@ -192,20 +219,20 @@ enum BackupEngine {
         let (stream, continuation) = AsyncStream<FileEntry>.makeStream(bufferingPolicy: .unbounded)
         let slots = QueueGate(limit: QUEUE_LIMIT)
 
-        let walkerTask = Task.detached(priority: .utility) {
+        let walkerTask = Task.detached(priority: WORK_PRIORITY) {
             FileScanner.walk(sources: sourceURLs, basePaths: homeBasePaths,
                            excludeFilter: excludeFilter,
                            onTraversalError: { path, error in
-                               counters.traversalErrors.append((path: path, error: error))
+                               counters.recordError(path: path, error: error)
                            }) { entry in
                 if token.isCancelled { return false }
                 slots.acquire()
                 if token.isCancelled { return false }
-                counters.discovered += 1
+                counters.discover()
                 continuation.yield(entry)
                 return true
             }
-            counters.walkerDone = !token.isCancelled
+            counters.finish(completed: !token.isCancelled)
             continuation.finish()
         }
 
@@ -213,9 +240,10 @@ enum BackupEngine {
         var errorList: [(path: String, error: Error)] = []
         var skipList: [(path: String, reason: String)] = []
         var processedCount: UInt64 = 0
+        var completedCount: UInt64 = 0
         var vanishedCount = 0
         let VANISHED_THRESHOLD = 3
-        let maxWorkers = 8  // per spec: TaskGroup concurrency limit
+        let directories = BackupDirectories()
 
         let protectionGuard = RightsManagementGuard(config: config.protection)
         if protectionGuard.isActive {
@@ -224,6 +252,7 @@ enum BackupEngine {
 
         // Helper: post-copy checks and stats merge (called from main task only — no data races)
         func handleResult(_ result: FileResult, entry: FileEntry) {
+            completedCount += 1
             processResult(result, stats: &stats, errors: &errorList, skips: &skipList)
             let isShellFile = entry.relativePath.hasSuffix("shrc") || entry.relativePath.hasSuffix("profile")
                 || entry.relativePath.hasSuffix("shenv") || entry.relativePath.hasSuffix("history")
@@ -259,13 +288,14 @@ enum BackupEngine {
                     let destFile = inProgressURL.appendingPathComponent(file.relativePath).path
                     let prevFile = latestBackup.map { $0.appendingPathComponent(file.relativePath).path }
 
-                    group.addTask {
+                    group.addTask(priority: WORK_PRIORITY) {
                         (await BackupEngine.processFile(entry: file, destFile: destFile,
-                                                        prevFile: prevFile, protectionGuard: protectionGuard), file)
+                                                        prevFile: prevFile, protectionGuard: protectionGuard,
+                                                        directories: directories), file)
                     }
                     inFlight += 1
 
-                    if inFlight >= maxWorkers {
+                    if inFlight >= MAX_WORKERS {
                         if let (result, entry) = try await group.next() {
                             inFlight -= 1
                             handleResult(result, entry: entry)
@@ -273,23 +303,15 @@ enum BackupEngine {
                     }
 
                     if processedCount % UInt64(STATUS_UPDATE_INTERVAL) == 0 {
-                        let elapsed = Date().timeIntervalSince(startTime)
-                        let discovered = UInt64(counters.discovered)
-                        let done = processedCount
-                        status.filesDone = done
-                        status.filesTotal = counters.walkerDone ? discovered : discovered + 5000
-                        status.bytesCopied = stats.bytesCopied
-                        status.bytesPerSec = elapsed > 0 ? UInt64(Double(stats.bytesCopied) / elapsed) : 0
-                        if status.bytesPerSec > 0 && done > 0 {
-                            let remaining = status.filesTotal > done ? status.filesTotal - done : 0
-                            let avgBytesPerFile = stats.bytesCopied / done
-                            status.etaSecs = UInt64(remaining * avgBytesPerFile / status.bytesPerSec)
-                        }
+                        let counts = counters.snapshot
+                        status.updateCopyProgress(discovered: UInt64(counts.discovered), completed: completedCount,
+                                                  scanFinished: counts.walkerDone, bytesCopied: stats.bytesCopied,
+                                                  elapsed: options.now().timeIntervalSince(startTime))
                         status.errors = UInt64(errorList.count)
                         status.filesSkipped = stats.filesSkipped
                         status.currentFile = file.relativePath
-                        status.phase = stats.bytesCopied > 0 ? "copying" : "scanning"
-                        try? statusWriter.write(status: status)
+                        do { try statusWriter.write(status: status) }
+                        catch { Log.error("Status write failed during backup: \(error)") }
                     }
                 }
 
@@ -313,7 +335,8 @@ enum BackupEngine {
         if token.isCancelled { slots.open() }
         await walkerTask.value
 
-        errorList.append(contentsOf: counters.traversalErrors)
+        let counts = counters.snapshot
+        errorList.append(contentsOf: counts.traversalErrors)
 
         // F-02: Do NOT rename to final snapshot if cancelled — partial backup must not look valid.
         if token.isCancelled {
@@ -327,8 +350,13 @@ enum BackupEngine {
 
         // Git and database safety: written into the snapshot before it gets its final name.
         status.phase = "finalizing"
+        status.filesDone = completedCount
+        status.filesTotal = UInt64(counts.discovered)
+        status.scanFinished = true
+        status.etaSecs = 0
         status.currentFile = "Salvo i commit non pubblicati e i database…"
-        try? statusWriter.write(status: status)
+        do { try statusWriter.write(status: status) }
+        catch { Log.error("Status write failed during finalization: \(error)") }
         let gitRecords = options.captureGit
             ? GitSafety.captureAll(sources: allPaths, excludeFilter: excludeFilter, home: home, into: inProgressURL,
                                    previousSnapshot: latestBackup)
@@ -337,7 +365,7 @@ enum BackupEngine {
             ? DatabaseDumps.captureAll(config: config.databases, home: home, into: inProgressURL)
             : []
 
-        let traversalCount = counters.traversalErrors.count
+        let traversalCount = counts.traversalErrors.count
         let copyErrors = errorList.count - traversalCount
         let shrink = SnapshotManifest.shrinkWarning(processed: Int64(processedCount),
                                                     previous: previousComplete?.manifest,
@@ -353,8 +381,8 @@ enum BackupEngine {
             }
         }
         let (complete, reasons) = SnapshotManifest.evaluate(
-            discovered: counters.discovered, processed: Int64(processedCount),
-            walkerFinished: counters.walkerDone, errors: copyErrors, traversalErrors: traversalCount,
+            discovered: counts.discovered, processed: Int64(processedCount),
+            walkerFinished: counts.walkerDone, errors: copyErrors, traversalErrors: traversalCount,
             gitFailures: gitRecords.compactMap { r in r.error.map { "\(r.relativePath) (\($0))" } },
             databaseFailures: dbRecords.compactMap { r in r.error.map { "\(r.source) (\($0))" } },
             shrinkWarning: shrink, otherReasons: sourceReasons)
@@ -364,7 +392,7 @@ enum BackupEngine {
             startedAt: ISO8601DateFormatter().string(from: startTime),
             finishedAt: ISO8601DateFormatter().string(from: options.now()),
             sources: allPaths.map { ConfigDiscovery.contract($0) }, missingSources: missing,
-            filesDiscovered: counters.discovered, filesProcessed: Int64(processedCount),
+            filesDiscovered: counts.discovered, filesProcessed: Int64(processedCount),
             filesCopied: Int64(stats.filesCopied), filesHardlinked: Int64(stats.filesHardlinked),
             filesSkipped: Int64(stats.filesSkipped), bytesCopied: stats.bytesCopied,
             errorCount: copyErrors, traversalErrorCount: traversalCount,

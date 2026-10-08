@@ -14,7 +14,7 @@ if [ -z "${DEVELOPER_DIR:-}" ] && [[ "$(xcode-select -p 2>/dev/null)" == *Comman
 fi
 
 APP_NAME="MacBackup4Dev"
-VERSION="${VERSION:-4.1.2}"
+VERSION="${VERSION:-4.1.4}"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 BINARY="$BUILD_DIR/$APP_NAME"
@@ -44,6 +44,7 @@ echo "  Compiling..."
 swiftc \
     -O \
     -target "$MACOS_TARGET" \
+    -import-objc-header Sources/Backup/KeychainStatus.h \
     -framework Cocoa \
     -framework SwiftUI \
     -framework UserNotifications \
@@ -75,5 +76,5 @@ codesign --force --deep --options runtime \
 
 echo ""
 echo "Build complete: $APP_BUNDLE"
-echo "CLI: $($BINARY version 2>/dev/null || echo 'N/A')"
+echo "CLI: $("$APP_BUNDLE/Contents/MacOS/$APP_NAME" version)"
 echo "Signed: $SIGN_LABEL"

@@ -34,10 +34,17 @@ extension CLIHandler {
         }
         report("disco assente")
         state.appState = .running
-        var st = BackupStatusFile(); st.state = "running"; st.filesDone = 50_000; st.filesTotal = 170_000
+        var st = BackupStatusFile(); st.state = "running"; st.phase = "scanning"
+        st.filesDone = 151_000; st.filesTotal = 156_000; st.scanFinished = false
         st.currentFile = "GitHub/x/y.json"; st.etaSecs = 90
         state.status = st
-        report("backup in corso (dopo il cambio)")
+        report("scansione (totale sconosciuto)")
+        st.phase = "copying"; st.scanFinished = true
+        state.status = st
+        report("copia (totale noto)")
+        st.phase = "finalizing"
+        state.status = st
+        report("verifica finale (nessun conto alla rovescia)")
         popover.close()
         window.close()
     }

@@ -36,7 +36,8 @@ jobs:
           for f in "MacBackup4Dev-${VER}.app.zip" "MacBackup4Dev-${VER}-arm64.pkg" "RustyMacBackup-${VER}.app.zip" "RustyMacBackup-${VER}-arm64.pkg"; do
             swift tools/sign-update.swift "$f" "$PUB"
           done
-          shasum -a 256 "MacBackup4Dev-${VER}.app.zip" "MacBackup4Dev-${VER}-arm64.pkg" "RustyMacBackup-${VER}.app.zip" > SHA256SUMS.txt
+          shasum -a 256 "MacBackup4Dev-${VER}.app.zip" "MacBackup4Dev-${VER}-arm64.pkg" \
+            "RustyMacBackup-${VER}.app.zip" "RustyMacBackup-${VER}-arm64.pkg" > SHA256SUMS.txt
 
       - name: Verify artifacts
         run: |

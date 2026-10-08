@@ -105,7 +105,8 @@ extension BackupEngine {
     }
 
     static func processFile(entry: FileEntry, destFile: String, prevFile: String?,
-                            protectionGuard: RightsManagementGuard = RightsManagementGuard()) async -> FileResult {
+                            protectionGuard: RightsManagementGuard = RightsManagementGuard(),
+                            directories: BackupDirectories = BackupDirectories()) async -> FileResult {
         // Apply the user's exclusion before both hard links and copies. Old snapshots
         // remain untouched, but excluded files must not enter a new snapshot.
         do {
@@ -121,12 +122,10 @@ extension BackupEngine {
 
         let fm = FileManager.default
         let destDir = URL(fileURLWithPath: destFile).deletingLastPathComponent().path
-        if !fm.fileExists(atPath: destDir) {
-            do {
-                try fm.createDirectory(atPath: destDir, withIntermediateDirectories: true)
-            } catch {
-                return .error(path: entry.relativePath, error: error)
-            }
+        do {
+            try directories.prepare(destDir)
+        } catch {
+            return .error(path: entry.relativePath, error: error)
         }
 
         // Attempt hard link from previous backup
@@ -139,12 +138,25 @@ extension BackupEngine {
         }
 
         // Fall back to a copy without clone flags.
-        do {
+        func copy() throws -> FileResult {
             try HardLinker.copyFile(from: entry.absolutePath, to: destFile)
             HardLinker.preserveModificationTime(at: destFile, mtime: entry.mtime)
             return .copied(bytes: entry.size)
+        }
+        do {
+            return try copy()
         } catch {
-            return .error(path: entry.relativePath, error: error)
+            directories.invalidate(destDir)
+            guard !fm.fileExists(atPath: destDir) else {
+                return .error(path: entry.relativePath, error: error)
+            }
+            do {
+                try directories.prepare(destDir)
+                return try copy()
+            } catch {
+                directories.invalidate(destDir)
+                return .error(path: entry.relativePath, error: error)
+            }
         }
     }
 

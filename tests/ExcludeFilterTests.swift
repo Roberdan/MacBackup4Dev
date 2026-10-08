@@ -9,7 +9,8 @@ final class ExcludeFilterTests {
                      "GitHub/app/.pytest_cache/data", "GitHub/app/.ruff_cache/data",
                      "GitHub/app/.mypy_cache/data", "GitHub/app/__pycache__/mod.pyc",
                      "GitHub/app/.cache/data", "GitHub/app/.next/cache/data",
-                     "GitHub/app/.turbo/data", "GitHub/app/file.tmp", "GitHub/app/file.swp"] {
+                     "GitHub/app/.turbo/data", "GitHub/app/file.tmp", "GitHub/app/file.swp",
+                     ".rustybackup-pre-restore", ".rustybackup-pre-restore/old/undo.json"] {
             try expect(filter.isExcluded(relativePath: path), "Mandatory exclusion: \(path)")
             try expect(filter.shouldSkipDirectory(relativePath: path), "Prune excluded subtree: \(path)")
         }
@@ -119,5 +120,105 @@ final class ExcludeFilterTests {
         try expect(filter.isExcluded(relativePath: ".DS_Store"), ".DS_Store should match")
         try expect(filter.isExcluded(relativePath: "some/dir/.DS_Store"), "nested .DS_Store should match")
         try expect(filter.isExcluded(relativePath: ".Spotlight-V100"), ".Spotlight-* should match")
+    }
+
+    func test_globMatchesOriginalSemantics() throws {
+        func strings(_ alphabet: [String], depth: Int) -> [String] {
+            var all = [""]
+            var level = [""]
+            for _ in 0..<depth {
+                level = level.flatMap { prefix in alphabet.map { prefix + $0 } }
+                all.append(contentsOf: level)
+            }
+            return all
+        }
+        let patterns = strings(["a", "/", "*", "?"], depth: 4)
+        let texts = strings(["a", "b", "/"], depth: 4)
+        for pattern in patterns {
+            for text in texts {
+                try expectEqual(ExcludeFilter.globMatch(pattern: pattern, text: text),
+                                referenceGlob(pattern: pattern, text: text),
+                                "glob semantics: \(pattern) vs \(text)")
+            }
+        }
+        for (pattern, text) in [("?.txt", "é.txt"), ("?.txt", "👩‍💻.txt"),
+                                ("*.tmp", "*x.tmp"), ("**/*.txt", "a/b/c.txt"),
+                                ("a*?b", "a/b"), ("a/*/b", "a/x/y/b")] {
+            try expectEqual(ExcludeFilter.globMatch(pattern: pattern, text: text),
+                            referenceGlob(pattern: pattern, text: text), "Unicode and slash boundaries")
+        }
+    }
+
+    func test_compiledFiltersPreserveMatchingAndPruning() throws {
+        let rules = ["", ".", "./foo/", "foo/bar", "foo//bar", "foo/*/bar", "**/cache",
+                     "a?b", "*", "*.txt", "foo*", "*bar", "é/?", "*/👩‍💻", "foo/\u{0301}"]
+        let paths = ["", ".", "./foo/bar/", "x/foo/bar/file", "foo/x/bar/file",
+                     "foo/x/y/bar", "x/foo/\u{0301}", "a/b/c", "é/界", "a/👩‍💻",
+                     "a/node_modules/pkg", "site-packages/pptx/template.pptx",
+                     "notes/template.pptx", "foo//bar", "x/a?b/file", "report.txt"]
+        for rules in rules.map({ [$0] }) + [rules] {
+            let filter = ExcludeFilter(patterns: rules)
+            for path in paths {
+                for pruning in [false, true] {
+                    let actual = pruning ? filter.shouldSkipDirectory(relativePath: path)
+                                         : filter.isExcluded(relativePath: path)
+                    try expectEqual(actual, referenceFilter(patterns: filter.patterns, path: path, pruning: pruning),
+                                    "Compiled rules preserve \(path), pruning=\(pruning), rules=\(rules)")
+                }
+            }
+        }
+    }
+
+    private func referenceFilter(patterns: [String], path: String, pruning: Bool) -> Bool {
+        func normalize(_ value: String) -> String {
+            var value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            while value.hasPrefix("./") { value.removeFirst(2) }
+            value = value.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return value == "." ? "" : value
+        }
+        let path = normalize(path)
+        let components = path.split(separator: "/").map(String.init)
+        if !pruning, components.dropLast().contains("site-packages"),
+           let last = components.last,
+           ["docx", "pptx", "xlsx", "xls", "xlsb"].contains((last as NSString).pathExtension.lowercased()) {
+            return true
+        }
+        for raw in patterns {
+            let pattern = normalize(raw)
+            if pattern.isEmpty { continue }
+            if referenceGlob(pattern: pattern, text: path) { return true }
+            if !pruning, !pattern.contains("*"), !pattern.contains("?"), path.hasPrefix(pattern + "/") {
+                return true
+            }
+            if components.contains(where: { referenceGlob(pattern: pattern, text: $0) }) { return true }
+            let parts = pattern.split(separator: "/").map(String.init)
+            if parts.count > 1 && parts.count <= components.count {
+                for start in 0...(components.count - parts.count) {
+                    if parts.indices.allSatisfy({ referenceGlob(pattern: parts[$0], text: components[start + $0]) }) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func referenceGlob(pattern: String, text: String) -> Bool {
+        let p = Array(pattern), t = Array(text)
+        var dp = Array(repeating: Array(repeating: false, count: t.count + 1), count: p.count + 1)
+        dp[0][0] = true
+        for i in p.indices {
+            if p[i] == "*" { dp[i + 1][0] = dp[i][0] }
+            for j in t.indices {
+                if p[i] == "*" {
+                    dp[i + 1][j + 1] = dp[i][j + 1] || (t[j] != "/" && dp[i + 1][j])
+                } else if p[i] == "?" {
+                    dp[i + 1][j + 1] = t[j] != "/" && dp[i][j]
+                } else {
+                    dp[i + 1][j + 1] = p[i] == t[j] && dp[i][j]
+                }
+            }
+        }
+        return dp[p.count][t.count]
     }
 }

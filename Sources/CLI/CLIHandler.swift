@@ -237,7 +237,7 @@ enum CLIHandler {
         let sem = DispatchSemaphore(value: 0)
         final class ErrorBox: @unchecked Sendable { var error: Error? }
         let box = ErrorBox()
-        Task {
+        Task(priority: BackupEngine.WORK_PRIORITY) {
             do {
                 if let r = try await BackupEngine.run(config: cfg) {
                     if r.manifest.complete {
@@ -292,7 +292,13 @@ enum CLIHandler {
             switch status.state {
             case "running":
                 print("State: \(yellow(bold("RUNNING")))")
-                print("Progress: \(status.filesDone)/\(status.filesTotal) files")
+                if status.phase == "finalizing" {
+                    print("Processed: \(status.filesDone) files · final checks")
+                } else if status.scanFinished == true {
+                    print("Progress: \(status.filesDone)/\(status.filesTotal) files")
+                } else {
+                    print("Processed: \(status.filesDone) files · total still being discovered")
+                }
                 print("Speed: \(BackupEngine.formatBytes(status.bytesPerSec))/s")
             case "idle":
                 print("State: \(green("IDLE"))")

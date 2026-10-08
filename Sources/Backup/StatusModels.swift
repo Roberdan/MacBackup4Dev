@@ -19,6 +19,35 @@ struct BackupStatusFile: Codable {
     var lastCompleteAt: String?        // ISO 8601 of the newest complete snapshot
     var incompleteReasons: [String]?
     var lastSnapshot: String?
+    var scanFinished: Bool?
+
+    var progressFraction: Double? {
+        guard state == "running", phase == "copying", scanFinished == true, filesTotal > 0 else { return nil }
+        return min(0.99, Double(filesDone) / Double(filesTotal))
+    }
+
+    var progressDetail: String {
+        if phase == "finalizing" { return "Verifica finale" }
+        guard scanFinished == true else { return "Totale in calcolo" }
+        if etaSecs > 0 { return "Copia: circa \(Fmt.formatDuration(Double(etaSecs)))" }
+        return "Copia in corso"
+    }
+
+    mutating func updateCopyProgress(discovered: UInt64, completed: UInt64, scanFinished: Bool,
+                                     bytesCopied: UInt64, elapsed: TimeInterval) {
+        filesTotal = discovered
+        filesDone = completed
+        self.scanFinished = scanFinished
+        self.bytesCopied = bytesCopied
+        phase = scanFinished ? "copying" : "scanning"
+        let rate = elapsed.isFinite && elapsed > 0 ? Double(bytesCopied) / max(1, elapsed) : 0
+        bytesPerSec = rate < Double(UInt64.max) ? UInt64(rate) : UInt64.max
+        etaSecs = 0
+        if scanFinished && completed > 0 && discovered > completed && elapsed.isFinite && elapsed > 0 {
+            let estimate = ceil(Double(discovered - completed) * elapsed / Double(completed))
+            if estimate < Double(UInt64.max) { etaSecs = UInt64(estimate) }
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case state
@@ -38,6 +67,7 @@ struct BackupStatusFile: Codable {
         case lastCompleteAt = "last_complete_at"
         case incompleteReasons = "incomplete_reasons"
         case lastSnapshot = "last_snapshot"
+        case scanFinished = "scan_finished"
     }
 
     init(state: String = "idle", phase: String = "",
