@@ -4,6 +4,12 @@ import AppKit
 /// Debug-only: `MacBackup4Dev render-menu <out-dir>` draws the menu popover in its main
 /// states to PNG files, so its layout can be checked without clicking the menu bar.
 extension CLIHandler {
+    static var menuDemoConfig: Config {
+        Config(source: SourceConfig(paths: ["~/Projects"]),
+               destination: DestinationConfig(path: "/Volumes/Backup demo/MacBackup4Dev"),
+               exclude: ExcludeConfig(patterns: []), retention: RetentionConfig())
+    }
+
     @MainActor
     static func renderMenu(to dir: String) throws {
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -20,13 +26,7 @@ extension CLIHandler {
         }
         // MB4D_DEMO=1: sample data only (README screenshots never show a real disk or folder).
         let demo = ProcessInfo.processInfo.environment["MB4D_DEMO"] != nil
-        var cfg = try? Config.load(from: Config.defaultPath)
-        if demo {
-            let disk = FileManager.default.temporaryDirectory.appendingPathComponent("Backup/MacBackup4Dev")
-            try? FileManager.default.createDirectory(at: disk, withIntermediateDirectories: true)
-            if cfg == nil { cfg = try? Config.load(from: Config.defaultPath) }
-            cfg?.destination.path = disk.path
-        }
+        let cfg = demo ? Self.menuDemoConfig : try? Config.load(from: Config.defaultPath)
         let states: [(String, (AppUIState) -> Void)] = [
             ("protetto", { s in
                 s.appState = .idle
@@ -65,6 +65,23 @@ extension CLIHandler {
                 s.protection = summary(.attention, "Attenzione · ultimo completo ieri", "L'ultimo backup è incompleto: 5 file non copiati", incomplete: true)
                 s.coverageGaps = [CoverageGap(kind: .folder, path: "~/Projects/new-app",
                                               lastModified: ISO8601DateFormatter().string(from: now), approximateBytes: 1_000_000)]
+            }),
+            ("chiusura-disco", { s in
+                s.appState = .idle
+                s.ejection = EjectionFeedback(disk: Self.menuDemoConfig.diskURL, phase: .closingStore)
+            }),
+            ("espulsione-disco", { s in
+                s.appState = .idle
+                s.ejection = EjectionFeedback(disk: Self.menuDemoConfig.diskURL, phase: .ejecting)
+            }),
+            ("disco-espulso", { s in
+                s.appState = .diskAbsent
+                s.ejection = EjectionFeedback(disk: Self.menuDemoConfig.diskURL, phase: .succeeded)
+            }),
+            ("espulsione-fallita", { s in
+                s.appState = .idle
+                s.ejection = EjectionFeedback(disk: Self.menuDemoConfig.diskURL,
+                                              phase: .failed("Backup demo è in uso da: Finder, Terminal. Chiudili e riprova."))
             }),
         ]
         for (name, apply) in states {

@@ -10,7 +10,8 @@ extension CLIHandler {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         let state = AppUIState()
-        state.config = try? Config.load(from: Config.defaultPath)
+        state.config = ProcessInfo.processInfo.environment["MB4D_DEMO"] != nil
+            ? Self.menuDemoConfig : try? Config.load(from: Config.defaultPath)
         state.appState = .diskAbsent
         state.cachedHasBackups = true
         state.cachedCanUndo = true
@@ -31,6 +32,24 @@ extension CLIHandler {
             let shown = popover.contentSize
             let ok = shown.width + 0.5 >= needed.width && shown.height + 0.5 >= needed.height
             print("\(label): popover \(Int(shown.width))×\(Int(shown.height)) · contenuto \(Int(needed.width))×\(Int(needed.height)) · \(ok ? "OK" : "TAGLIATO")")
+            if let directory = ProcessInfo.processInfo.environment["MB4D_MEASURE_OUTPUT"] {
+                do {
+                    let output = URL(fileURLWithPath: directory)
+                    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+                    let view = controller.view
+                    guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                        throw err("Cannot capture the real popover")
+                    }
+                    view.cacheDisplay(in: view.bounds, to: bitmap)
+                    guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                        throw err("Cannot encode the real popover")
+                    }
+                    try png.write(to: output.appendingPathComponent(label + ".png"))
+                } catch {
+                    print("Popover capture failed: \(error.localizedDescription)")
+                    exit(1)
+                }
+            }
         }
         report("disco assente")
         state.appState = .running
@@ -45,6 +64,19 @@ extension CLIHandler {
         st.phase = "finalizing"
         state.status = st
         report("verifica finale (nessun conto alla rovescia)")
+        state.status = nil
+        state.appState = .idle
+        let disk = Self.menuDemoConfig.diskURL
+        state.ejection = EjectionFeedback(disk: disk, phase: .closingStore)
+        report("chiusura backup cifrato")
+        state.ejection?.phase = .ejecting
+        report("espulsione in corso")
+        state.ejection?.phase = .succeeded
+        state.appState = .diskAbsent
+        report("disco espulso")
+        state.appState = .idle
+        state.ejection?.phase = .failed("Backup demo è in uso da: Finder, Terminal, Editor. Chiudili e riprova.")
+        report("espulsione fallita")
         popover.close()
         window.close()
     }

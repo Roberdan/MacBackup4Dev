@@ -57,7 +57,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// can take a while), never more than one attempt at a time, and after a failure not
     /// again for 5 minutes (review 4.1 M1).
     private func openStoreInBackground() {
-        guard let config, let setup = config.encryption.setup, !storeOpening, Date() >= storeRetryAfter,
+        guard !uiState.isEjecting,
+              let config, let setup = config.encryption.setup, !storeOpening, Date() >= storeRetryAfter,
               !EncryptedStore.isOpen(setup), FileManager.default.fileExists(atPath: setup.container) else { return }
         storeOpening = true
         DispatchQueue.global(qos: .utility).async {
@@ -139,7 +140,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.onRequestStop = { [weak self] in self?.handleStop() }
         uiState.onRequestEject = { [weak self] in self?.handleEject() }
         uiState.onRequestOpenFolder = { [weak self] in self?.handleOpenFolder() }
-        uiState.onRequestQuit = { NSApplication.shared.terminate(nil) }
+        uiState.onRequestQuit = { [weak self] in
+            guard self?.uiState.isEjecting == false else { return }
+            NSApplication.shared.terminate(nil)
+        }
         uiState.onSelectDisk = { [weak self] url in self?.handleSelectDisk(url) }
         uiState.onRequestUndoRestore = { [weak self] in self?.handleUndoRestore() }
         uiState.onRequestUpdate = { [weak self] in self?.handleRequestUpdate() }
@@ -166,6 +170,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleRequestScheduleMenu() {
+        guard !uiState.isEjecting else { return }
         let menu = NSMenu()
         func item(_ title: String, opt: Int?) -> NSMenuItem {
             let i = NSMenuItem(title: title, action: #selector(scheduleMenuAction(_:)), keyEquivalent: "")
@@ -195,6 +200,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleSetSchedule(_ option: Int?) {
+        guard !uiState.isEjecting else { return }
         do {
             if let opt = option {
                 let plist: String
@@ -296,6 +302,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Moves backups into an encrypted store on the same disk. Old snapshots stay where they are.
     private func showEncryptionSetup() {
+        guard !uiState.isEjecting else { return }
         guard let config = freshConfig(), config.encryption.setup == nil else { return }
         guard FileManager.default.fileExists(atPath: config.diskURL.path) else {
             sendNotification(title: "Disco di backup non collegato", body: "Collegalo per cifrare i backup.")
@@ -329,6 +336,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - First launch
 
     private func showOnboarding() {
+        guard !uiState.isEjecting else { return }
         popover.performClose(nil)
         if let wc = onboardingWC, wc.window?.isVisible == true {
             wc.window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return
@@ -446,6 +454,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Action handlers
 
     private func handleRequestCleanupMenu() {
+        guard !uiState.isEjecting else { return }
         let menu = NSMenu()
         let header = NSMenuItem(title: "Elimina backup più vecchi di:", action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -467,7 +476,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleRequestCleanup(_ age: CleanupAge) {
-        guard let config, !uiState.isRunning, !uiState.isCleaning else { return }
+        guard let config, !uiState.isRunning, !uiState.isCleaning, !uiState.isEjecting else { return }
         let destination = URL(fileURLWithPath: config.destination.path)
         uiState.cleanupPhase = .reading
         popover.performClose(nil)
@@ -545,14 +554,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// "Esegui ora": back up what is configured, now. Choosing folders is a separate action
     /// (the picker used to stand in front of every backup and rewrite the source list).
     private func handleRequestBackup() {
-        guard !uiState.isCleaning, let config = config else { return }
+        guard !uiState.isCleaning, !uiState.isEjecting, let config = config else { return }
         popover.performClose(nil)
         startBackup(selectedPaths: config.source.paths,
                     includeRightsManagedFiles: config.protection.includeRightsManagedFiles)
     }
 
     private func handleChooseSources() {
-        guard !uiState.isCleaning else { return }
+        guard !uiState.isCleaning, !uiState.isEjecting else { return }
         guard let config = config else { return }
         popover.performClose(nil)
 
@@ -572,7 +581,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleRequestRestore() {
-        guard !uiState.isCleaning else { return }
+        guard !uiState.isCleaning, !uiState.isEjecting else { return }
         let backups = RestoreEngine.findBackupSnapshots()
         guard let first = backups.first, !first.snapshots.isEmpty else { return }
         popover.performClose(nil)
@@ -622,7 +631,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startBackup(selectedPaths: [String], includeRightsManagedFiles: Bool) {
-        guard !uiState.isCleaning else { return }
+        guard !uiState.isCleaning, !uiState.isEjecting else { return }
+        uiState.dismissEjection()
         guard var pending = freshConfig() else { return }
         pending.source.paths = selectedPaths
         pending.protection.includeRightsManagedFiles = includeRightsManagedFiles
@@ -701,66 +711,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleEject() {
-        guard !uiState.isCleaning else { return }
+        guard !uiState.isEjecting else { return }
         guard let config = config else { return }
         let volumePath = config.diskURL
         let volumeName = volumePath.lastPathComponent
-        popover.performClose(nil)
+        func blocked(_ reason: String) {
+            uiState.ejection = EjectionFeedback(disk: volumePath, phase: .failed(reason))
+            sendNotification(title: "Disco non espulso", body: reason)
+        }
+        guard !uiState.isCleaning, !uiState.isRunning, !uiState.isUpdating else {
+            blocked("C'è un'operazione in corso. Aspetta che finisca e riprova.")
+            return
+        }
+        guard !storeOpening, !compactingStore else {
+            blocked("Il backup cifrato si sta aprendo o recuperando spazio. Aspetta che finisca e riprova.")
+            return
+        }
+        guard restoreCenterWC?.window?.isVisible != true,
+              encryptionWC?.window?.isVisible != true,
+              onboardingWC?.window?.isVisible != true else {
+            blocked("Chiudi prima la finestra di ripristino o configurazione, poi riprova.")
+            return
+        }
         // Never pull the disk from under a backup, also one the schedule started on its own.
         let lockPath = config.destination.path + "/rustymacbackup.lock"
         if let content = try? String(contentsOfFile: lockPath, encoding: .utf8),
            let pid = Int32(content.split(separator: "\n").first.map(String.init) ?? ""),
            kill(pid, 0) == 0 {
-            sendNotification(title: "Disco non espulso",
-                             body: "C'è un backup in corso su \(volumeName). Interrompilo o aspetta che finisca.")
+            blocked("C'è un backup in corso su \(volumeName). Interrompilo o aspetta che finisca.")
             return
         }
         Log.info("Ejecting: \(volumePath.path)")
 
         let store = config.encryption.setup
+        uiState.ejection = EjectionFeedback(disk: volumePath, phase: store == nil ? .ejecting : .closingStore)
         DispatchQueue.global(qos: .userInitiated).async {
-            // The encrypted store lives on the disk: close it first, or the disk stays busy.
-            // Read-only scanners: Spotlight and antivirus (Microsoft Defender held the store
-            // open on 2026-10-07). Forcing them off loses nothing.
-            let indexers: Set<String> = ["mds", "mds_stores", "mdworker_shared", "fseventsd",
-                                         "wdavdaemon", "wdavdaemon_enterprise", "wdavdaemon_unprivileged"]
-            var holders = ""
-            // Same rule as the disk: forced only when nothing but system indexers holds it.
-            if let store, !EncryptedStore.close(store) {
-                holders = Self.processesUsing(store.mountPoint)
-                let names = holders.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-                if names.allSatisfy({ indexers.contains($0) }) {
-                    EncryptedStore.close(store, force: true)
-                }
-                if EncryptedStore.isOpen(store) {
-                    DispatchQueue.main.async { [holders] in
-                        self.sendNotification(title: "Disco non espulso",
-                                              body: "Il backup cifrato è in uso\(holders.isEmpty ? "" : " da: " + holders). Riprova quando ha finito.")
-                    }
-                    return
-                }
+            let outcome = DiskEjection.run(disk: volumePath, store: store,
+                                          diskutil: Self.runDiskutil, processesUsing: Self.processesUsing) { phase in
+                DispatchQueue.main.async { self.uiState.ejection?.phase = phase }
             }
-            var success = Self.runDiskutil(["eject", volumePath.path])
-            if !success {
-                // Who keeps it busy (Spotlight, Finder, a terminal…): say it instead of guessing.
-                holders = Self.processesUsing(volumePath.path)
-                // Only system indexers left: safe to force, nothing of ours is writing.
-                let names = holders.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-                if !names.isEmpty, names.allSatisfy({ indexers.contains($0) }) {
-                    success = Self.runDiskutil(["unmount", "force", volumePath.path])
-                }
-            }
-            DispatchQueue.main.async { [success, holders] in
-                if success {
+            DispatchQueue.main.async {
+                self.uiState.ejection = EjectionFeedback(disk: volumePath, phase: outcome)
+                if outcome == .succeeded {
                     Log.info("Disk ejected: \(volumeName)")
                     self.sendNotification(title: "Disco espulso", body: "\(volumeName) si può scollegare.")
                     self.iconManager.setState(.diskAbsent)
                     self.pollStatus()
-                } else {
-                    Log.error("Eject failed: \(volumeName) (\(holders))")
-                    self.sendNotification(title: "Disco non espulso",
-                                          body: holders.isEmpty ? "\(volumeName) è in uso. Chiudi le finestre del Finder e riprova."
-                                                                : "\(volumeName) è in uso da: \(holders). Chiudili e riprova.")
+                } else if case .failed(let reason) = outcome {
+                    Log.error("Eject failed: \(volumeName) (\(reason))")
+                    self.sendNotification(title: "Disco non espulso", body: reason)
+                    self.pollStatus()
                 }
             }
         }
@@ -774,11 +774,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleOpenFolder() {
+        guard !uiState.isEjecting else { return }
         guard let config = config else { return }
         NSWorkspace.shared.open(URL(fileURLWithPath: config.destination.path))
     }
 
     private func handleSelectDisk(_ volumeURL: URL) {
+        guard !uiState.isEjecting else { return }
+        uiState.dismissEjection()
         let backupDir = AppIdentity.backupFolder(on: volumeURL)
         do {
             try FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
@@ -802,7 +805,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startRestore(snapshotURL: URL, items: [String], brewInstall: Bool, overrides: [String: String] = [:]) {
-        guard !uiState.isCleaning else { return }
+        guard !uiState.isCleaning, !uiState.isEjecting else { return }
+        uiState.dismissEjection()
         // F-10: Preflight free-space check (payload × 2 to account for pre-restore backup copy)
         let estimate = RestoreEngine.estimateRestoreSize(snapshotURL: snapshotURL, items: items)
         let required = estimate * 2
@@ -887,6 +891,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleUndoRestore() {
+        guard !uiState.isEjecting else { return }
+        uiState.dismissEjection()
         // 3.0 restores keep an exact record (undo.json): use it, it also removes files the
         // restore created. Older pre-restore folders keep the previous behaviour.
         if let undoDir = latestUndoDir() {
@@ -963,7 +969,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Something is writing to the disk or the app: an update would interrupt it.
     private var isBusyForUpdate: Bool {
-        if uiState.isUpdating || uiState.isCleaning { return true }
+        if uiState.isUpdating || uiState.isCleaning || uiState.isEjecting { return true }
         if [.running, .stopping, .restoring].contains(uiState.appState) { return true }
         guard let config else { return false }
         let lockPath = config.destination.path + "/rustymacbackup.lock"
@@ -1072,7 +1078,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// The installed version, unencrypted, at the top of the backup disk: a just-updated app
     /// copies itself there as soon as the disk is attached (only the installed copy does).
     private func refreshRecoveryAppOnDisk() {
-        guard AutoUpdater.isInstalledCopy, let disk = config?.diskURL,
+        guard !uiState.isEjecting, AutoUpdater.isInstalledCopy, let disk = config?.diskURL,
               FileManager.default.fileExists(atPath: disk.path) else { return }
         DispatchQueue.global(qos: .utility).async { EnvironmentSnapshot.refreshRecoveryApp(onDisk: disk) }
     }
@@ -1080,6 +1086,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Status polling
 
     private func pollStatus(forceProtection: Bool = false) {
+        guard !uiState.isEjecting else { return }
+        if let disk = config?.diskURL {
+            uiState.reconcileEjection(diskMounted: BackupEngine.isVolumeReallyMounted(disk.path))
+        }
         openStoreInBackground()
         compactStoreIfNeeded()
         let newState = statusManager.poll(config: config)
@@ -1134,6 +1144,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openRestoreCenter(destination: URL, tab: RestoreCenterModel.Tab) {
+        guard !uiState.isEjecting else { return }
         popover.performClose(nil)
         if let wc = restoreCenterWC, wc.window?.isVisible == true {
             wc.window?.makeKeyAndOrderFront(nil)

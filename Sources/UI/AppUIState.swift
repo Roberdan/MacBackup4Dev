@@ -24,6 +24,17 @@ final class AppUIState: ObservableObject {
     /// nil = no cleanup; otherwise the current phase, shown in place of the status line.
     @Published var cleanupPhase: CleanupPhase?
     var isCleaning: Bool { cleanupPhase != nil }
+    @Published var ejection: EjectionFeedback?
+    var isEjecting: Bool { ejection?.phase.isBusy == true }
+
+    func dismissEjection() {
+        guard !isEjecting else { return }
+        ejection = nil
+    }
+
+    func reconcileEjection(diskMounted: Bool) {
+        if ejection?.phase == .succeeded && diskMounted { ejection = nil }
+    }
 
     /// Non-nil when a newer version is available on GitHub.
     @Published var updateAvailable: String?
