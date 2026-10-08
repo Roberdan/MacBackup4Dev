@@ -150,8 +150,7 @@ struct PopoverView: View {
     }
 
     private var progress: Double? {
-        guard state.isRunning, let s = state.status, s.filesTotal > 0 else { return nil }
-        return min(1, Double(s.filesDone) / Double(s.filesTotal))
+        state.progressFraction
     }
 
     private var ringSymbol: String {
@@ -170,7 +169,7 @@ struct PopoverView: View {
     }
 
     private var ring: some View {
-        let value = progress ?? (heroLevel == .protected && !state.isRunning ? 1 : 0.28)
+        let value = progress ?? (state.isRunning ? 0 : (heroLevel == .protected ? 1 : 0.28))
         return ZStack {
             Circle().stroke(Color.white.opacity(0.08), lineWidth: 9)
             Circle()
@@ -191,6 +190,9 @@ struct PopoverView: View {
             }
         }
         .frame(width: 78, height: 78)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(heroHeadline)
+        .accessibilityValue(progress.map { "\(Int($0 * 100))%" } ?? (state.isRunning ? state.progressDetail : heroDetail))
     }
 
     private var heroCard: some View {
@@ -214,9 +216,9 @@ struct PopoverView: View {
             if state.isRunning, let s = state.status {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("\(Fmt.formatFileCount(s.filesDone)) file").monospacedDigit()
+                        Text("\(Fmt.formatFileCount(s.filesDone)) file elaborati").monospacedDigit()
                         Spacer()
-                        if s.etaSecs > 0 { Text("ancora \(Fmt.formatDuration(Double(s.etaSecs)))") }
+                        Text(state.progressDetail)
                     }
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(Look.secondaryText)

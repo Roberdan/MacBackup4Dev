@@ -112,6 +112,30 @@ final class SafetyTests {
         try expectEqual(status?.lastResult, "incomplete", "status says incomplete")
     }
 
+    func test_excludedSourceDoesNotMakeSnapshotIncomplete() throws {
+        let box = try makeSandbox(); defer { cleanup(box) }
+        try write("keep", to: box.home + "/data/a.txt")
+        try write("undo", to: box.home + "/.rustybackup-pre-restore/undo.txt")
+        try write("scratch", to: box.home + "/scratch/a.txt")
+        var cfg = config(box, sources: ["data", ".rustybackup-pre-restore", "scratch"])
+        cfg.exclude.patterns.append("scratch")
+        let first = try runEngine(cfg, box)
+        try expect(first.manifest.complete, "excluded sources must not affect completeness")
+        try expectEqual(first.manifest.sources, [box.home + "/data"], "manifest lists only effective sources")
+        try expectEqual(first.manifest.filesProcessed, 1, "excluded sources are not copied")
+
+        // Older manifests listed configured sources even when their files were excluded.
+        var baseline = first.manifest
+        baseline.sources = cfg.source.allExpandedPaths()
+        try baseline.write(to: first.snapshot)
+        try FileManager.default.removeItem(atPath: box.home + "/.rustybackup-pre-restore")
+        try FileManager.default.removeItem(atPath: box.home + "/scratch")
+        let second = try runEngine(cfg, box)
+        try expect(second.manifest.complete, "deleted excluded sources must not poison the next backup")
+        try expect(second.manifest.missingSources.isEmpty, "excluded roots are not missing backup sources")
+        try expect(second.manifest.incompleteReasons.isEmpty, "no false missing-source warning")
+    }
+
     func test_shrinkWarningOnEmptiedHome() throws {
         var prev = SnapshotManifest(appVersion: "t", host: "h", startedAt: "", finishedAt: "", sources: [],
                                     missingSources: [], filesDiscovered: 10_000, filesProcessed: 10_000,

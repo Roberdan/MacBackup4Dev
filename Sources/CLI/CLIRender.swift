@@ -37,8 +37,27 @@ extension CLIHandler {
                 s.protection = summary(.protected, "Protetto · ultimo completo 2 ore fa", "6 ott 22:24 · 171604 file · 0 errori")
                 var st = BackupStatusFile()
                 st.state = "running"; st.filesDone = 144_500; st.filesTotal = 171_000
+                st.phase = "copying"; st.scanFinished = true
                 st.bytesPerSec = 7_300; st.etaSecs = 85
                 st.currentFile = demo ? "GitHub/my-app/src/components/Header.tsx" : "GitHub/MirrorHR_Set/research-cloud-api/data/A13A-CB806E0D8DF4.json"
+                s.status = st
+            }),
+            ("scansione", { s in
+                s.appState = .running
+                s.protection = summary(.protected, "Protetto", "Ultimo backup completo")
+                var st = BackupStatusFile(state: "running", phase: "scanning", filesTotal: 156_000,
+                                          filesDone: 151_000, etaSecs: 42)
+                st.scanFinished = false
+                st.currentFile = "GitHub/my-app/src/main.swift"
+                s.status = st
+            }),
+            ("verifica", { s in
+                s.appState = .running
+                s.protection = summary(.protected, "Protetto", "Ultimo backup completo")
+                var st = BackupStatusFile(state: "running", phase: "finalizing", filesTotal: 171_000,
+                                          filesDone: 171_000, etaSecs: 42)
+                st.scanFinished = true
+                st.currentFile = "Salvo i commit non pubblicati e i database…"
                 s.status = st
             }),
             ("avvisi", { s in

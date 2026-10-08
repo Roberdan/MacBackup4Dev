@@ -378,12 +378,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Moves the 3.x LaunchAgent to the new label once no backup is running (bootout would
     /// stop it). Retried at every status poll until done.
     private func migrateLegacyScheduleWhenIdle() {
-        let legacy = AppIdentity.home + "/Library/LaunchAgents/\(AppIdentity.legacyLaunchAgentLabel).plist"
-        guard FileManager.default.fileExists(atPath: legacy) else { return }
         guard !isBusyForUpdate else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.migrateLegacyScheduleWhenIdle() }
             return
         }
+        do {
+            if try ScheduleManager.migrateIntervalScheduleWhenIdle() { refreshScheduleLabel() }
+        } catch {
+            Log.error("Calendar schedule migration failed: \(error.localizedDescription)")
+            sendNotification(title: "Pianificazione non aggiornata", body: error.localizedDescription)
+        }
+        let legacy = AppIdentity.home + "/Library/LaunchAgents/\(AppIdentity.legacyLaunchAgentLabel).plist"
+        guard FileManager.default.fileExists(atPath: legacy) else { return }
         if let done = ScheduleManager.migrateLegacyAgent() {
             Log.info("Legacy schedule migrated: \(done)")
             refreshScheduleLabel()

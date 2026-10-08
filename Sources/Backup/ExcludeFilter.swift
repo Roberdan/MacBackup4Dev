@@ -4,6 +4,7 @@ struct ExcludeFilter {
     /// Enforced even with an old or empty config; avoid broad data/source extensions.
     static let mandatoryPatterns = [
         ".DS_Store", ".Trash", ".Trashes", ".TemporaryItems",
+        ".rustybackup-pre-restore",
         "node_modules", ".next", ".nuxt", ".svelte-kit",
         ".cache", ".parcel-cache", ".turbo", ".npm", ".pnpm-store",
         ".yarn/cache", ".yarn/unplugged",

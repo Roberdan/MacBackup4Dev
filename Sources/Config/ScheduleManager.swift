@@ -32,10 +32,67 @@ enum ScheduleManager {
     }
 
     static func generatePlist(intervalSeconds: Int) -> String {
-        generatePlistBody("""
+        if let slots = calendarSlots(intervalSeconds: intervalSeconds) {
+            let entries = slots.indices.map { index in
+                let minute = index * (intervalSeconds / 60)
+                return """
+                <dict>
+                    <key>Hour</key><integer>\(minute / 60)</integer>
+                    <key>Minute</key><integer>\(minute % 60)</integer>
+                </dict>
+                """
+            }.joined(separator: "\n")
+            return generatePlistBody("""
+                <key>StartCalendarInterval</key>
+                <array>
+                    \(entries)
+                </array>
+            """)
+        }
+        return generatePlistBody("""
             <key>StartInterval</key>
             <integer>\(intervalSeconds)</integer>
         """)
+    }
+
+    private static func calendarSlots(intervalSeconds: Int) -> [[String: Int]]? {
+        guard intervalSeconds > 0, intervalSeconds % 60 == 0, 86_400 % intervalSeconds == 0 else { return nil }
+        return stride(from: 0, to: 1440, by: intervalSeconds / 60).map {
+            ["Hour": $0 / 60, "Minute": $0 % 60]
+        }
+    }
+
+    static func calendarPlist(from old: [String: Any]) -> [String: Any]? {
+        guard old["StartCalendarInterval"] == nil,
+              let interval = old["StartInterval"] as? Int,
+              let slots = calendarSlots(intervalSeconds: interval) else { return nil }
+        var new = old
+        new.removeValue(forKey: "StartInterval")
+        new["StartCalendarInterval"] = slots
+        return new
+    }
+
+    /// Called only when no backup is running: bootout must never interrupt a snapshot.
+    static func migrateIntervalScheduleWhenIdle() throws -> Bool {
+        guard FileManager.default.fileExists(atPath: plistPath.path) else { return false }
+        let data = try Data(contentsOf: plistPath)
+        guard let old = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let new = calendarPlist(from: old) else { return false }
+        let converted = try PropertyListSerialization.data(fromPropertyList: new, format: .xml, options: 0)
+        guard let xml = String(data: converted, encoding: .utf8) else {
+            throw scheduleError("Cannot encode calendar schedule")
+        }
+        do {
+            try installSchedule(plistContent: xml)
+        } catch {
+            let originalError = error
+            guard let original = String(data: data, encoding: .utf8) else { throw originalError }
+            do { try installSchedule(plistContent: original) }
+            catch { Log.error("Schedule rollback failed: \(error.localizedDescription)") }
+            throw originalError
+        }
+        Log.info("Backup schedule migrated to fixed calendar times")
+        return true
     }
 
     static func generatePlistDaily(hour: Int) -> String {
@@ -91,8 +148,32 @@ enum ScheduleManager {
             return ScheduleStatus(installed: installed, intervalMinutes: nil, dailyHour: nil)
         }
 
+        return scheduleStatus(from: plist, installed: installed)
+    }
+
+    static func scheduleStatus(from plist: [String: Any], installed: Bool) -> ScheduleStatus {
         if let intervalSeconds = plist["StartInterval"] as? Int {
             return ScheduleStatus(installed: installed, intervalMinutes: intervalSeconds / 60, dailyHour: nil)
+        }
+
+        if let slots = plist["StartCalendarInterval"] as? [[String: Int]],
+           !slots.isEmpty {
+            var minutes: [Int] = []
+            for slot in slots {
+                guard Set(slot.keys) == Set(["Hour", "Minute"]),
+                      let hour = slot["Hour"], (0..<24).contains(hour),
+                      let minute = slot["Minute"], (0..<60).contains(minute) else {
+                    return ScheduleStatus(installed: installed, intervalMinutes: nil, dailyHour: nil)
+                }
+                minutes.append(hour * 60 + minute)
+            }
+            minutes.sort()
+            let gaps = minutes.indices.map { i in
+                i + 1 < minutes.count ? minutes[i + 1] - minutes[i] : 1440 + minutes[0] - minutes[i]
+            }
+            if let interval = gaps.first, interval > 0, gaps.allSatisfy({ $0 == interval }) {
+                return ScheduleStatus(installed: installed, intervalMinutes: interval, dailyHour: nil)
+            }
         }
 
         if let schedule = plist["StartCalendarInterval"] as? [String: Any],

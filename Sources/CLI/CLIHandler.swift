@@ -292,7 +292,13 @@ enum CLIHandler {
             switch status.state {
             case "running":
                 print("State: \(yellow(bold("RUNNING")))")
-                print("Progress: \(status.filesDone)/\(status.filesTotal) files")
+                if status.phase == "finalizing" {
+                    print("Processed: \(status.filesDone) files · final checks")
+                } else if status.scanFinished == true {
+                    print("Progress: \(status.filesDone)/\(status.filesTotal) files")
+                } else {
+                    print("Processed: \(status.filesDone) files · total still being discovered")
+                }
                 print("Speed: \(BackupEngine.formatBytes(status.bytesPerSec))/s")
             case "idle":
                 print("State: \(green("IDLE"))")
