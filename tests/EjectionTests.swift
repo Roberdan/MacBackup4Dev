@@ -22,7 +22,7 @@ struct EjectionTests {
     func test_encryptedStoreClosesFirst() throws {
         var calls: [String] = []
         let result = DiskEjection.run(disk: disk, store: store,
-                                     closeStore: { _, force in calls.append(force ? "force-close" : "close"); return true },
+                                     closeStore: { _, force in calls.append(force ? "force-close" : "close"); return .closed },
                                      isStoreOpen: { _ in false },
                                      diskutil: { _ in calls.append("eject"); return true },
                                      processesUsing: { _ in "" },
@@ -37,14 +37,18 @@ struct EjectionTests {
             var forced = false
             var ejected = false
             let result = DiskEjection.run(disk: disk, store: store,
-                                         closeStore: { _, force in forced = forced || force; return false },
+                                         closeStore: { _, force in forced = forced || force; return .failed("hdiutil: detach failed - Resource busy") },
                                          isStoreOpen: { _ in true },
                                          diskutil: { _ in ejected = true; return true },
                                          processesUsing: { _ in holders },
                                          isMounted: { _ in true }, progress: { _ in })
             guard case .failed(let reason) = result else { throw TestFailure.failed("Busy store must fail") }
             try expect(!forced && !ejected, "Unknown holders and writers must never be forced")
-            try expect(reason.contains("backup cifrato"), "The encrypted-store failure is readable")
+            try expect(reason.contains("volume cifrato") && reason.contains("Resource busy"), "The real close error reaches the feedback")
+            try expect(!reason.contains("quando ha finito"), "A close failure must not imply a running backup")
+            try expect(reason.contains("Non scollegare"), "A failed close never permits unplugging")
+            try expect(holders.isEmpty ? reason.contains("Nessun processo identificato") : reason.contains(holders),
+                       "Unknown owners are distinguished from observed process names")
         }
     }
 
@@ -52,7 +56,7 @@ struct EjectionTests {
         var forcedClose = false
         var commands: [[String]] = []
         let result = DiskEjection.run(disk: disk, store: store,
-                                     closeStore: { _, force in forcedClose = forcedClose || force; return force },
+                                     closeStore: { _, force in forcedClose = forcedClose || force; return force ? .closed : .failed("Resource busy") },
                                      isStoreOpen: { _ in false },
                                      diskutil: { commands.append($0); return $0.first == "unmount" },
                                      processesUsing: { _ in "mds, wdavdaemon" },
@@ -95,5 +99,41 @@ struct EjectionTests {
         try expect(state.ejection != nil, "Polling does not hide failure or retry")
         state.dismissEjection()
         try expect(state.ejection == nil, "A finished result can be dismissed")
+    }
+
+    func test_closeReportingPreservesCommandFailure() throws {
+        var commands: [String] = []
+        var arguments: [[String]] = []
+        var timeouts: [TimeInterval] = []
+        let result = EncryptedStore.closeReporting(store, runCommand: { executable, args, timeout in
+            commands.append(executable)
+            arguments.append(args)
+            timeouts.append(timeout)
+            return Shell.Result(status: 16, stdout: "", stderr: "hdiutil: detach failed - Resource busy\n")
+        }, isMounted: { _ in true })
+        try expectEqual(commands, ["/usr/bin/hdiutil"], "A normal failure must not try forced unmount")
+        try expectEqual(arguments, [["detach", store.mountPoint]], "Normal close does not force")
+        try expectEqual(timeouts, [120], "The existing close deadline is preserved")
+        try expectEqual(result, .failed("hdiutil: detach failed - Resource busy"), "The system error is retained, not replaced by a guessed backup state")
+    }
+
+    func test_closeReportingKeepsFallbackErrorAndExitCode() throws {
+        var commands: [String] = []
+        let result = EncryptedStore.closeReporting(store, force: true, runCommand: { executable, _, _ in
+            commands.append(executable)
+            return Shell.Result(status: 1, stdout: "", stderr: executable == "/usr/bin/hdiutil" ? "First failure" : "Unmount denied")
+        }, isMounted: { _ in true })
+        try expectEqual(commands, ["/usr/bin/hdiutil", "/usr/sbin/diskutil"], "Existing explicit-force fallback is preserved")
+        try expectEqual(result, .failed("Unmount denied"), "The last attempted command supplies the reason")
+        let noReason = EncryptedStore.closeReporting(store, runCommand: { _, _, _ in
+            Shell.Result(status: 73, stdout: "", stderr: "")
+        }, isMounted: { _ in true })
+        try expectEqual(noReason, .failed("macOS non ha indicato il motivo (codice 73)."), "An empty error reports the exit code, not an invented owner")
+        let longReason = EncryptedStore.closeReporting(store, runCommand: { _, _, _ in
+            Shell.Result(status: 1, stdout: "", stderr: String(repeating: "x", count: 600) + " useful final reason")
+        }, isMounted: { _ in true })
+        guard case .failed(let detail) = longReason else { throw TestFailure.failed("The long failure must remain a failure") }
+        try expectEqual(detail.count, 300, "Visible command errors are bounded")
+        try expect(detail.hasSuffix("useful final reason"), "The final reason is not lost when bounding the output")
     }
 }

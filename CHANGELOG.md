@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.1.8] - 2026-10-09
+
+### Fixed
+- Failed encrypted-store closure now preserves the actual macOS command error
+  instead of implying that a backup is still running. Known holder names and
+  unidentified holders are distinguished; failure still says not to unplug.
+- Existing normal-close deadlines, explicit-force fallback and indexer-only
+  ejection policy are unchanged. A volume that remains open after failed closure
+  prevents physical ejection.
+
 ## [4.1.7] - 2026-10-09
 
 ### Fixed

@@ -67,6 +67,8 @@ struct TestRunner {
             ("Ejection.indexerFallback", ejection.test_indexersOnlyAllowFallback),
             ("Ejection.failureIsNotSuccess", ejection.test_failureAndMountedSuccessStayUnsafe),
             ("Ejection.feedbackLifecycle", ejection.test_feedbackLifecycle),
+            ("Ejection.closeReason", ejection.test_closeReportingPreservesCommandFailure),
+            ("Ejection.fallbackReason", ejection.test_closeReportingKeepsFallbackErrorAndExitCode),
             ("Safety.noFileIsDropped", safety.test_noFileIsDropped),
             ("Optimization.backgroundPolicy", optimization.test_backgroundPolicyNeverRaisesExistingPriority),
             ("Optimization.diskPolicyRestored", optimization.test_diskPolicyUsesSDKAndRestores),
