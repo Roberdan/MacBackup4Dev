@@ -579,6 +579,9 @@ colour, sized to its content.
   *Disco espulso — Puoi scollegare il disco* appears only after the physical volume is
   unmounted; a failure stays visible with *Riprova*. The result survives closing and
   reopening the menu, and the success message clears when the disk is reconnected.
+  A failed encrypted-store close shows the actual macOS error, including an explicit
+  unknown-owner indication when no process was identified. It does not assume a
+  backup is running or tell you to unplug.
 - Problems appear with the button that fixes them: *Riprova* for an incomplete backup,
   *Aggiungi* / *Ignora* for a folder or database that is not backed up. The audit never
   suggests credentials, parked folders (`_name`), caches, a tool's own databases or git
@@ -658,7 +661,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 167 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 169 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?

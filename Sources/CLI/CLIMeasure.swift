@@ -77,6 +77,18 @@ extension CLIHandler {
         state.appState = .idle
         state.ejection?.phase = .failed("Backup demo è in uso da: Finder, Terminal, Editor. Chiudili e riprova.")
         report("espulsione fallita")
+        state.ejection?.phase = DiskEjection.run(
+            disk: disk, store: EncryptedStore.Setup(container: "/Volumes/Backup demo/demo.sparsebundle", volume: "Demo"),
+            closeStore: { _, _ in .failed("hdiutil: detach failed - Resource busy") },
+            isStoreOpen: { _ in true }, diskutil: { _ in false }, processesUsing: { _ in "" },
+            progress: { _ in })
+        report("chiusura fallita (motivo macOS)")
+        state.ejection?.phase = DiskEjection.run(
+            disk: disk, store: EncryptedStore.Setup(container: "/Volumes/Backup demo/demo.sparsebundle", volume: "Demo"),
+            closeStore: { _, _ in .failed(String(String(repeating: "Il sistema non riesce a chiudere il volume. ", count: 8).prefix(300))) },
+            isStoreOpen: { _ in true }, diskutil: { _ in false }, processesUsing: { _ in "Finder, Terminal" },
+            progress: { _ in })
+        report("chiusura fallita (motivo lungo)")
         popover.close()
         window.close()
     }

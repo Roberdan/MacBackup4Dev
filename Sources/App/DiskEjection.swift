@@ -38,7 +38,7 @@ enum DiskEjection {
     static func run(
         disk: URL,
         store: EncryptedStore.Setup?,
-        closeStore: (EncryptedStore.Setup, Bool) -> Bool = { EncryptedStore.close($0, force: $1) },
+        closeStore: (EncryptedStore.Setup, Bool) -> EncryptedStore.CloseResult = { EncryptedStore.closeReporting($0, force: $1) },
         isStoreOpen: (EncryptedStore.Setup) -> Bool = { EncryptedStore.isOpen($0) },
         diskutil: ([String]) -> Bool,
         processesUsing: (String) -> String,
@@ -53,11 +53,16 @@ enum DiskEjection {
         }
         if let store {
             progress(.closingStore)
-            if !closeStore(store, false) {
+            var result = closeStore(store, false)
+            if !result.isClosed {
                 let holders = processesUsing(store.mountPoint)
-                if onlyIndexers(holders) { _ = closeStore(store, true) }
+                if onlyIndexers(holders) { result = closeStore(store, true) }
                 if isStoreOpen(store) {
-                    return .failed("Il backup cifrato è in uso\(holders.isEmpty ? "" : " da: " + holders). Riprova quando ha finito.")
+                    let reason: String
+                    if case .failed(let error) = result { reason = error }
+                    else { reason = "Il volume risulta ancora montato." }
+                    let owners = holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders)."
+                    return .failed("Non riesco a chiudere il volume cifrato.\n\(reason)\n\(owners) Non scollegare il disco.")
                 }
             }
         }

@@ -192,6 +192,6 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (167 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh` (169 tests). No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.

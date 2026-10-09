@@ -207,19 +207,41 @@ enum EncryptedStore {
         return (UInt64(r.stdout.split(separator: "\t").first ?? "0") ?? 0) * 1024
     }
 
+    enum CloseResult: Equatable {
+        case closed
+        case failed(String)
+
+        var isClosed: Bool {
+            if case .closed = self { return true }
+            return false
+        }
+    }
+
     /// Closes the image (before ejecting its disk).
     @discardableResult
     static func close(_ setup: Setup, force: Bool = false) -> Bool {
-        guard isOpen(setup) else { return true }
+        closeReporting(setup, force: force).isClosed
+    }
+
+    static func closeReporting(
+        _ setup: Setup, force: Bool = false,
+        runCommand: (String, [String], TimeInterval) -> Shell.Result = { Shell.run($0, $1, timeout: $2) },
+        isMounted: (Setup) -> Bool = { isOpen($0) }
+    ) -> CloseResult {
+        guard isMounted(setup) else { return .closed }
         // hdiutil detach: unmounts AND detaches the image (diskutil eject on the mount point
         // left the image attached, 34 of them after the tests on 2026-10-07).
-        var r = Shell.run("/usr/bin/hdiutil", force ? ["detach", "-force", setup.mountPoint] : ["detach", setup.mountPoint], timeout: 120)
+        var r = runCommand("/usr/bin/hdiutil", force ? ["detach", "-force", setup.mountPoint] : ["detach", setup.mountPoint], 120)
         if !r.ok && force {
-            r = Shell.run("/usr/sbin/diskutil", ["unmount", "force", setup.mountPoint], timeout: 60)
+            r = runCommand("/usr/sbin/diskutil", ["unmount", "force", setup.mountPoint], 60)
         }
-        let closed = r.ok || !isOpen(setup)
+        let closed = r.ok || !isMounted(setup)
         if closed { try? FileManager.default.removeItem(atPath: openMarker(setup)) }   // closed by us: clean
-        return closed
+        if closed { return .closed }
+        let error = r.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        return .failed(error.isEmpty
+                       ? "macOS non ha indicato il motivo (codice \(r.status))."
+                       : String(error.suffix(300)))
     }
 
     // MARK: - Keychain (through /usr/bin/security, see the type comment)
