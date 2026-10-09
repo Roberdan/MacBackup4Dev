@@ -5,6 +5,11 @@ typealias TestClosure = () throws -> Void
 @main
 struct TestRunner {
     static func main() throws {
+        if CommandLine.arguments.count == 5, CommandLine.arguments[1] == "--environment-worker" {
+            let args = CommandLine.arguments
+            try RecoveryCopyTests.runWorker(configPath: args[2], home: args[3], state: args[4])
+            return
+        }
         Log.logURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("rmb-tests-\(ProcessInfo.processInfo.processIdentifier).log")
         let storeState = FileManager.default.temporaryDirectory
@@ -49,8 +54,13 @@ struct TestRunner {
         let homeRewrite = HomeRewriteTests()
         let optimization = BackupOptimizationTests()
         let ejection = EjectionTests()
+        let recovery = RecoveryCopyTests()
 
         let suites: [(String, TestClosure)] = [
+            ("Recovery.backupDoesNotCopyApp", recovery.test_backupFinishesWithoutRefreshingPhysicalDisk),
+            ("Recovery.concurrentCopySkipped", recovery.test_competingCopyDoesNotWaitOrTouchStaging),
+            ("Recovery.timeoutKeepsOldApp", recovery.test_timeoutPreservesExistingRecoveryApp),
+            ("Recovery.failedReplacementRollsBack", recovery.test_failedReplacementRestoresPreviousApp),
             ("Ejection.plainSuccess", ejection.test_plainDiskProgressAndSuccess),
             ("Ejection.encryptedOrder", ejection.test_encryptedStoreClosesFirst),
             ("Ejection.busyStore", ejection.test_busyStoreNeverEjects),

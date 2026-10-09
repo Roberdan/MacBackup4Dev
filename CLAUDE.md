@@ -78,7 +78,12 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   "Interrompi" sends SIGTERM to that PID when the backup runs in its own process (scheduled);
   the CLI turns SIGTERM into `BackupEngine.stop()` (`CLIHandler.stopOnSIGTERM`).
 - **Recovery copy:** the installed app copies itself, unencrypted, to the top of the physical
-  backup disk (`Config.diskURL`) when the version differs.
+  backup disk (`Config.diskURL`) when the version differs. This maintenance runs outside
+  `BackupEngine.run`, after launch, mount or completed backups when idle; it must never
+  extend a scheduled job's lifetime or hold its destination locks. The physical-root
+  operation lock serializes refreshes without waiting; unique staging and rollback keep
+  the previous copy. Copy commands time out after 60 s, not metadata/rename operations.
+  CLI-only backups keep the snapshot's app copy but do not maintain the physical-root app.
 
 ## 3.0 invariants (scar 2026-10-06 — do not weaken)
 
@@ -187,6 +192,6 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (137 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh` (167 tests). No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.

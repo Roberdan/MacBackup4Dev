@@ -142,7 +142,8 @@ struct OnboardingTests {
 
         EnvironmentSnapshot.refreshRecoveryApp(from: running, in: disk)
         let names = try FileManager.default.contentsOfDirectory(atPath: disk.path).sorted()
-        try expectEqual(names, ["MacBackup4Dev.app", "Other.app"], "old copy and installer removed, others untouched")
+        try expectEqual(names, [".rustymacbackup-operation.lock", "MacBackup4Dev.app", "Other.app"],
+                        "old copy and installer removed, others untouched; coordination inode retained")
         try expectEqual(NSDictionary(contentsOf: disk.appendingPathComponent("MacBackup4Dev.app/Contents/Info.plist"))?["CFBundleShortVersionString"] as? String,
                         "4.0.3", "the copy on the disk is the running version")
     }

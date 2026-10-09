@@ -1,5 +1,23 @@
 # Changelog
 
+## [4.1.7] - 2026-10-09
+
+### Fixed
+- Physical-disk recovery-app maintenance no longer keeps a completed backup's process
+  and destination locks occupied, preventing subsequent hourly jobs from starting.
+  The installed menu-bar app refreshes that copy separately when idle.
+- Recovery-app refreshes serialize without waiting, use unique staging directories,
+  and preserve the previous copy if copying or replacement fails. The copy command
+  has a 60-second deadline; filesystem metadata and rename operations have no hard deadline.
+  Writable stale mountpoint directories are rejected before copying.
+- Homebrew and editor-extension inventory commands drain their output while running
+  and have deadlines, rather than blocking finalization indefinitely on a full pipe.
+
+### Changed
+- CLI-only backups still include the app in their environment snapshot but no longer
+  refresh the unencrypted app at the physical disk root; that maintenance requires
+  the installed menu-bar app.
+
 ## [4.1.6] - 2026-10-08
 
 ### Fixed

@@ -13,12 +13,12 @@ enum Shell {
 
     static func run(_ executable: String, _ arguments: [String], cwd: String? = nil,
                     timeout: TimeInterval = 300, environment: [String: String]? = nil,
-                    stdin: String? = nil) -> Result {
+                    stdin: String? = nil, inheritEnvironment: Bool = true) -> Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-        var env = ProcessInfo.processInfo.environment
+        var env = inheritEnvironment ? ProcessInfo.processInfo.environment : [:]
         // Never let git open an editor, ask for a password or page its output.
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_PAGER"] = "cat"

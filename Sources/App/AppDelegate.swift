@@ -20,6 +20,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastStoreError: String?
     private var storeOpening = false
     private var compactingStore = false
+    private var recoveryCopying = false
+    private var recoveryRetryAfter = Date.distantPast
+    private var lastRecoveryCompletion = ""
     private var compactRetryAfter = Date.distantPast
     private var storeRetryAfter = Date.distantPast
 
@@ -727,6 +730,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             blocked("Il backup cifrato si sta aprendo o recuperando spazio. Aspetta che finisca e riprova.")
             return
         }
+        guard !recoveryCopying else {
+            blocked("Sto aggiornando l'app di ripristino sul disco. Aspetta che finisca e riprova.")
+            return
+        }
         guard restoreCenterWC?.window?.isVisible != true,
               encryptionWC?.window?.isVisible != true,
               onboardingWC?.window?.isVisible != true else {
@@ -969,7 +976,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Something is writing to the disk or the app: an update would interrupt it.
     private var isBusyForUpdate: Bool {
-        if uiState.isUpdating || uiState.isCleaning || uiState.isEjecting { return true }
+        if uiState.isUpdating || uiState.isCleaning || uiState.isEjecting || recoveryCopying { return true }
         if [.running, .stopping, .restoring].contains(uiState.appState) { return true }
         guard let config else { return false }
         let lockPath = config.destination.path + "/rustymacbackup.lock"
@@ -990,7 +997,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Automatic: try again at the next tick. Asked by hand: say why not now.
             if userInitiated {
                 sendNotification(title: "Aggiornamento rimandato",
-                                 body: "C'è un backup o un ripristino in corso: aggiorno appena finisce.")
+                                 body: "C'è un'operazione sul disco in corso: aggiorno appena finisce.")
             }
             return
         }
@@ -1078,9 +1085,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// The installed version, unencrypted, at the top of the backup disk: a just-updated app
     /// copies itself there as soon as the disk is attached (only the installed copy does).
     private func refreshRecoveryAppOnDisk() {
-        guard !uiState.isEjecting, AutoUpdater.isInstalledCopy, let disk = config?.diskURL,
-              FileManager.default.fileExists(atPath: disk.path) else { return }
-        DispatchQueue.global(qos: .utility).async { EnvironmentSnapshot.refreshRecoveryApp(onDisk: disk) }
+        guard !uiState.isEjecting, !recoveryCopying, !isBusyForUpdate, Date() >= recoveryRetryAfter,
+              AutoUpdater.isInstalledCopy, let disk = config?.diskURL,
+              BackupEngine.isVolumeReallyMounted(disk.path) else { return }
+        recoveryCopying = true
+        let completed = uiState.status?.lastCompleted ?? ""
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let success = EnvironmentSnapshot.refreshRecoveryApp(onDisk: disk)
+            DispatchQueue.main.async { [weak self, success] in
+                guard let self else { return }
+                self.recoveryCopying = false
+                if success { self.lastRecoveryCompletion = completed }
+                else { self.recoveryRetryAfter = Date().addingTimeInterval(300) }
+            }
+        }
     }
 
     // MARK: - Status polling
@@ -1104,6 +1122,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.cachedHasBackups = config != nil && !RestoreEngine.findBackupSnapshots().isEmpty
         uiState.cachedCanUndo = RestoreEngine.hasPreRestoreBackup() || latestUndoDir() != nil
         refreshProtection(force: forceProtection)
+        if let completed = uiState.status?.lastCompleted, !completed.isEmpty,
+           completed != lastRecoveryCompletion {
+            refreshRecoveryAppOnDisk()
+        }
     }
 
     /// Snapshot manifests live on the backup disk: read them at most every 20 s (or right
