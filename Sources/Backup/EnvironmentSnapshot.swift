@@ -32,36 +32,82 @@ enum EnvironmentSnapshot {
 
     /// The app at the top of the physical backup disk, NOT encrypted, so a new Mac can
     /// reinstall it straight from the disk (decided 2026-10-07). Called at launch, when the
-    /// disk is attached and after each backup; copies only when the version differs.
-    static func refreshRecoveryApp(onDisk disk: URL) {
-        guard let appURL = findAppBundle(), FileManager.default.isWritableFile(atPath: disk.path) else { return }
-        refreshRecoveryApp(from: appURL, in: disk)
+    /// disk is attached and after each backup. The menu app requests it when idle;
+    /// the physical-root lock serializes recovery copies, not backup jobs.
+    @discardableResult
+    static func refreshRecoveryApp(onDisk disk: URL,
+                                   isMounted: (String) -> Bool = { BackupEngine.isVolumeReallyMounted($0) }) -> Bool {
+        guard isMounted(disk.path) else {
+            Log.warn("Recovery app refresh deferred: the physical backup disk is not mounted")
+            return false
+        }
+        guard let appURL = findAppBundle(), FileManager.default.isWritableFile(atPath: disk.path) else { return false }
+        return refreshRecoveryApp(from: appURL, in: disk)
     }
 
     /// Puts the running app at `<backup folder>/MacBackup4Dev.app` when that copy is missing or
     /// of another version (copy beside, then rename: never a half copy), and removes this
     /// app's older copies and installers (same bundle id, older names) from that folder.
-    static func refreshRecoveryApp(from appURL: URL, in root: URL) {
+    @discardableResult
+    static func refreshRecoveryApp(from appURL: URL, in root: URL,
+                                   copy: (URL, URL) throws -> Void = { try copyAppBounded(from: $0, to: $1) },
+                                   move: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }) -> Bool {
         let fm = FileManager.default
+        let operationLock: DestinationLock
+        do {
+            operationLock = try DestinationLock(at: root)
+        } catch BackupError.lockExists {
+            Log.info("Recovery app refresh deferred: another operation is using the disk")
+            return false
+        } catch {
+            Log.error("Recovery app lock failed: \(error.localizedDescription)")
+            return false
+        }
+        defer { withExtendedLifetime(operationLock) {} }
         let target = root.appendingPathComponent("\(AppIdentity.name).app")
         // Info.plist read from disk: Bundle(url:) caches, and would report a replaced copy's old version.
         func info(_ app: URL, _ key: String) -> String? {
             NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist"))?[key] as? String
         }
-        let mine = info(appURL, "CFBundleShortVersionString")
+        guard let mine = info(appURL, "CFBundleShortVersionString"),
+              info(appURL, "CFBundleIdentifier") == AppIdentity.bundleID else {
+            Log.error("Recovery app source has no valid bundle identity/version")
+            return false
+        }
         let there = info(target, "CFBundleShortVersionString")
-        if mine != nil, mine != there {
-            let staged = root.appendingPathComponent(".\(AppIdentity.name)-new.app")
-            try? fm.removeItem(at: staged)
+        if mine != there {
+            let staged = root.appendingPathComponent(".\(AppIdentity.name)-new-\(UUID().uuidString).app")
+            let old = root.appendingPathComponent(".\(AppIdentity.name)-old-\(UUID().uuidString).app")
             do {
-                try fm.copyItem(at: appURL, to: staged)
-                try? fm.removeItem(at: target)
-                try fm.moveItem(at: staged, to: target)
-                Log.info("Recovery app on the backup disk updated to \(mine ?? "?")")
+                try copy(appURL, staged)
+                guard info(staged, "CFBundleShortVersionString") == mine,
+                      info(staged, "CFBundleIdentifier") == AppIdentity.bundleID else {
+                    throw NSError(domain: "RecoveryApp", code: 1,
+                                  userInfo: [NSLocalizedDescriptionKey: "La copia dell'app di ripristino non è completa."])
+                }
+                let hadOld = fm.fileExists(atPath: target.path)
+                if hadOld { try move(target, old) }
+                do {
+                    try move(staged, target)
+                } catch {
+                    if hadOld {
+                        do { try move(old, target) }
+                        catch { Log.error("Recovery app rollback failed; previous copy retained at \(old.path): \(error.localizedDescription)") }
+                    }
+                    throw error
+                }
+                if hadOld {
+                    do { try fm.removeItem(at: old) }
+                    catch { Log.warn("Recovery app old-copy cleanup failed: \(error.localizedDescription)") }
+                }
+                Log.info("Recovery app on the backup disk updated to \(mine)")
             } catch {
-                try? fm.removeItem(at: staged)
+                if fm.fileExists(atPath: staged.path) {
+                    do { try fm.removeItem(at: staged) }
+                    catch { Log.warn("Recovery app staging cleanup failed: \(error.localizedDescription)") }
+                }
                 Log.error("Recovery app not updated: \(error.localizedDescription)")
-                return
+                return false
             }
         }
         // Older copies of this app and their installers: one current copy is enough.
@@ -74,6 +120,16 @@ enum EnvironmentSnapshot {
                       name.hasPrefix(AppIdentity.legacyName + "-") || name.hasPrefix(AppIdentity.name + "-") {
                 try? fm.removeItem(at: url)
             }
+        }
+        return true
+    }
+
+    static func copyAppBounded(from source: URL, to target: URL, timeout: TimeInterval = 60,
+                               executable: String = "/usr/bin/ditto") throws {
+        let result = Shell.run(executable, [source.path, target.path], timeout: timeout)
+        guard result.ok else {
+            throw NSError(domain: "RecoveryApp", code: Int(result.status),
+                          userInfo: [NSLocalizedDescriptionKey: "Copia dell'app non riuscita: \(result.stderr.suffix(300))"])
         }
     }
 
@@ -119,22 +175,19 @@ enum EnvironmentSnapshot {
             ? "/opt/homebrew/bin/brew" : "/usr/local/bin/brew"
         guard FileManager.default.fileExists(atPath: brewPath) else { return }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: brewPath)
-        process.arguments = ["bundle", "dump", "--file=-", "--force"]
-        // Clean environment to avoid triggering dotfile managers
-        process.environment = ["HOME": NSHomeDirectory(), "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+        let result = Shell.run(brewPath, ["bundle", "dump", "--file=-", "--force"], timeout: 60,
+                               environment: ["HOME": NSHomeDirectory(), "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                                             "HOMEBREW_NO_AUTO_UPDATE": "1"],
+                               inheritEnvironment: false)
+        guard result.ok else {
+            Log.warn("Environment Brewfile not captured: \(result.stderr.suffix(300))")
+            return
+        }
         do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if !data.isEmpty {
-                try data.write(to: dir.appendingPathComponent("Brewfile"))
+            if !result.stdout.isEmpty {
+                try result.stdout.write(to: dir.appendingPathComponent("Brewfile"), atomically: true, encoding: .utf8)
             }
-        } catch {}
+        } catch { Log.warn("Environment Brewfile write failed: \(error.localizedDescription)") }
     }
 
     private static func captureSystemInfo(to dir: URL) {
@@ -233,18 +286,16 @@ enum EnvironmentSnapshot {
         let path = FileManager.default.fileExists(atPath: cmd) ? cmd :
                    (FileManager.default.fileExists(atPath: altCmd) ? altCmd : nil)
         guard let execPath = path else { return }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: execPath)
-        p.arguments = args
-        p.environment = ["HOME": NSHomeDirectory(), "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = FileHandle.nullDevice
+        let result = Shell.run(execPath, args, timeout: 30,
+                               environment: ["HOME": NSHomeDirectory(), "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"],
+                               inheritEnvironment: false)
+        guard result.ok else {
+            Log.warn("Environment \(url.lastPathComponent) not captured: \(result.stderr.suffix(300))")
+            return
+        }
         do {
-            try p.run(); p.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if !data.isEmpty { try data.write(to: url) }
-        } catch {}
+            if !result.stdout.isEmpty { try result.stdout.write(to: url, atomically: true, encoding: .utf8) }
+        } catch { Log.warn("Environment \(url.lastPathComponent) write failed: \(error.localizedDescription)") }
     }
 
     static func findAppBundle() -> URL? {
@@ -267,7 +318,8 @@ enum EnvironmentSnapshot {
               FileManager.default.fileExists(atPath: appURL.path) else { return }
         let destApp = dir.appendingPathComponent("\(AppIdentity.name).app")
         try? FileManager.default.removeItem(at: destApp)
-        try? FileManager.default.copyItem(at: appURL, to: destApp)
+        do { try copyAppBounded(from: appURL, to: destApp) }
+        catch { Log.warn("Environment app copy failed: \(error.localizedDescription)") }
     }
 
     private static func generateRestoreScript(to dir: URL) {

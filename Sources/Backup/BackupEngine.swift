@@ -9,6 +9,7 @@ struct BackupRunOptions {
     var captureDatabases = true
     var auditCoverage = true
     var now: () -> Date = { Date() }
+    var environmentCapture: (URL) -> Void = EnvironmentSnapshot.capture
 }
 
 /// Bounded hand-off between the scanner and the copy workers. Unlike a DispatchSemaphore it
@@ -411,8 +412,7 @@ enum BackupEngine {
         if options.captureEnvironment {
             // Run AFTER backup completes, in a non-interactive shell to avoid triggering kaku/dotfile managers
             Log.info("Capturing environment snapshot...")
-            EnvironmentSnapshot.capture(to: finalURL)
-            EnvironmentSnapshot.refreshRecoveryApp(onDisk: config.diskURL)
+            options.environmentCapture(finalURL)
             Log.info("Environment snapshot complete")
         }
 

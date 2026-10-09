@@ -80,6 +80,13 @@ interval schedules are migrated when the app is idle; daily times and arbitrary
 custom intervals are preserved. Calendar jobs missed during sleep run on wake;
 scheduled backups still require AC power and never overlap another backup.
 
+The installed menu-bar app maintains an unencrypted recovery copy of itself at the
+physical disk root, separately from backup jobs and only while idle. A stalled refresh
+does not keep a completed scheduled job or its destination locks occupied. Copy commands
+have a 60-second deadline; filesystem metadata and renames do not have a hard deadline.
+CLI-only backups retain the app inside their environment snapshot but do not refresh
+the physical-root copy.
+
 During discovery the menu shows the number of files processed and **Totale in calcolo**,
 without inventing a percentage or countdown. Once the scan finishes, copy progress
 uses the known total and file throughput (including hard links); **Verifica finale**
@@ -651,7 +658,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 163 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 167 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
