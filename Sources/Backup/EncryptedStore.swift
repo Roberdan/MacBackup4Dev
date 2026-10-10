@@ -238,10 +238,7 @@ enum EncryptedStore {
         let closed = r.ok || !isMounted(setup)
         if closed { try? FileManager.default.removeItem(atPath: openMarker(setup)) }   // closed by us: clean
         if closed { return .closed }
-        let error = r.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        return .failed(error.isEmpty
-                       ? "macOS non ha indicato il motivo (codice \(r.status))."
-                       : String(error.suffix(300)))
+        return .failed(r.failureReason)
     }
 
     // MARK: - Keychain (through /usr/bin/security, see the type comment)

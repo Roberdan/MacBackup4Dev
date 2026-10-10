@@ -80,15 +80,25 @@ extension CLIHandler {
         state.ejection?.phase = DiskEjection.run(
             disk: disk, store: EncryptedStore.Setup(container: "/Volumes/Backup demo/demo.sparsebundle", volume: "Demo"),
             closeStore: { _, _ in .failed("hdiutil: detach failed - Resource busy") },
-            isStoreOpen: { _ in true }, diskutil: { _ in false }, processesUsing: { _ in "" },
+            isStoreOpen: { _ in true }, diskutil: { _ in Shell.Result(status: 1, stdout: "", stderr: "") }, processesUsing: { _ in "" },
             progress: { _ in })
         report("chiusura fallita (motivo macOS)")
         state.ejection?.phase = DiskEjection.run(
             disk: disk, store: EncryptedStore.Setup(container: "/Volumes/Backup demo/demo.sparsebundle", volume: "Demo"),
             closeStore: { _, _ in .failed(String(String(repeating: "Il sistema non riesce a chiudere il volume. ", count: 8).prefix(300))) },
-            isStoreOpen: { _ in true }, diskutil: { _ in false }, processesUsing: { _ in "Finder, Terminal" },
+            isStoreOpen: { _ in true }, diskutil: { _ in Shell.Result(status: 1, stdout: "", stderr: "") }, processesUsing: { _ in "Finder, Terminal" },
             progress: { _ in })
         report("chiusura fallita (motivo lungo)")
+        state.ejection?.phase = DiskEjection.run(
+            disk: disk, store: nil,
+            diskutil: { _ in Shell.Result(status: 1, stdout: "Volume could not be unmounted by process 12345", stderr: "") },
+            processesUsing: { _ in "" }, isMounted: { _ in true }, progress: { _ in })
+        report("espulsione fallita (motivo macOS)")
+        state.ejection?.phase = DiskEjection.run(
+            disk: disk, store: nil,
+            diskutil: { _ in Shell.Result(status: 1, stdout: "", stderr: String(repeating: "Il sistema non riesce a espellere il disco. ", count: 10)) },
+            processesUsing: { _ in "Finder, Terminal" }, isMounted: { _ in true }, progress: { _ in })
+        report("espulsione fallita (motivo lungo)")
         popover.close()
         window.close()
     }
