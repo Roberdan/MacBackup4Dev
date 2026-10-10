@@ -40,7 +40,7 @@ enum DiskEjection {
         store: EncryptedStore.Setup?,
         closeStore: (EncryptedStore.Setup, Bool) -> EncryptedStore.CloseResult = { EncryptedStore.closeReporting($0, force: $1) },
         isStoreOpen: (EncryptedStore.Setup) -> Bool = { EncryptedStore.isOpen($0) },
-        diskutil: ([String]) -> Bool,
+        diskutil: ([String]) -> Shell.Result = { runDiskutil($0) },
         processesUsing: (String) -> String,
         isMounted: (String) -> Bool = BackupEngine.isVolumeReallyMounted,
         progress: (EjectionPhase) -> Void
@@ -67,15 +67,24 @@ enum DiskEjection {
             }
         }
         progress(.ejecting)
-        var success = diskutil(["eject", disk.path])
+        var result = diskutil(["eject", disk.path])
         var holders = ""
-        if !success {
+        if !result.ok {
             holders = processesUsing(disk.path)
-            if onlyIndexers(holders) { success = diskutil(["unmount", "force", disk.path]) }
+            if onlyIndexers(holders) { result = diskutil(["unmount", "force", disk.path]) }
         }
-        if success && !isMounted(disk.path) { return .succeeded }
-        return .failed(holders.isEmpty
-                       ? "\(disk.lastPathComponent) è ancora collegato o in uso. Chiudi le finestre del Finder e riprova."
-                       : "\(disk.lastPathComponent) è in uso da: \(holders). Chiudili e riprova.")
+        if result.ok && !isMounted(disk.path) { return .succeeded }
+        let reason = result.ok
+            ? "macOS ha terminato il comando, ma il volume risulta ancora montato."
+            : result.failureReason
+        let owners = holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders)."
+        return .failed("Non riesco a espellere \(disk.lastPathComponent).\n\(reason)\n\(owners) Non scollegare il disco.")
+    }
+
+    static func runDiskutil(
+        _ arguments: [String],
+        runCommand: (String, [String], TimeInterval) -> Shell.Result = { Shell.run($0, $1, timeout: $2) }
+    ) -> Shell.Result {
+        runCommand("/usr/sbin/diskutil", arguments, 120)
     }
 }

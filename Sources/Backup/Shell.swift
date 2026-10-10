@@ -9,6 +9,14 @@ enum Shell {
         let stdout: String
         let stderr: String
         var ok: Bool { status == 0 }
+        var failureReason: String {
+            let error = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            let output = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            let reason = error.isEmpty ? output : error
+            return reason.isEmpty
+                ? "macOS non ha indicato il motivo (codice \(status))."
+                : String(reason.suffix(300))
+        }
     }
 
     static func run(_ executable: String, _ arguments: [String], cwd: String? = nil,

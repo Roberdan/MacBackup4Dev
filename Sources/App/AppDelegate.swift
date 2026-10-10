@@ -754,7 +754,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.ejection = EjectionFeedback(disk: volumePath, phase: store == nil ? .ejecting : .closingStore)
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome = DiskEjection.run(disk: volumePath, store: store,
-                                          diskutil: Self.runDiskutil, processesUsing: Self.processesUsing) { phase in
+                                          processesUsing: Self.processesUsing) { phase in
                 DispatchQueue.main.async { self.uiState.ejection?.phase = phase }
             }
             DispatchQueue.main.async {
@@ -1212,18 +1212,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Helpers
-
-    /// Deliberately off the main actor: it spawns `diskutil` and blocks until it exits,
-    /// and `handleEject` calls it from a background queue for exactly that reason.
-    nonisolated private static func runDiskutil(_ args: [String]) -> Bool {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
-        p.arguments = args
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
-        do { try p.run(); p.waitUntilExit(); return p.terminationStatus == 0 }
-        catch { return false }
-    }
 
     private func sendNotification(title: String, body: String) {
         guard Bundle.main.bundleIdentifier != nil else { return }

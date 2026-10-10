@@ -3,6 +3,8 @@ import Foundation
 struct EjectionTests {
     private let disk = URL(fileURLWithPath: "/Volumes/Test-ejection")
     private let store = EncryptedStore.Setup(container: "/Volumes/Test-ejection/test.sparsebundle", volume: "Test-store")
+    private let success = Shell.Result(status: 0, stdout: "", stderr: "")
+    private let failure = Shell.Result(status: 1, stdout: "", stderr: "Resource busy")
 
     func test_plainDiskProgressAndSuccess() throws {
         var events: [EjectionPhase] = []
@@ -10,7 +12,7 @@ struct EjectionTests {
         let result = DiskEjection.run(disk: disk, store: nil,
                                      closeStore: { _, _ in fatalError("No encrypted store") },
                                      isStoreOpen: { _ in fatalError("No encrypted store") },
-                                     diskutil: { commands.append($0); return true },
+                                     diskutil: { commands.append($0); return success },
                                      processesUsing: { _ in fatalError("No holders needed") },
                                      isMounted: { _ in false },
                                      progress: { events.append($0) })
@@ -24,7 +26,7 @@ struct EjectionTests {
         let result = DiskEjection.run(disk: disk, store: store,
                                      closeStore: { _, force in calls.append(force ? "force-close" : "close"); return .closed },
                                      isStoreOpen: { _ in false },
-                                     diskutil: { _ in calls.append("eject"); return true },
+                                     diskutil: { _ in calls.append("eject"); return success },
                                      processesUsing: { _ in "" },
                                      isMounted: { _ in false },
                                      progress: { calls.append($0 == .closingStore ? "closing" : "ejecting") })
@@ -39,7 +41,7 @@ struct EjectionTests {
             let result = DiskEjection.run(disk: disk, store: store,
                                          closeStore: { _, force in forced = forced || force; return .failed("hdiutil: detach failed - Resource busy") },
                                          isStoreOpen: { _ in true },
-                                         diskutil: { _ in ejected = true; return true },
+                                         diskutil: { _ in ejected = true; return success },
                                          processesUsing: { _ in holders },
                                          isMounted: { _ in true }, progress: { _ in })
             guard case .failed(let reason) = result else { throw TestFailure.failed("Busy store must fail") }
@@ -58,7 +60,7 @@ struct EjectionTests {
         let result = DiskEjection.run(disk: disk, store: store,
                                      closeStore: { _, force in forcedClose = forcedClose || force; return force ? .closed : .failed("Resource busy") },
                                      isStoreOpen: { _ in false },
-                                     diskutil: { commands.append($0); return $0.first == "unmount" },
+                                     diskutil: { commands.append($0); return $0.first == "unmount" ? success : failure },
                                      processesUsing: { _ in "mds, wdavdaemon" },
                                      isMounted: { _ in false }, progress: { _ in })
         try expect(result == .succeeded && forcedClose, "Only known read-only scanners permit force-close")
@@ -69,16 +71,80 @@ struct EjectionTests {
         for holders in ["Finder, Terminal", ""] {
             var commands = 0
             let result = DiskEjection.run(disk: disk, store: nil,
-                                         diskutil: { _ in commands += 1; return false },
+                                         diskutil: { _ in commands += 1; return failure },
                                          processesUsing: { _ in holders },
                                          isMounted: { _ in true }, progress: { _ in })
             guard case .failed(let reason) = result else { throw TestFailure.failed("Failed command cannot confirm success") }
             try expect(commands == 1, "Writers or unknown holders cannot trigger force-unmount")
             try expect(holders.isEmpty || reason.contains(holders), "Failure identifies known holders")
+            try expect(reason.contains("Resource busy") && reason.contains("Non scollegare"),
+                       "Physical failure preserves the error and does not permit unplugging")
         }
-        let stillMounted = DiskEjection.run(disk: disk, store: nil, diskutil: { _ in true },
+        let stillMounted = DiskEjection.run(disk: disk, store: nil, diskutil: { _ in success },
                                             processesUsing: { _ in "" }, isMounted: { _ in true }, progress: { _ in })
-        guard case .failed = stillMounted else { throw TestFailure.failed("Exit zero alone is not safe-to-unplug proof") }
+        guard case .failed(let reason) = stillMounted else { throw TestFailure.failed("Exit zero alone is not safe-to-unplug proof") }
+        try expect(reason.contains("ancora montato") && reason.contains("Non scollegare"),
+                   "Unconfirmed unmount is reported explicitly, not as a command failure")
+    }
+
+    func test_physicalFailurePreservesSystemError() throws {
+        for holders in ["", "Finder"] {
+            let result = DiskEjection.run(
+                disk: disk, store: nil,
+                diskutil: { _ in Shell.Result(status: 16, stdout: "Ejection progress", stderr: "Actual macOS refusal\n") },
+                processesUsing: { _ in holders }, isMounted: { _ in true }, progress: { _ in })
+            guard case .failed(let reason) = result else { throw TestFailure.failed("Eject must fail") }
+            try expect(reason.contains("Actual macOS refusal") && !reason.contains("Ejection progress"),
+                       "Stderr takes priority over progress output")
+            try expect(!reason.contains("Chiudi le finestre del Finder"), "Do not guess Finder is the cause")
+            try expect(holders.isEmpty ? reason.contains("Nessun processo identificato") : reason.contains(holders),
+                       "Observed holders are distinguished from an inconclusive lookup")
+        }
+    }
+
+    func test_physicalFailureUsesStdoutAndExitCode() throws {
+        for output in ["Volume could not be unmounted by process 12345", ""] {
+            let result = DiskEjection.run(
+                disk: disk, store: nil,
+                diskutil: { _ in Shell.Result(status: 73, stdout: output, stderr: " \n") },
+                processesUsing: { _ in "" }, isMounted: { _ in true }, progress: { _ in })
+            guard case .failed(let reason) = result else { throw TestFailure.failed("Eject must fail") }
+            try expect(output.isEmpty ? reason.contains("codice 73") : reason.contains(output),
+                       "diskutil failures on stdout and empty-output exit codes remain visible")
+        }
+        let long = Shell.Result(status: 1, stdout: "", stderr: String(repeating: "x", count: 600) + " last refusal")
+        try expectEqual(long.failureReason.count, 300, "Shared command errors are bounded")
+        try expect(long.failureReason.hasSuffix("last refusal"), "Bounding keeps the useful final reason")
+    }
+
+    func test_physicalFallbackKeepsLastError() throws {
+        var commands: [[String]] = []
+        let result = DiskEjection.run(
+            disk: disk, store: nil,
+            diskutil: { args in
+                commands.append(args)
+                return Shell.Result(status: 1, stdout: "", stderr: args.first == "eject" ? "First refusal" : "Last refusal")
+            }, processesUsing: { _ in "mds" }, isMounted: { _ in true }, progress: { _ in })
+        guard case .failed(let reason) = result else { throw TestFailure.failed("Fallback must fail") }
+        try expectEqual(commands, [["eject", disk.path], ["unmount", "force", disk.path]], "Existing indexer-only policy is unchanged")
+        try expect(reason.contains("Last refusal") && !reason.contains("First refusal"),
+                   "The last attempted physical command supplies the reason")
+    }
+
+    func test_physicalCommandCapturesOutputAndDeadline() throws {
+        var seen: ([String], TimeInterval)?
+        var executableUsed = ""
+        let result = DiskEjection.runDiskutil(["eject", disk.path], runCommand: { executable, args, timeout in
+            executableUsed = executable
+            seen = (args, timeout)
+            return Shell.Result(status: -2, stdout: "progress", stderr: "timeout dopo 120s")
+        })
+        try expectEqual(executableUsed, "/usr/sbin/diskutil", "Only the native diskutil is invoked")
+        try expectEqual(seen?.0, ["eject", disk.path], "The configured target is preserved")
+        try expectEqual(seen?.1, 120, "Physical commands no longer wait without a deadline")
+        try expectEqual(result.status, -2, "Timeout remains a failure")
+        try expectEqual(result.stdout, "progress", "Output is captured instead of discarded")
+        try expectEqual(result.stderr, "timeout dopo 120s", "The captured error is preserved")
     }
 
     func test_feedbackLifecycle() throws {
@@ -129,6 +195,10 @@ struct EjectionTests {
             Shell.Result(status: 73, stdout: "", stderr: "")
         }, isMounted: { _ in true })
         try expectEqual(noReason, .failed("macOS non ha indicato il motivo (codice 73)."), "An empty error reports the exit code, not an invented owner")
+        let outputReason = EncryptedStore.closeReporting(store, runCommand: { _, _, _ in
+            Shell.Result(status: 1, stdout: "Actual close refusal on stdout", stderr: "")
+        }, isMounted: { _ in true })
+        try expectEqual(outputReason, .failed("Actual close refusal on stdout"), "Shared error reporting also retains close failures on stdout")
         let longReason = EncryptedStore.closeReporting(store, runCommand: { _, _, _ in
             Shell.Result(status: 1, stdout: "", stderr: String(repeating: "x", count: 600) + " useful final reason")
         }, isMounted: { _ in true })

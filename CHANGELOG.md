@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.1.9] - 2026-10-10
+
+### Fixed
+- Physical-disk ejection now retains the actual macOS refusal, including errors
+  written to standard output, instead of guessing that Finder is the cause.
+  Unidentified holders remain explicit; failure always says not to unplug.
+- Ejection commands capture and drain their output and have a 120-second deadline,
+  rather than waiting indefinitely. Exit zero without an observed unmount remains
+  a failure. Existing command targets and indexer-only force policy are unchanged.
+- Encrypted-store closure shares the bounded command-error formatter and also
+  preserves a refusal reported on standard output.
+
 ## [4.1.8] - 2026-10-09
 
 ### Fixed
