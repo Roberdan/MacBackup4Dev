@@ -227,9 +227,16 @@ enum EncryptedStore {
         _ setup: Setup, force: Bool = false,
         runCommand: (String, [String], TimeInterval) -> Shell.Result = { Shell.run($0, $1, timeout: $2) },
         isMounted: (Setup) -> Bool = { isOpen($0) },
-        imageDevice: (Setup) -> String? = { imageDevice($0) }
+        imageDevice: (Setup) -> String? = { imageDevice($0) },
+        attachedDevice: (Setup) -> String? = { attachedImageDevice($0) }
     ) -> CloseResult {
-        guard isMounted(setup) else { return .closed }
+        // Attached but not mounted (a refused mount, an interrupted check): still holds the
+        // disk busy through diskimages-helper, so detach it too (found 2026-10-11).
+        guard isMounted(setup) else {
+            guard let device = attachedDevice(setup) else { return .closed }
+            let r = runCommand("/usr/sbin/diskutil", ["eject", device], 120)
+            return r.ok ? .closed : .failed(r.failureReason)
+        }
         // Normal close: `diskutil eject` on the image's own whole device (`man hdiutil`:
         // detach is deprecated, its replacement is diskutil eject). On a refusal it names the
         // process that keeps the volume busy ("dissented by PID …"), which hdiutil does not and
@@ -263,6 +270,17 @@ enum EncryptedStore {
     /// anything else (none, two, unreadable) → nil, and the caller keeps hdiutil detach.
     /// hdiutil lists the image's own device first, before the APFS container it carries.
     static func imageDevice(fromHdiutilInfo data: Data, setup: Setup) -> String? {
+        imageDevice(fromHdiutilInfo: data, setup: setup, requireMount: true)
+    }
+
+    /// `/dev/diskN` of this container when attached, mounted or not.
+    static func attachedImageDevice(_ setup: Setup) -> String? {
+        let r = Shell.run("/usr/bin/hdiutil", ["info", "-plist"], timeout: 30)
+        guard r.ok else { return nil }
+        return imageDevice(fromHdiutilInfo: Data(r.stdout.utf8), setup: setup, requireMount: false)
+    }
+
+    static func imageDevice(fromHdiutilInfo data: Data, setup: Setup, requireMount: Bool) -> String? {
         guard let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let images = info["images"] as? [[String: Any]] else { return nil }
         func same(_ a: String, _ b: String) -> Bool {
@@ -272,7 +290,7 @@ enum EncryptedStore {
         let matches = images.filter { image in
             guard let path = image["image-path"] as? String, same(path, setup.container) else { return false }
             let entities = image["system-entities"] as? [[String: Any]] ?? []
-            return entities.contains { ($0["mount-point"] as? String) == setup.mountPoint }
+            return !requireMount || entities.contains { ($0["mount-point"] as? String) == setup.mountPoint }
         }
         guard matches.count == 1, let entities = matches[0]["system-entities"] as? [[String: Any]] else { return nil }
         return entities.lazy.compactMap { $0["dev-entry"] as? String }.first { device in

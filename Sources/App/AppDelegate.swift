@@ -148,8 +148,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.onRequestEject = { [weak self] in self?.handleEject() }
         uiState.onRequestOpenFolder = { [weak self] in self?.handleOpenFolder() }
         uiState.onRequestQuit = { [weak self] in
-            guard self?.uiState.isEjecting == false else { return }
-            NSApplication.shared.terminate(nil)
+            guard let self, !self.uiState.isEjecting else { return }
+            self.quitClosingStore()
         }
         uiState.onSelectDisk = { [weak self] url in self?.handleSelectDisk(url) }
         uiState.onRequestUndoRestore = { [weak self] in self?.handleUndoRestore() }
@@ -304,6 +304,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func olderInstanceBusy(_ note: Notification) {
         Log.info("An older copy is busy: this one quits")
         NSApp.terminate(nil)
+    }
+
+    /// "Esci" closes the encrypted volume first (same rules as "Espelli disco"): left open,
+    /// it kept the disk busy after the app had quit (user report 2026-10-11). Not while a
+    /// backup runs, and not when a newer copy takes over (that one keeps using the volume).
+    /// After a refusal, a second "Esci" quits anyway: the refusal is on screen.
+    private func quitClosingStore() {
+        if case .failed = uiState.ejection?.phase { NSApp.terminate(nil); return }
+        guard let config, let setup = config.encryption.setup,
+              EncryptedStore.isOpen(setup) || EncryptedStore.attachedImageDevice(setup) != nil,
+              !DiskEjection.backupLockIsLive(setup) else { NSApp.terminate(nil); return }
+        let disk = config.diskURL
+        uiState.ejection = EjectionFeedback(disk: disk, phase: .closingStore)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = DiskEjection.run(disk: disk, store: setup, processesUsing: Self.processesUsing,
+                                           storeOnly: true) { _ in }
+            DispatchQueue.main.async {
+                if outcome == .succeeded { NSApp.terminate(nil); return }
+                self.uiState.ejection?.phase = outcome
+            }
+        }
     }
 
     // MARK: - Encrypted backups (4.1)

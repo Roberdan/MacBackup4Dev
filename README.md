@@ -575,6 +575,12 @@ colour, sized to its content.
 - **Ripristina…** opens the restore window: *Argomento*, *File* (every version), *Nuovo Mac*.
 - **Espelli disco** refuses while a backup runs (also a scheduled one), says which apps keep
   the disk busy, and forces the unmount only for recognized read-only indexers or antivirus.
+  That includes Microsoft Defender when macOS itself names it (`dlp_agent` or
+  `wdavdaemon_enterprise`) as the only holder: its data-loss prevention keeps any external
+  volume busy a few seconds after files are written and never lets go (measured
+  2026-10-11). The app then checks that no backup is running, flushes pending writes, retries
+  normally, and only then forces. Any other visible program is never forced. An encrypted image
+  attached but not mounted is detached too, so it cannot keep the disk busy.
   The menu stays open with a spinner during encrypted-store closure and disk ejection.
   *Disco espulso — Puoi scollegare il disco* appears only after the physical volume is
   unmounted; a failure stays visible with *Riprova*. The result survives closing and

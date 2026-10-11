@@ -74,6 +74,7 @@ struct TestRunner {
             ("Ejection.exactImageDevice", ejection.test_normalCloseEjectsTheExactImageDevice),
             ("Ejection.imageDeviceMapping", ejection.test_imageDeviceNeedsExactlyOneMatchingImage),
             ("Ejection.dissenterNamed", ejection.test_dissenterIsNamedFromTheSystemMessage),
+            ("Ejection.defenderForcedOnlyWhenSafe", ejection.test_defenderHoldIsForcedOnlyWhenSafe),
             ("Ejection.staleFailureDropped", ejection.test_failureIsDroppedOnlyWhenTheDiskIsGone),
             ("Ejection.physicalReason", ejection.test_physicalFailurePreservesSystemError),
             ("Ejection.physicalOutput", ejection.test_physicalFailureUsesStdoutAndExitCode),

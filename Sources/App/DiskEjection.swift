@@ -43,6 +43,9 @@ enum DiskEjection {
         diskutil: ([String]) -> Shell.Result = { runDiskutil($0) },
         processesUsing: (String) -> String,
         isMounted: (String) -> Bool = BackupEngine.isVolumeReallyMounted,
+        backupRunning: (EncryptedStore.Setup?) -> Bool = { backupLockIsLive($0) },
+        flush: () -> Void = { _ = Shell.run("/bin/sync", [], timeout: 120) },
+        storeOnly: Bool = false,
         progress: (EjectionPhase) -> Void
     ) -> EjectionPhase {
         let indexers: Set<String> = ["mds", "mds_stores", "mdworker_shared", "fseventsd",
@@ -51,12 +54,27 @@ enum DiskEjection {
             let names = holders.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             return !names.isEmpty && names.allSatisfy { indexers.contains($0) }
         }
+        // Defender only reads what was written and never lets go (measured 2026-10-11: macOS
+        // names dlp_agent or, sometimes, its parent wdavdaemon_enterprise). Forcing is allowed
+        // for Defender alone: macOS must name it, no other holder may be visible and no backup
+        // may be running.
+        let defender: Set<String> = ["dlp_agent", "wdavdaemon", "wdavdaemon_enterprise", "wdavdaemon_unprivileged"]
+        func onlyDLP(_ reason: String, _ holders: String) -> Bool {
+            dissentingExecutable(in: reason).map(defender.contains) == true && (holders.isEmpty || onlyIndexers(holders))
+                && !backupRunning(store)
+        }
         if let store {
             progress(.closingStore)
             var result = closeStore(store, false)
             if !result.isClosed {
                 let holders = processesUsing(store.mountPoint)
-                if onlyIndexers(holders) { result = closeStore(store, true) }
+                if case .failed(let error) = result, onlyDLP(error, holders) {
+                    flush()
+                    result = closeStore(store, false)
+                    if !result.isClosed { result = closeStore(store, true) }
+                } else if onlyIndexers(holders) {
+                    result = closeStore(store, true)
+                }
                 if isStoreOpen(store) {
                     let reason: String
                     if case .failed(let error) = result { reason = error }
@@ -65,12 +83,16 @@ enum DiskEjection {
                 }
             }
         }
+        if storeOnly { return .succeeded }
         progress(.ejecting)
         var result = diskutil(["eject", disk.path])
         var holders = ""
         if !result.ok {
             holders = processesUsing(disk.path)
-            if onlyIndexers(holders) { result = diskutil(["unmount", "force", disk.path]) }
+            if onlyIndexers(holders) || onlyDLP(result.failureReason, holders) {
+                flush()
+                result = diskutil(["unmount", "force", disk.path])
+            }
         }
         if result.ok && !isMounted(disk.path) { return .succeeded }
         let reason = result.ok
@@ -87,12 +109,30 @@ enum DiskEjection {
         if let who = dissenter(in: reason) {
             var text = "macOS dice che lo sta usando \(who)."
             if who.hasPrefix("Microsoft Defender") {
-                text += " È la protezione dati aziendale (DLP): tiene occupati i dischi esterni su cui sono stati scritti file. "
-                    + "Non è un errore del backup. Per scollegare senza rischi spegni il Mac; per risolverlo serve l'IT."
+                text += " È la protezione dati aziendale (DLP). "
+                    + "Non è un errore del backup. Per scollegare senza rischi spegni il Mac."
             }
             return text
         }
         return reason + "\n" + (holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders).")
+    }
+
+    /// The executable name in diskutil's "dissented by PID n (/path/to/executable)".
+    static func dissentingExecutable(in text: String) -> String? {
+        guard let match = text.range(of: #"dissented by PID [0-9]+ \([^)\n]*\)"#, options: .regularExpression) else { return nil }
+        let inner = text[match].drop { $0 != "(" }.dropFirst().dropLast()
+        return inner.split(separator: "/").last.map(String.init)
+    }
+
+    /// A backup holds `rustymacbackup.lock` with its live PID. Without a store the
+    /// destination is unknown here: answer "running", so nothing is forced.
+    static func backupLockIsLive(_ store: EncryptedStore.Setup?) -> Bool {
+        guard let store else { return true }
+        let lock = store.destination + "/rustymacbackup.lock"
+        guard FileManager.default.fileExists(atPath: lock) else { return false }
+        guard let text = try? String(contentsOfFile: lock, encoding: .utf8),
+              let pid = Int32(text.split(separator: "\n").first?.trimmingCharacters(in: .whitespaces) ?? "") else { return true }
+        return kill(pid, 0) == 0 || errno == EPERM
     }
 
     /// The process macOS names when it refuses an unmount, from diskutil's

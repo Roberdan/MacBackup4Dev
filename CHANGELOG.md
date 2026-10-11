@@ -1,5 +1,20 @@
 # Changelog
 
+## [4.1.14] - 2026-10-11
+
+### Fixed
+- "Espelli disco" now works when Microsoft Defender holds the disk. Its data-loss
+  prevention keeps any external volume busy a few seconds after files are written and never
+  lets go (measured on throwaway disks). When macOS itself names Defender (`dlp_agent` or
+  `wdavdaemon_enterprise`) as the only holder and no backup is running, the app flushes
+  pending writes, retries normally, then closes the volume forcibly. A real program
+  using the disk is never forced: the disk stays protected and the program is named.
+- An encrypted image attached but not mounted (an interrupted check) no longer keeps the
+  disk busy: it is detached before ejecting.
+- "Esci" closes the encrypted volume before quitting, with the same rules. Left open,
+  it kept the disk busy after the app had quit. It does not close the volume while a backup
+  runs, nor when a newer copy takes over after an update. After a refusal, a second "Esci" quits anyway.
+
 ## [4.1.13] - 2026-10-11
 
 ### Added
