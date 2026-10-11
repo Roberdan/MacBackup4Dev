@@ -21,6 +21,25 @@ final class AppUIState: ObservableObject {
     @Published var status: BackupStatusFile?
     @Published var config: Config?
     @Published var scheduleLabel: String = "Off"   // human-readable current schedule
+    @Published var schedule: ScheduleStatus?
+    /// The disk is there and the encrypted volume is being opened (and checked, after an
+    /// unclean removal): not "disk missing" (user report 2026-10-11).
+    @Published var storeOpening = false
+    @Published var onBattery = false
+    var now: () -> Date = { Date() }
+
+    /// When the next automatic backup starts, and what it needs to actually run.
+    var nextBackupText: String? {
+        guard let schedule else { return nil }
+        guard schedule.installed else { return "Backup automatico disattivato" }
+        guard let next = schedule.nextRun(after: now()) else {
+            return schedule.intervalMinutes.map { "Backup automatico ogni \($0) min" }
+        }
+        let text = "Prossimo backup automatico: \(ProtectionSummary.dateLabel(next).replacingOccurrences(of: "oggi ", with: "oggi alle "))"
+        if appState == .diskAbsent && !storeOpening { return text + ", se colleghi il disco" }
+        if onBattery { return text + ", solo con l'alimentatore collegato (ora sei a batteria)" }
+        return text
+    }
     /// nil = no cleanup; otherwise the current phase, shown in place of the status line.
     @Published var cleanupPhase: CleanupPhase?
     var isCleaning: Bool { cleanupPhase != nil }

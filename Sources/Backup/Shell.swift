@@ -15,7 +15,15 @@ enum Shell {
             let reason = error.isEmpty ? output : error
             return reason.isEmpty
                 ? "macOS non ha indicato il motivo (codice \(status))."
-                : String(reason.suffix(300))
+                : Self.boundedTail(reason)
+        }
+
+        /// The last 300 characters, starting at a whole line when that cuts one in half
+        /// (2026-10-11: "lume could not be unmounted").
+        static func boundedTail(_ text: String) -> String {
+            let tail = String(text.suffix(300))
+            guard text.count > 300, let newline = tail.firstIndex(of: "\n") else { return tail }
+            return String(tail[tail.index(after: newline)...])
         }
     }
 

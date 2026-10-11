@@ -4,6 +4,23 @@ struct ScheduleStatus {
     let installed: Bool
     let intervalMinutes: Int?
     let dailyHour: Int?
+    /// Wall-clock start times (minutes after midnight, sorted). Empty for a launchd
+    /// StartInterval, whose next run depends on when the job was loaded.
+    var slots: [Int] = []
+
+    /// The next automatic start after `now`, or nil when it cannot be known exactly.
+    func nextRun(after now: Date, calendar: Calendar = .current) -> Date? {
+        guard installed, !slots.isEmpty else { return nil }
+        let today = calendar.startOfDay(for: now)
+        for offset in 0...1 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
+            for minute in slots {
+                if let date = calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: day),
+                   date > now { return date }
+            }
+        }
+        return nil
+    }
 }
 
 enum ScheduleManager {
@@ -176,13 +193,15 @@ enum ScheduleManager {
                 i + 1 < minutes.count ? minutes[i + 1] - minutes[i] : 1440 + minutes[0] - minutes[i]
             }
             if let interval = gaps.first, interval > 0, gaps.allSatisfy({ $0 == interval }) {
-                return ScheduleStatus(installed: installed, intervalMinutes: interval, dailyHour: nil)
+                return ScheduleStatus(installed: installed, intervalMinutes: interval, dailyHour: nil, slots: minutes)
             }
+            return ScheduleStatus(installed: installed, intervalMinutes: nil, dailyHour: nil, slots: minutes)
         }
 
         if let schedule = plist["StartCalendarInterval"] as? [String: Any],
            let hour = schedule["Hour"] as? Int {
-            return ScheduleStatus(installed: installed, intervalMinutes: nil, dailyHour: hour)
+            let minute = schedule["Minute"] as? Int ?? 0
+            return ScheduleStatus(installed: installed, intervalMinutes: nil, dailyHour: hour, slots: [hour * 60 + minute])
         }
 
         return ScheduleStatus(installed: installed, intervalMinutes: nil, dailyHour: nil)

@@ -119,7 +119,8 @@ struct PopoverView: View {
     }
 
     private var levelColor: Color {
-        if state.appState == .running || state.appState == .restoring || state.appState == .stopping { return Look.gold }
+        if state.appState == .running || state.appState == .restoring || state.appState == .stopping
+            || (state.appState == .diskAbsent && state.storeOpening) { return Look.gold }
         switch heroLevel {
         case .protected: return Look.green
         case .attention: return Look.orange
@@ -132,7 +133,7 @@ struct PopoverView: View {
         case .running: return state.backupHeadline
         case .stopping: return "Interrompo il backup…"
         case .restoring: return "Ripristino in corso"
-        case .diskAbsent: return "Disco di backup non collegato"
+        case .diskAbsent: return state.storeOpening ? "Apro il backup cifrato…" : "Disco di backup non collegato"
         case .error: return "L'ultimo backup non è riuscito"
         default: return state.backupHeadline
         }
@@ -141,6 +142,9 @@ struct PopoverView: View {
     private var heroDetail: String {
         switch state.appState {
         case .diskAbsent:
+            if state.storeOpening {
+                return "Il disco è collegato. Se era stato scollegato senza espellerlo, controllo il volume: può richiedere qualche minuto."
+            }
             let last = state.protection?.lastCompleteDate.map { "Ultimo completo \(ProtectionSummary.ago(Date().timeIntervalSince($0))). " } ?? ""
             return last + "Collegalo: riparte da solo all'orario previsto."
         case .running:
@@ -172,7 +176,8 @@ struct PopoverView: View {
     }
 
     private var ring: some View {
-        let value = progress ?? (state.isRunning ? 0 : (heroLevel == .protected ? 1 : 0.28))
+        let busy = state.isRunning || (state.appState == .diskAbsent && state.storeOpening)
+        let value = progress ?? (busy ? 0 : (heroLevel == .protected ? 1 : 0.28))
         return ZStack {
             Circle().stroke(Color.white.opacity(0.08), lineWidth: 9)
             Circle()
@@ -186,7 +191,7 @@ struct PopoverView: View {
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundColor(Look.text)
                     .monospacedDigit()
-            } else if state.isRunning {
+            } else if state.isRunning || (state.appState == .diskAbsent && state.storeOpening) {
                 ProgressView()
                     .progressViewStyle(.circular)
                     .controlSize(.large)
@@ -250,6 +255,15 @@ struct PopoverView: View {
                     stat("arrow.triangle.branch", "\(p.reposWithSavedCommits) repo")
                     stat("cylinder.split.1x2.fill", "\(p.databasesSaved) database")
                 }
+            }
+            if !state.isRunning, let next = state.nextBackupText {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "clock").font(.system(size: 10))
+                    Text(next).fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Look.secondaryText)
+                .accessibilityElement(children: .combine)
             }
         }
         .padding(16)
