@@ -96,6 +96,15 @@ final class RestoreTests {
         try safety.write("cfg", to: box.home + "/.zshrc")
 
         let result = try safety.runEngine(safety.config(box, sources: ["GitHub", ".zshrc"]), box, git: true)
+        var progress: [(Int, Int)] = []
+        let progressSnapshot = box.root.appendingPathComponent("progress-snapshot")
+        let captured = GitSafety.captureAll(sources: [box.home + "/GitHub"],
+                                            excludeFilter: ExcludeFilter(patterns: []),
+                                            home: box.home, into: progressSnapshot,
+                                            onProgress: { progress.append(($0, $1)) })
+        try expectEqual(captured.count, 1, "progress does not change repository capture")
+        try expectEqual(progress.map { $0.0 }, [1], "actual repository index is reported")
+        try expectEqual(progress.map { $0.1 }, [1], "actual repository total is reported")
 
         // "New Mac": an empty home except for a partial copy of the repo.
         let newHome = box.root.appendingPathComponent("newhome").path

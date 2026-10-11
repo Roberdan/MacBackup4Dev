@@ -350,22 +350,32 @@ enum BackupEngine {
         }
 
         // Git and database safety: written into the snapshot before it gets its final name.
-        status.phase = "finalizing"
         status.filesDone = completedCount
         status.filesTotal = UInt64(counts.discovered)
         status.scanFinished = true
         status.etaSecs = 0
-        status.currentFile = "Salvo i commit non pubblicati e i database…"
-        do { try statusWriter.write(status: status) }
-        catch { Log.error("Status write failed during finalization: \(error)") }
+        func reportFinalization(_ message: String) {
+            status.beginFinalizationStep(message, at: options.now())
+            do { try statusWriter.write(status: status) }
+            catch { Log.error("Status write failed during finalization: \(error)") }
+        }
+        reportFinalization("Cerco i repository da proteggere…")
         let gitRecords = options.captureGit
             ? GitSafety.captureAll(sources: allPaths, excludeFilter: excludeFilter, home: home, into: inProgressURL,
-                                   previousSnapshot: latestBackup)
+                                   previousSnapshot: latestBackup,
+                                   onProgress: { index, total in
+                                       reportFinalization("Salvo i commit: repository \(index) di \(total)")
+                                   })
             : []
+        reportFinalization("Preparo le copie dei database…")
         let dbRecords = options.captureDatabases
-            ? DatabaseDumps.captureAll(config: config.databases, home: home, into: inProgressURL)
+            ? DatabaseDumps.captureAll(config: config.databases, home: home, into: inProgressURL,
+                                     onProgress: { index, total in
+                                         reportFinalization("Salvo il database \(index) di \(total)")
+                                     })
             : []
 
+        reportFinalization("Verifico e completo lo snapshot…")
         let traversalCount = counts.traversalErrors.count
         let copyErrors = errorList.count - traversalCount
         let shrink = SnapshotManifest.shrinkWarning(processed: Int64(processedCount),
@@ -410,6 +420,7 @@ enum BackupEngine {
         }
 
         if options.captureEnvironment {
+            reportFinalization("Registro l'ambiente di sviluppo…")
             // Run AFTER backup completes, in a non-interactive shell to avoid triggering kaku/dotfile managers
             Log.info("Capturing environment snapshot...")
             options.environmentCapture(finalURL)
@@ -429,6 +440,7 @@ enum BackupEngine {
         }
 
         if options.auditCoverage {
+            reportFinalization("Controllo la copertura del backup…")
             let gaps = CoverageAuditor.audit(config: config, home: home)
             try? statusWriter.writeCoverage(CoverageReport(
                 checkedAt: ISO8601DateFormatter().string(from: Date()), gaps: gaps))

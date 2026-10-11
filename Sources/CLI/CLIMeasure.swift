@@ -62,8 +62,8 @@ extension CLIHandler {
         st.phase = "copying"; st.scanFinished = true
         state.status = st
         report("copia (totale noto)")
-        st.phase = "finalizing"
-        st.currentFile = "Salvo i commit non pubblicati e i database…"
+        st.beginFinalizationStep("Salvo i commit: repository 123 di 456",
+                                 at: Date().addingTimeInterval(-125))
         state.status = st
         report("verifica finale (nessun conto alla rovescia)")
         let finish = Date()

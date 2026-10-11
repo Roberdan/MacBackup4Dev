@@ -106,6 +106,19 @@ final class BackupEngineTests {
         try expect(state.backupDetail.contains("Avviato \(ProtectionSummary.dateLabel(start))"), "start is named as start")
         try expect(state.backupDetail.contains("Ancora in corso"), "activity is explicit")
         status.phase = "finalizing"
+        status.beginFinalizationStep("Salvo il database 1 di 2", at: finish)
+        try expectEqual(status.currentFile, "Salvo il database 1 di 2", "actual step is displayed")
+        try expectEqual(status.finalizationStepDate, finish, "step timer uses actual start")
+        try expectNil(status.progressFraction, "finalization has no invented percentage")
+        let roundTrip = try JSONDecoder().decode(BackupStatusFile.self, from: JSONEncoder().encode(status))
+        try expectEqual(roundTrip.finalizationStepDate, finish, "step timestamp survives status polling")
+        var dbProgress: [(Int, Int)] = []
+        _ = DatabaseDumps.captureAll(config: DatabaseConfig(sqlite: ["/nonexistent-mb4d-test.sqlite"]),
+                                    home: "/nonexistent-mb4d-test-home",
+                                    into: URL(fileURLWithPath: "/nonexistent-mb4d-test-snapshot"),
+                                    onProgress: { dbProgress.append(($0, $1)) })
+        try expectEqual(dbProgress.map { $0.0 }, [1], "database step reports actual index")
+        try expectEqual(dbProgress.map { $0.1 }, [1], "database step reports configured total")
         state.status = status
         try expectEqual(state.backupHeadline, "Backup: fase finale", "finalization is distinct from copying")
         try expect(state.backupDetail.contains("Non scollegare il disco"), "finalization is not safe completion")
@@ -113,6 +126,7 @@ final class BackupEngineTests {
 
         state.appState = .idle
         status.state = "idle"; status.lastResult = "complete"
+        try expectNil(status.finalizationStepDate, "terminal metadata cannot keep the activity timer running")
         status.lastSnapshot = "snapshot"; status.lastCompleteAt = iso.string(from: finish)
         state.status = status
         try expectEqual(state.backupHeadline, "Backup completato", "idle and manifest complete")
