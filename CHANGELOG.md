@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.1.12] - 2026-10-11
+
+### Fixed
+- The encrypted volume now closes with `diskutil eject` on its own image device
+  (`hdiutil detach` is deprecated). When macOS refuses, the message names the process
+  that refused, such as Microsoft Defender (dlp_agent), instead of "Nessun processo
+  identificato". Lsof cannot see processes of other users. Nothing is forced.
+- After a refused eject the app no longer reopens the volume you just asked to close.
+- A backup refuses to start when the encrypted volume is still mounted but its physical
+  disk is gone (pulled out after a refused eject): nothing is written and no old snapshot
+  is pruned. Backup contents, restore and force policies are unchanged.
+
 ## [4.1.11] - 2026-10-11
 
 ### Fixed
