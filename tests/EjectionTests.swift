@@ -228,6 +228,16 @@ struct EjectionTests {
         let closed = EncryptedStore.closeReporting(store, runCommand: { _, _, _ in Shell.Result(status: 0, stdout: "", stderr: "") },
                                                    isMounted: { _ in true }, imageDevice: { _ in "/dev/disk12" })
         try expectEqual(closed, .closed, "A successful eject closes")
+        var unmounted: [[String]] = []
+        let detached = EncryptedStore.closeReporting(store, runCommand: { executable, args, _ in
+            unmounted.append([executable] + args); return Shell.Result(status: 0, stdout: "", stderr: "")
+        }, isMounted: { _ in false }, imageDevice: { _ in nil }, attachedDevice: { _ in "/dev/disk12" })
+        try expectEqual(detached, .closed, "Attached but not mounted: detached")
+        try expectEqual(unmounted, [["/usr/sbin/diskutil", "eject", "/dev/disk12"]],
+                        "An attached, unmounted image is detached so it cannot keep the disk busy")
+        let nothing = EncryptedStore.closeReporting(store, runCommand: { _, _, _ in fatalError("Nothing to run") },
+                                                    isMounted: { _ in false }, attachedDevice: { _ in nil })
+        try expectEqual(nothing, .closed, "Neither mounted nor attached: already closed")
     }
 
     func test_imageDeviceNeedsExactlyOneMatchingImage() throws {
@@ -265,7 +275,7 @@ struct EjectionTests {
                                      processesUsing: { _ in "" }, isMounted: { _ in true }, progress: { _ in })
         guard case .failed(let reason) = result else { throw TestFailure.failed("Refusal must fail") }
         try expect(reason.contains("macOS dice che lo sta usando Microsoft Defender (dlp_agent, PID 14647)."), "The refusing process is named")
-        try expect(reason.contains("spegni il Mac") && reason.contains("IT"), "Defender's DLP hold says what to do")
+        try expect(reason.contains("spegni il Mac"), "Defender's DLP hold says what to do")
         try expect(!reason.contains("/Applications/"), "No raw system paths when the process is named")
         try expect(!reason.contains("Nessun processo identificato"), "No contradiction with the named process")
         try expect(reason.contains("Non scollegare il disco"), "Still unsafe to unplug")
@@ -285,5 +295,65 @@ struct EjectionTests {
         state.ejection = EjectionFeedback(disk: disk, phase: .closingStore)
         state.reconcileEjection(diskMounted: false)
         try expect(state.ejection?.phase == .closingStore, "A running ejection is never dropped")
+    }
+
+    /// Defender DLP holds every written external volume and never lets go (2026-10-11).
+    /// Force only for it alone, never during a backup, after flushing.
+    func test_defenderHoldIsForcedOnlyWhenSafe() throws {
+        let dlp = "Unmount was dissented by PID 14647 (/Applications/Microsoft Defender.app/Contents/MacOS/dlp_agent.app/Contents/MacOS/dlp_agent)"
+        try expectEqual(DiskEjection.dissentingExecutable(in: dlp), "dlp_agent", "executable read from macOS's own message")
+        try expectNil(DiskEjection.dissentingExecutable(in: "Resource busy"), "no dissent, nothing named")
+        func attempt(dissent: String, holders: String, running: Bool) -> (EjectionPhase, [String]) {
+            var calls: [String] = []
+            var open = true
+            let outcome = DiskEjection.run(
+                disk: disk, store: store,
+                closeStore: { _, force in
+                    calls.append(force ? "force-close" : "close")
+                    if force { open = false; return .closed }
+                    return .failed("Unmount of disk12 failed\n" + dissent)
+                },
+                isStoreOpen: { _ in open },
+                diskutil: { calls.append($0.joined(separator: " ")); return success },
+                processesUsing: { _ in holders }, isMounted: { _ in false },
+                backupRunning: { _ in running }, flush: { calls.append("flush") }, progress: { _ in })
+            return (outcome, calls)
+        }
+        let (ok, calls) = attempt(dissent: dlp, holders: "", running: false)
+        try expect(ok == .succeeded, "Defender alone, idle: closed and ejected")
+        try expectEqual(calls, ["close", "flush", "close", "force-close", "eject \(disk.path)"],
+                        "flush and a normal retry come before forcing")
+        let (busy, busyCalls) = attempt(dissent: dlp, holders: "", running: true)
+        try expect(busy != .succeeded && !busyCalls.contains("force-close"), "never forced during a backup")
+        let (other, otherCalls) = attempt(dissent: dlp, holders: "Terminal", running: false)
+        try expect(other != .succeeded && !otherCalls.contains("force-close"), "another visible holder: never forced")
+        let (prog, progCalls) = attempt(dissent: "Unmount was dissented by PID 77 (/usr/sbin/someprog)", holders: "", running: false)
+        try expect(prog != .succeeded && !progCalls.contains("force-close"), "any other program: never forced")
+        let antivirus = "Unmount was dissented by PID 14597 (/Applications/Microsoft Defender.app/Contents/MacOS/wdavdaemon_enterprise.app/Contents/MacOS/wdavdaemon_enterprise)"
+        let (av, _) = attempt(dissent: antivirus, holders: "", running: false)
+        try expect(av == .succeeded, "Defender's antivirus daemon (seen naming itself instead of dlp_agent) is Defender too")
+
+        var diskCalls: [String] = []
+        var first = true
+        let physical = DiskEjection.run(
+            disk: disk, store: nil,
+            diskutil: { args in
+                diskCalls.append(args.joined(separator: " "))
+                if first { first = false; return Shell.Result(status: 1, stdout: dlp, stderr: "") }
+                return success
+            },
+            processesUsing: { _ in "" }, isMounted: { _ in false },
+            backupRunning: { _ in false }, flush: { diskCalls.append("flush") }, progress: { _ in })
+        try expect(physical == .succeeded, "Defender alone on the disk: unmounted")
+        try expectEqual(diskCalls, ["eject \(disk.path)", "flush", "unmount force \(disk.path)"], "flush before force on the disk too")
+        try expect(DiskEjection.backupLockIsLive(nil), "no store: destination unknown, treated as running (never forced)")
+        var quitCalls: [String] = []
+        let quit = DiskEjection.run(disk: disk, store: store,
+                                    closeStore: { _, _ in quitCalls.append("close"); return .closed },
+                                    isStoreOpen: { _ in false },
+                                    diskutil: { _ in fatalError("Quitting never ejects the physical disk") },
+                                    processesUsing: { _ in "" }, backupRunning: { _ in false }, flush: {},
+                                    storeOnly: true, progress: { _ in })
+        try expect(quit == .succeeded && quitCalls == ["close"], "Esci closes only the encrypted volume")
     }
 }
