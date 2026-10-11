@@ -106,6 +106,7 @@ final class AppUIState: ObservableObject {
         if appState == .running {
             return status?.phase == "finalizing" ? "Backup: fase finale" : "Backup in corso"
         }
+        if status?.state == "cancelled" { return "Backup interrotto" }
         return protection?.level == .protected ? "Backup completato" : (protection?.headline ?? "Nessun backup")
     }
 
@@ -114,6 +115,9 @@ final class AppUIState: ObservableObject {
             let start = status.flatMap { ISO8601DateFormatter().date(from: $0.startedAt) }
                 .map { "Avviato \(ProtectionSummary.dateLabel($0)). " } ?? ""
             return start + "Ancora in corso. Non scollegare il disco."
+        }
+        if status?.state == "cancelled" {
+            return "L'ultimo tentativo è stato interrotto. Nessun backup in corso."
         }
         guard let protection, protection.level == .protected else { return protection?.detail ?? "" }
         var finished = protection.lastCompleteFinishedDate

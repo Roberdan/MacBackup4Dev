@@ -118,6 +118,12 @@ final class BackupEngineTests {
         try expectEqual(state.backupHeadline, "Backup completato", "idle and manifest complete")
         try expect(state.backupDetail.contains("Terminato \(ProtectionSummary.dateLabel(finish))"), "matching operation uses actual finish")
         try expect(state.backupDetail.contains("Nessun backup in corso"), "idle is explicit")
+        status.state = "cancelled"
+        state.status = status
+        try expectEqual(state.backupHeadline, "Backup interrotto", "previous protection cannot hide cancellation")
+        try expect(state.backupDetail.contains("ultimo tentativo è stato interrotto"), "retained successful history is not this attempt")
+        try expect(!state.backupDetail.contains("Terminato"), "cancelled attempt never claims completion")
+        status.state = "idle"
         status.lastSnapshot = "another-snapshot"
         state.status = status
         let manifestFinish = finish.addingTimeInterval(-180)
