@@ -111,6 +111,12 @@ enum BackupEngine {
         // Encrypted store: open it first (password from the Keychain) when its disk is there.
         try EncryptedStore.ensureOpen(config)
         guard isVolumeReallyMounted(destPath) else { throw BackupError.volumeNotMounted(destPath) }
+        // An encrypted store can stay mounted after its disk is gone (scar 2026-10-11: the
+        // unmount was refused, then the cable was pulled). Never write into or prune it.
+        if let setup = config.encryption.setup,
+           !(isVolumeReallyMounted(config.diskURL.path) && FileManager.default.fileExists(atPath: setup.container)) {
+            throw BackupError.volumeNotMounted(config.diskURL.path)
+        }
         // Security warning if backup disk is not encrypted
         if !DiskDiagnostics.checkEncryption(volume: destPath) {
             Log.warn("Backup disk is NOT encrypted -- sensitive data (SSH keys, tokens) at risk")

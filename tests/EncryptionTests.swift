@@ -98,6 +98,24 @@ struct EncryptionTests {
                         "the menu names and ejects the physical disk, not the store")
     }
 
+    /// Scar 2026-10-11: the store stayed mounted after its disk was pulled. A backup must
+    /// refuse before writing or pruning anything.
+    func test_orphanedStoreIsNeverWritten() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        try safety.write("cfg", to: box.home + "/.zshrc")
+        let old = URL(fileURLWithPath: box.dest).appendingPathComponent("2026-10-01_000000")
+        try safety.write("old", to: old.path + "/.zshrc")
+        var cfg = safety.config(box, sources: [".zshrc"])
+        cfg.encryption = EncryptionConfig(container: "/Volumes/MB4DGoneDisk-\(UUID().uuidString)/\(EncryptedStore.imageName)",
+                                          volume: "MB4DOrphan")
+        do { _ = try safety.runEngine(cfg, box); try fail("an orphaned store must be refused") }
+        catch BackupError.volumeNotMounted(let path) {
+            try expectEqual(path, cfg.diskURL.path, "names the missing physical disk")
+        }
+        let left = try FileManager.default.contentsOfDirectory(atPath: box.dest)
+        try expectEqual(left, ["2026-10-01_000000"], "nothing written, nothing pruned: \(left)")
+    }
+
     func test_keychainRoundTripAndEnsureOpen() throws {
         // Touches the login Keychain (a throwaway item, removed at the end): skipped on CI.
         guard ProcessInfo.processInfo.environment["CI"] == nil, !EncryptedStore.keychainLocked else { return }

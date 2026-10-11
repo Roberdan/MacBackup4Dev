@@ -159,6 +159,7 @@ struct TestRunner {
             ("Encryption.isolatedState", encryption.test_stateDirectoryIsolatesLocksAndMarkers),
             ("Encryption.storeBasics", encryption.test_storeEncryptsKeepsHardLinksAndRefusesWrongPassword),
             ("Encryption.realBackup", encryption.test_realBackupIntoTheEncryptedStore),
+            ("Encryption.orphanRefused", encryption.test_orphanedStoreIsNeverWritten),
             ("Encryption.keychainAndEnsureOpen", encryption.test_keychainRoundTripAndEnsureOpen),
             ("Encryption.configSection", encryption.test_configKeepsTheEncryptionSection),
             ("Encryption.existingStoreAdopted", encryption.test_existingStoreIsAdoptedNotRecreated),
