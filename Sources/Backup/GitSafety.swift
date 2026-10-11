@@ -245,7 +245,8 @@ enum GitSafety {
     }
 
     static func captureAll(sources: [String], excludeFilter: ExcludeFilter, home: String,
-                           into snapshot: URL, previousSnapshot: URL? = nil) -> [GitRepoRecord] {
+                           into snapshot: URL, previousSnapshot: URL? = nil,
+                           onProgress: (_ index: Int, _ total: Int) -> Void = { _, _ in }) -> [GitRepoRecord] {
         let dir = snapshot.appendingPathComponent(SnapshotManifest.directoryName)
             .appendingPathComponent(directoryName)
         let prevDir = previousSnapshot?.appendingPathComponent(SnapshotManifest.directoryName)
@@ -254,7 +255,9 @@ enum GitSafety {
         for r in previousSnapshot.flatMap({ SnapshotManifest.read(from: $0) })?.git ?? [] {
             prevRecords[r.relativePath] = r
         }
-        return discoverRepositories(sources: sources, excludeFilter: excludeFilter, home: home).map { repo in
+        let repositories = discoverRepositories(sources: sources, excludeFilter: excludeFilter, home: home)
+        return repositories.enumerated().map { index, repo in
+            onProgress(index + 1, repositories.count)
             let realHome = FileScanner.realPath(home), realRepo = FileScanner.realPath(repo.path)
             let rel = realRepo.hasPrefix(realHome + "/") ? String(realRepo.dropFirst(realHome.count + 1)) : realRepo
             let previous = prevDir.flatMap { d in prevRecords[rel].map { ($0, d) } }

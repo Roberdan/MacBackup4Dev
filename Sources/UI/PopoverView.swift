@@ -186,6 +186,12 @@ struct PopoverView: View {
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundColor(Look.text)
                     .monospacedDigit()
+            } else if state.isRunning {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.large)
+                    .tint(levelColor)
+                    .accessibilityLabel(heroHeadline)
             } else {
                 Image(systemName: ringSymbol)
                     .font(.system(size: 24, weight: .semibold))
@@ -228,6 +234,14 @@ struct PopoverView: View {
                     if !s.currentFile.isEmpty {
                         Text(s.currentFile).font(.system(size: 10)).foregroundColor(Look.tertiaryText)
                             .lineLimit(1).truncationMode(.middle)
+                    }
+                    if let started = s.finalizationStepDate {
+                        HStack(spacing: 4) {
+                            Text("In questo passaggio da")
+                            Text(started, style: .timer).monospacedDigit()
+                        }
+                        .font(.system(size: 10))
+                        .foregroundColor(Look.secondaryText)
                     }
                 }
             } else if let p = state.protection, p.level == .protected, state.appState == .idle {

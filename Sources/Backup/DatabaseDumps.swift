@@ -38,14 +38,18 @@ enum DatabaseDumps {
         return Shell.find(candidates)
     }
 
-    static func captureAll(config: DatabaseConfig, home: String, into snapshot: URL) -> [DatabaseRecord] {
+    static func captureAll(config: DatabaseConfig, home: String, into snapshot: URL,
+                           onProgress: (_ index: Int, _ total: Int) -> Void = { _, _ in }) -> [DatabaseRecord] {
         let root = snapshot.appendingPathComponent(SnapshotManifest.directoryName)
             .appendingPathComponent(directoryName)
         var records: [DatabaseRecord] = []
+        let total = config.sqlite.count + config.postgres.count
         for path in config.sqlite {
+            onProgress(records.count + 1, total)
             records.append(captureSQLite(path: path, home: home, root: root, snapshot: snapshot))
         }
         for name in config.postgres {
+            onProgress(records.count + 1, total)
             records.append(capturePostgres(database: name, root: root, snapshot: snapshot))
         }
         return records

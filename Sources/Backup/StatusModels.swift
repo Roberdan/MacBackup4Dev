@@ -20,6 +20,20 @@ struct BackupStatusFile: Codable {
     var incompleteReasons: [String]?
     var lastSnapshot: String?
     var scanFinished: Bool?
+    var finalizationStepStartedAt: String?
+
+    var finalizationStepDate: Date? {
+        guard state == "running", phase == "finalizing",
+              let finalizationStepStartedAt else { return nil }
+        return ISO8601DateFormatter().date(from: finalizationStepStartedAt)
+    }
+
+    mutating func beginFinalizationStep(_ message: String, at date: Date) {
+        phase = "finalizing"
+        etaSecs = 0
+        currentFile = message
+        finalizationStepStartedAt = ISO8601DateFormatter().string(from: date)
+    }
 
     var progressFraction: Double? {
         guard state == "running", phase == "copying", scanFinished == true, filesTotal > 0 else { return nil }
@@ -69,6 +83,7 @@ struct BackupStatusFile: Codable {
         case incompleteReasons = "incomplete_reasons"
         case lastSnapshot = "last_snapshot"
         case scanFinished = "scan_finished"
+        case finalizationStepStartedAt = "finalization_step_started_at"
     }
 
     init(state: String = "idle", phase: String = "",

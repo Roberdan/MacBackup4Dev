@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.1.11] - 2026-10-11
+
+### Fixed
+- Active backup phases without a known percentage use a native activity indicator
+  instead of an empty, static ring. This signals activity, not measured completion.
+- Finalization reports repository and database counts, snapshot completion,
+  environment capture and coverage checks as they actually begin. Each step shows
+  its elapsed time, not a guessed countdown. Terminal states stop showing the timer.
+- Backup contents, restore safety and disk-ejection policies are unchanged.
+
 ## [4.1.10] - 2026-10-11
 
 ### Fixed
