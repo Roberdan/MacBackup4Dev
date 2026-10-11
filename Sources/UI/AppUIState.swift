@@ -34,6 +34,9 @@ final class AppUIState: ObservableObject {
 
     func reconcileEjection(diskMounted: Bool) {
         if ejection?.phase == .succeeded && diskMounted { ejection = nil }
+        // A refusal is stale once the disk is gone (ejected another way): drop it, so the
+        // encrypted store opens again normally when the disk comes back.
+        if case .failed = ejection?.phase, !diskMounted { ejection = nil }
     }
 
     /// Non-nil when a newer version is available on GitHub.

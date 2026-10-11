@@ -176,7 +176,7 @@ struct EjectionTests {
             arguments.append(args)
             timeouts.append(timeout)
             return Shell.Result(status: 16, stdout: "", stderr: "hdiutil: detach failed - Resource busy\n")
-        }, isMounted: { _ in true })
+        }, isMounted: { _ in true }, imageDevice: { _ in nil })
         try expectEqual(commands, ["/usr/bin/hdiutil"], "A normal failure must not try forced unmount")
         try expectEqual(arguments, [["detach", store.mountPoint]], "Normal close does not force")
         try expectEqual(timeouts, [120], "The existing close deadline is preserved")
@@ -188,7 +188,7 @@ struct EjectionTests {
         let result = EncryptedStore.closeReporting(store, force: true, runCommand: { executable, _, _ in
             commands.append(executable)
             return Shell.Result(status: 1, stdout: "", stderr: executable == "/usr/bin/hdiutil" ? "First failure" : "Unmount denied")
-        }, isMounted: { _ in true })
+        }, isMounted: { _ in true }, imageDevice: { _ in "/dev/disk12" })
         try expectEqual(commands, ["/usr/bin/hdiutil", "/usr/sbin/diskutil"], "Existing explicit-force fallback is preserved")
         try expectEqual(result, .failed("Unmount denied"), "The last attempted command supplies the reason")
         let noReason = EncryptedStore.closeReporting(store, runCommand: { _, _, _ in
@@ -205,5 +205,79 @@ struct EjectionTests {
         guard case .failed(let detail) = longReason else { throw TestFailure.failed("The long failure must remain a failure") }
         try expectEqual(detail.count, 300, "Visible command errors are bounded")
         try expect(detail.hasSuffix("useful final reason"), "The final reason is not lost when bounding the output")
+    }
+
+    func test_normalCloseEjectsTheExactImageDevice() throws {
+        var calls: [[String]] = []
+        var timeouts: [TimeInterval] = []
+        let refusal = "Unmount of disk12 failed: at least one volume could not be unmounted\n"
+            + "Unmount was dissented by PID 14647 (/Applications/Microsoft Defender.app/Contents/MacOS/dlp_agent.app/Contents/MacOS/dlp_agent)"
+        let result = EncryptedStore.closeReporting(store, runCommand: { executable, args, timeout in
+            calls.append([executable] + args); timeouts.append(timeout)
+            return Shell.Result(status: 1, stdout: "", stderr: refusal)
+        }, isMounted: { _ in true }, imageDevice: { _ in "/dev/disk12" })
+        try expectEqual(calls, [["/usr/sbin/diskutil", "eject", "/dev/disk12"]], "Normal close ejects the image's own device, never forced")
+        try expectEqual(timeouts, [120], "Same close deadline")
+        guard case .failed(let reason) = result else { throw TestFailure.failed("A refusal is not a close") }
+        try expect(reason.contains("dissented by PID 14647"), "The system's dissent survives in the reason")
+        var forced: [[String]] = []
+        _ = EncryptedStore.closeReporting(store, force: true, runCommand: { executable, args, _ in
+            forced.append([executable] + args); return Shell.Result(status: 0, stdout: "", stderr: "")
+        }, isMounted: { _ in true }, imageDevice: { _ in "/dev/disk12" })
+        try expectEqual(forced, [["/usr/bin/hdiutil", "detach", "-force", store.mountPoint]], "The explicit force path is unchanged")
+        let closed = EncryptedStore.closeReporting(store, runCommand: { _, _, _ in Shell.Result(status: 0, stdout: "", stderr: "") },
+                                                   isMounted: { _ in true }, imageDevice: { _ in "/dev/disk12" })
+        try expectEqual(closed, .closed, "A successful eject closes")
+    }
+
+    func test_imageDeviceNeedsExactlyOneMatchingImage() throws {
+        func info(_ images: [[String: Any]]) -> Data {
+            (try? PropertyListSerialization.data(fromPropertyList: ["images": images], format: .xml, options: 0)) ?? Data()
+        }
+        func image(_ path: String, _ disk: Int, mount: String?) -> [String: Any] {
+            var leaf: [String: Any] = ["dev-entry": "/dev/disk\(disk + 1)s1"]
+            if let mount { leaf["mount-point"] = mount }
+            return ["image-path": path, "system-entities": [
+                ["dev-entry": "/dev/disk\(disk)", "content-hint": "GUID_partition_scheme"],
+                ["dev-entry": "/dev/disk\(disk)s1"], ["dev-entry": "/dev/disk\(disk + 1)"], leaf]]
+        }
+        let other = image("/tmp/other/\(EncryptedStore.imageName)", 14, mount: "/Volumes/MB4DTest-x")
+        let ours = image(store.container, 12, mount: store.mountPoint)
+        try expectEqual(EncryptedStore.imageDevice(fromHdiutilInfo: info([other, ours]), setup: store), "/dev/disk12",
+                        "The image's own whole device, not its APFS container nor another image")
+        try expectNil(EncryptedStore.imageDevice(fromHdiutilInfo: info([other]), setup: store), "Not attached: no device")
+        try expectNil(EncryptedStore.imageDevice(fromHdiutilInfo: info([image(store.container, 12, mount: "/Volumes/Else")]), setup: store),
+                      "Same file mounted elsewhere is not this store")
+        try expectNil(EncryptedStore.imageDevice(fromHdiutilInfo: info([ours, image(store.container, 16, mount: store.mountPoint)]), setup: store),
+                      "Ambiguous: no device")
+        try expectNil(EncryptedStore.imageDevice(fromHdiutilInfo: Data("not a plist".utf8), setup: store), "Unreadable: no device")
+    }
+
+    func test_dissenterIsNamedFromTheSystemMessage() throws {
+        let line = "Unmount was dissented by PID 14647 (/Applications/Microsoft Defender.app/Contents/MacOS/dlp_agent.app/Contents/MacOS/dlp_agent)"
+        try expectEqual(DiskEjection.dissenter(in: line), "Microsoft Defender (dlp_agent, PID 14647)", "App and executable named")
+        try expectEqual(DiskEjection.dissenter(in: "Unmount was dissented by PID 77 (/usr/sbin/someprog)"), "someprog (PID 77)", "Plain executable")
+        try expectEqual(DiskEjection.dissenter(in: "Unmount was dissented by PID 9"), "PID 9", "No path: only the PID")
+        try expectNil(DiskEjection.dissenter(in: "Resource busy"), "No dissent: nothing invented")
+        let result = DiskEjection.run(disk: disk, store: store,
+                                     closeStore: { _, _ in .failed(line) }, isStoreOpen: { _ in true },
+                                     diskutil: { _ in fatalError("Never eject while the store is open") },
+                                     processesUsing: { _ in "" }, isMounted: { _ in true }, progress: { _ in })
+        guard case .failed(let reason) = result else { throw TestFailure.failed("Refusal must fail") }
+        try expect(reason.contains("Lo sta usando: Microsoft Defender (dlp_agent, PID 14647)."), "The refusing process is named")
+        try expect(!reason.contains("Nessun processo identificato"), "No contradiction with the named process")
+        try expect(reason.contains("Non scollegare il disco"), "Still unsafe to unplug")
+    }
+
+    func test_failureIsDroppedOnlyWhenTheDiskIsGone() throws {
+        let state = AppUIState()
+        state.ejection = EjectionFeedback(disk: disk, phase: .failed("Occupato"))
+        state.reconcileEjection(diskMounted: true)
+        try expect(state.ejection != nil, "A refusal stays while the disk is there")
+        state.reconcileEjection(diskMounted: false)
+        try expect(state.ejection == nil, "Disk gone: the refusal is stale")
+        state.ejection = EjectionFeedback(disk: disk, phase: .closingStore)
+        state.reconcileEjection(diskMounted: false)
+        try expect(state.ejection?.phase == .closingStore, "A running ejection is never dropped")
     }
 }

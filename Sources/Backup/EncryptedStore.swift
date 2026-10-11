@@ -226,12 +226,22 @@ enum EncryptedStore {
     static func closeReporting(
         _ setup: Setup, force: Bool = false,
         runCommand: (String, [String], TimeInterval) -> Shell.Result = { Shell.run($0, $1, timeout: $2) },
-        isMounted: (Setup) -> Bool = { isOpen($0) }
+        isMounted: (Setup) -> Bool = { isOpen($0) },
+        imageDevice: (Setup) -> String? = { imageDevice($0) }
     ) -> CloseResult {
         guard isMounted(setup) else { return .closed }
-        // hdiutil detach: unmounts AND detaches the image (diskutil eject on the mount point
-        // left the image attached, 34 of them after the tests on 2026-10-07).
-        var r = runCommand("/usr/bin/hdiutil", force ? ["detach", "-force", setup.mountPoint] : ["detach", setup.mountPoint], 120)
+        // Normal close: `diskutil eject` on the image's own whole device (`man hdiutil`:
+        // detach is deprecated, its replacement is diskutil eject). On a refusal it names the
+        // process that keeps the volume busy ("dissented by PID …"), which hdiutil does not and
+        // lsof cannot see when that process belongs to another user (2026-10-11: Defender DLP).
+        // Never on the mount point: that leaves the image attached (34 of them, 2026-10-07).
+        // Device unknown → the previous hdiutil detach, which unmounts AND detaches.
+        var r: Shell.Result
+        if !force, let device = imageDevice(setup) {
+            r = runCommand("/usr/sbin/diskutil", ["eject", device], 120)
+        } else {
+            r = runCommand("/usr/bin/hdiutil", force ? ["detach", "-force", setup.mountPoint] : ["detach", setup.mountPoint], 120)
+        }
         if !r.ok && force {
             r = runCommand("/usr/sbin/diskutil", ["unmount", "force", setup.mountPoint], 60)
         }
@@ -239,6 +249,36 @@ enum EncryptedStore {
         if closed { try? FileManager.default.removeItem(atPath: openMarker(setup)) }   // closed by us: clean
         if closed { return .closed }
         return .failed(r.failureReason)
+    }
+
+    /// `/dev/diskN` of this store's attached image, read fresh from `hdiutil info -plist`
+    /// (device numbers change at every attach: never remembered).
+    static func imageDevice(_ setup: Setup) -> String? {
+        let r = Shell.run("/usr/bin/hdiutil", ["info", "-plist"], timeout: 30)
+        guard r.ok else { return nil }
+        return imageDevice(fromHdiutilInfo: Data(r.stdout.utf8), setup: setup)
+    }
+
+    /// Exactly one attached image must be this container AND mount this store's volume;
+    /// anything else (none, two, unreadable) → nil, and the caller keeps hdiutil detach.
+    /// hdiutil lists the image's own device first, before the APFS container it carries.
+    static func imageDevice(fromHdiutilInfo data: Data, setup: Setup) -> String? {
+        guard let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let images = info["images"] as? [[String: Any]] else { return nil }
+        func same(_ a: String, _ b: String) -> Bool {
+            URL(fileURLWithPath: a).resolvingSymlinksInPath().standardizedFileURL.path
+                == URL(fileURLWithPath: b).resolvingSymlinksInPath().standardizedFileURL.path
+        }
+        let matches = images.filter { image in
+            guard let path = image["image-path"] as? String, same(path, setup.container) else { return false }
+            let entities = image["system-entities"] as? [[String: Any]] ?? []
+            return entities.contains { ($0["mount-point"] as? String) == setup.mountPoint }
+        }
+        guard matches.count == 1, let entities = matches[0]["system-entities"] as? [[String: Any]] else { return nil }
+        return entities.lazy.compactMap { $0["dev-entry"] as? String }.first { device in
+            device.hasPrefix("/dev/disk") && device.dropFirst("/dev/disk".count).allSatisfy(\.isNumber)
+                && device.count > "/dev/disk".count
+        }
     }
 
     // MARK: - Keychain (through /usr/bin/security, see the type comment)

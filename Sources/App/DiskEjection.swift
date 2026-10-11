@@ -61,7 +61,8 @@ enum DiskEjection {
                     let reason: String
                     if case .failed(let error) = result { reason = error }
                     else { reason = "Il volume risulta ancora montato." }
-                    let owners = holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders)."
+                    let owners = dissenter(in: reason).map { "Lo sta usando: \($0)." }
+                        ?? (holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders).")
                     return .failed("Non riesco a chiudere il volume cifrato.\n\(reason)\n\(owners) Non scollegare il disco.")
                 }
             }
@@ -77,8 +78,27 @@ enum DiskEjection {
         let reason = result.ok
             ? "macOS ha terminato il comando, ma il volume risulta ancora montato."
             : result.failureReason
-        let owners = holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders)."
+        let owners = dissenter(in: reason).map { "Lo sta usando: \($0)." }
+            ?? (holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders).")
         return .failed("Non riesco a espellere \(disk.lastPathComponent).\n\(reason)\n\(owners) Non scollegare il disco.")
+    }
+
+    /// The process macOS names when it refuses an unmount, from diskutil's
+    /// "… dissented by PID 14647 (/Applications/Microsoft Defender.app/…/dlp_agent)" →
+    /// "Microsoft Defender (dlp_agent, PID 14647)". Only what the system said, never a guess:
+    /// lsof run as the user does not see processes of other users (security agents).
+    static func dissenter(in text: String) -> String? {
+        guard let match = text.range(of: #"dissented by PID [0-9]+( \([^)\n]*\))?"#, options: .regularExpression) else { return nil }
+        let found = text[match]
+        let pid = found.dropFirst("dissented by PID ".count).prefix { $0.isNumber }
+        guard let open = found.firstIndex(of: "(") else { return "PID \(pid)" }
+        let path = String(found[found.index(after: open)...].dropLast())
+        let parts = path.split(separator: "/").map(String.init)
+        guard let executable = parts.last, !executable.isEmpty else { return "PID \(pid)" }
+        if let app = parts.first(where: { $0.hasSuffix(".app") }).map({ String($0.dropLast(4)) }), app != executable {
+            return "\(app) (\(executable), PID \(pid))"
+        }
+        return "\(executable) (PID \(pid))"
     }
 
     static func runDiskutil(

@@ -60,7 +60,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// can take a while), never more than one attempt at a time, and after a failure not
     /// again for 5 minutes (review 4.1 M1).
     private func openStoreInBackground() {
-        guard !uiState.isEjecting,
+        // Not while an ejection result is on screen: after a refused eject the poll used to
+        // reattach the store the user had just asked to close (2026-10-11).
+        guard uiState.ejection == nil,
               let config, let setup = config.encryption.setup, !storeOpening, Date() >= storeRetryAfter,
               !EncryptedStore.isOpen(setup), FileManager.default.fileExists(atPath: setup.container) else { return }
         storeOpening = true
