@@ -56,14 +56,32 @@ extension CLIHandler {
         var st = BackupStatusFile(); st.state = "running"; st.phase = "scanning"
         st.filesDone = 151_000; st.filesTotal = 156_000; st.scanFinished = false
         st.currentFile = "GitHub/x/y.json"; st.etaSecs = 90
+        st.startedAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-600))
         state.status = st
         report("scansione (totale sconosciuto)")
         st.phase = "copying"; st.scanFinished = true
         state.status = st
         report("copia (totale noto)")
         st.phase = "finalizing"
+        st.currentFile = "Salvo i commit non pubblicati e i database…"
         state.status = st
         report("verifica finale (nessun conto alla rovescia)")
+        let finish = Date()
+        state.protection = ProtectionSummary(
+            level: .protected, headline: "Protetto", detail: "", lastComplete: "demo-snapshot",
+            lastCompleteDate: finish.addingTimeInterval(-600), latestIsIncomplete: false,
+            latestReasons: [], looksLikeNewMac: false, days: Array(repeating: .complete, count: 14),
+            reposWithSavedCommits: 6, databasesSaved: 3, filesInLastComplete: 156_000,
+            lastCompleteFinishedDate: finish)
+        state.appState = .idle
+        st.state = "idle"; st.lastResult = "complete"; st.lastSnapshot = "demo-snapshot"
+        st.lastCompleteAt = ISO8601DateFormatter().string(from: finish)
+        state.status = st
+        report("backup terminato (non in corso)")
+        state.protection?.lastCompleteFinishedDate = nil
+        state.status = nil
+        report("backup vecchio (ora finale sconosciuta)")
+        state.protection = nil
         state.status = nil
         state.appState = .idle
         let disk = Self.menuDemoConfig.diskURL

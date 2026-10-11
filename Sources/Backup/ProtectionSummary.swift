@@ -19,6 +19,7 @@ struct ProtectionSummary: Equatable {
     var reposWithSavedCommits: Int
     var databasesSaved: Int
     var filesInLastComplete: Int64? = nil
+    var lastCompleteFinishedDate: Date? = nil
 
     static func build(destination: URL, now: Date = Date(), staleAfter: TimeInterval = 36 * 3600) -> ProtectionSummary {
         let all = SnapshotCatalog.list(at: destination)
@@ -45,6 +46,9 @@ struct ProtectionSummary: Equatable {
                                   reposWithSavedCommits: complete?.manifest?.git.filter { $0.bundle != nil }.count ?? 0,
                                   databasesSaved: complete?.manifest?.databases.filter { $0.file != nil }.count ?? 0,
                                   filesInLastComplete: complete?.manifest?.filesProcessed)
+        if let finishedAt = complete?.manifest?.finishedAt {
+            s.lastCompleteFinishedDate = ISO8601DateFormatter().date(from: finishedAt)
+        }
 
         if s.looksLikeNewMac {
             s.level = .unprotected

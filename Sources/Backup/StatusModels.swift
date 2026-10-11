@@ -27,6 +27,7 @@ struct BackupStatusFile: Codable {
     }
 
     var progressDetail: String {
+        guard state == "running" else { return "" }
         if phase == "finalizing" { return "Verifica finale" }
         guard scanFinished == true else { return "Totale in calcolo" }
         if etaSecs > 0 { return "Copia: circa \(Fmt.formatDuration(Double(etaSecs)))" }

@@ -57,6 +57,8 @@ struct TestRunner {
         let recovery = RecoveryCopyTests()
 
         let suites: [(String, TestClosure)] = [
+            ("Progress.terminalIsIdle", backup.test_terminalStatusNeverClaimsWorkInProgress),
+            ("Progress.activityAndFinish", backup.test_backupActivityAndFinishTimeAreExplicit),
             ("Recovery.backupDoesNotCopyApp", recovery.test_backupFinishesWithoutRefreshingPhysicalDisk),
             ("Recovery.concurrentCopySkipped", recovery.test_competingCopyDoesNotWaitOrTouchStaging),
             ("Recovery.timeoutKeepsOldApp", recovery.test_timeoutPreservesExistingRecoveryApp),

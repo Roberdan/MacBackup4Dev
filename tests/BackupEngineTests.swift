@@ -75,4 +75,64 @@ final class BackupEngineTests {
         try expectNil(state.progressFraction, "cancellation has no completion estimate")
         try expectEqual(state.progressDetail, "Chiusura in corso", "stop remains distinct")
     }
+
+    func test_terminalStatusNeverClaimsWorkInProgress() throws {
+        let state = AppUIState()
+        state.appState = .idle
+        for terminal in ["idle", "cancelled", "error"] {
+            let status = BackupStatusFile(state: terminal, phase: "finalizing", etaSecs: 42)
+            state.status = status
+            try expectEqual(status.progressDetail, "", "terminal metadata is not an active phase")
+            try expectEqual(state.progressDetail, "", "idle UI never inherits an old active phase")
+            try expectNil(state.progressFraction, "idle UI has no running percentage")
+        }
+    }
+
+    func test_backupActivityAndFinishTimeAreExplicit() throws {
+        let start = Date(timeIntervalSince1970: 1_791_705_600)
+        let finish = start.addingTimeInterval(699)
+        let iso = ISO8601DateFormatter()
+        let state = AppUIState()
+        state.protection = ProtectionSummary(
+            level: .protected, headline: "Protetto", detail: "", lastComplete: "snapshot",
+            lastCompleteDate: start, latestIsIncomplete: false, latestReasons: [],
+            looksLikeNewMac: false, days: [], reposWithSavedCommits: 0, databasesSaved: 0,
+            lastCompleteFinishedDate: finish.addingTimeInterval(-180))
+        var status = BackupStatusFile(state: "running", phase: "scanning",
+                                      startedAt: iso.string(from: start))
+        state.appState = .running
+        state.status = status
+        try expectEqual(state.backupHeadline, "Backup in corso", "discovery is active")
+        try expect(state.backupDetail.contains("Avviato \(ProtectionSummary.dateLabel(start))"), "start is named as start")
+        try expect(state.backupDetail.contains("Ancora in corso"), "activity is explicit")
+        status.phase = "finalizing"
+        state.status = status
+        try expectEqual(state.backupHeadline, "Backup: fase finale", "finalization is distinct from copying")
+        try expect(state.backupDetail.contains("Non scollegare il disco"), "finalization is not safe completion")
+        try expect(!state.backupDetail.contains("Terminato"), "no premature completion")
+
+        state.appState = .idle
+        status.state = "idle"; status.lastResult = "complete"
+        status.lastSnapshot = "snapshot"; status.lastCompleteAt = iso.string(from: finish)
+        state.status = status
+        try expectEqual(state.backupHeadline, "Backup completato", "idle and manifest complete")
+        try expect(state.backupDetail.contains("Terminato \(ProtectionSummary.dateLabel(finish))"), "matching operation uses actual finish")
+        try expect(state.backupDetail.contains("Nessun backup in corso"), "idle is explicit")
+        status.state = "cancelled"
+        state.status = status
+        try expectEqual(state.backupHeadline, "Backup interrotto", "previous protection cannot hide cancellation")
+        try expect(state.backupDetail.contains("ultimo tentativo è stato interrotto"), "retained successful history is not this attempt")
+        try expect(!state.backupDetail.contains("Terminato"), "cancelled attempt never claims completion")
+        status.state = "idle"
+        status.lastSnapshot = "another-snapshot"
+        state.status = status
+        let manifestFinish = finish.addingTimeInterval(-180)
+        try expect(state.backupDetail.contains("Terminato \(ProtectionSummary.dateLabel(manifestFinish))"), "unrelated status cannot override manifest")
+        state.protection?.lastCompleteFinishedDate = nil
+        try expect(state.backupDetail.contains("Avviato \(ProtectionSummary.dateLabel(start))"), "legacy fallback never calls start the finish")
+        try expect(!state.backupDetail.contains("Terminato"), "unknown finish remains unknown")
+        state.protection?.level = .attention
+        state.protection?.headline = "Ultimo backup incompleto"
+        try expectEqual(state.backupHeadline, "Ultimo backup incompleto", "attention is not changed into success")
+    }
 }

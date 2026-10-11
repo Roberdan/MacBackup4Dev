@@ -98,7 +98,38 @@ final class AppUIState: ObservableObject {
     var progressDetail: String {
         if appState == .restoring { return "Ripristino dei file" }
         if appState == .stopping { return "Chiusura in corso" }
+        guard appState == .running else { return "" }
         return status?.progressDetail ?? ""
+    }
+
+    var backupHeadline: String {
+        if appState == .running {
+            return status?.phase == "finalizing" ? "Backup: fase finale" : "Backup in corso"
+        }
+        if status?.state == "cancelled" { return "Backup interrotto" }
+        return protection?.level == .protected ? "Backup completato" : (protection?.headline ?? "Nessun backup")
+    }
+
+    var backupDetail: String {
+        if appState == .running {
+            let start = status.flatMap { ISO8601DateFormatter().date(from: $0.startedAt) }
+                .map { "Avviato \(ProtectionSummary.dateLabel($0)). " } ?? ""
+            return start + "Ancora in corso. Non scollegare il disco."
+        }
+        if status?.state == "cancelled" {
+            return "L'ultimo tentativo è stato interrotto. Nessun backup in corso."
+        }
+        guard let protection, protection.level == .protected else { return protection?.detail ?? "" }
+        var finished = protection.lastCompleteFinishedDate
+        if let status, status.state == "idle", status.lastResult == "complete",
+           let snapshot = protection.lastComplete, status.lastSnapshot == snapshot,
+           let date = status.lastCompleteAt.flatMap({ ISO8601DateFormatter().date(from: $0) }) {
+            finished = date
+        }
+        let date = finished.map { "Terminato \(ProtectionSummary.dateLabel($0))" }
+            ?? protection.lastCompleteDate.map { "Avviato \(ProtectionSummary.dateLabel($0))" }
+            ?? ""
+        return date.isEmpty ? "Nessun backup in corso." : "\(date). Nessun backup in corso."
     }
 
     // F-19: hasBackups and canUndo are now cached — no disk I/O on SwiftUI render
