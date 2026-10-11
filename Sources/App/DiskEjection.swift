@@ -61,9 +61,7 @@ enum DiskEjection {
                     let reason: String
                     if case .failed(let error) = result { reason = error }
                     else { reason = "Il volume risulta ancora montato." }
-                    let owners = dissenter(in: reason).map { "Lo sta usando: \($0)." }
-                        ?? (holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders).")
-                    return .failed("Non riesco a chiudere il volume cifrato.\n\(reason)\n\(owners) Non scollegare il disco.")
+                    return .failed("Non riesco a chiudere il volume cifrato.\n\(explain(reason, holders: holders))\nNon scollegare il disco.")
                 }
             }
         }
@@ -78,9 +76,23 @@ enum DiskEjection {
         let reason = result.ok
             ? "macOS ha terminato il comando, ma il volume risulta ancora montato."
             : result.failureReason
-        let owners = dissenter(in: reason).map { "Lo sta usando: \($0)." }
-            ?? (holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders).")
-        return .failed("Non riesco a espellere \(disk.lastPathComponent).\n\(reason)\n\(owners) Non scollegare il disco.")
+        return .failed("Non riesco a espellere \(disk.lastPathComponent).\n\(explain(reason, holders: holders))\nNon scollegare il disco.")
+    }
+
+    /// What the user reads after a refusal: the process macOS itself named (and, for
+    /// Defender's data-loss prevention, what to do), otherwise the raw system reason.
+    /// Measured 2026-10-11: dlp_agent keeps any external volume busy a few seconds after
+    /// files are written to it, on throwaway images too, and does not let go.
+    static func explain(_ reason: String, holders: String) -> String {
+        if let who = dissenter(in: reason) {
+            var text = "macOS dice che lo sta usando \(who)."
+            if who.hasPrefix("Microsoft Defender") {
+                text += " È la protezione dati aziendale (DLP): tiene occupati i dischi esterni su cui sono stati scritti file. "
+                    + "Non è un errore del backup. Per scollegare senza rischi spegni il Mac; per risolverlo serve l'IT."
+            }
+            return text
+        }
+        return reason + "\n" + (holders.isEmpty ? "Nessun processo identificato." : "Processi rilevati: \(holders).")
     }
 
     /// The process macOS names when it refuses an unmount, from diskutil's

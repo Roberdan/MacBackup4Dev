@@ -16,6 +16,9 @@ extension CLIHandler {
         state.cachedHasBackups = true
         state.cachedCanUndo = true
         state.scheduleLabel = "ogni 1h"
+        state.schedule = ScheduleStatus(installed: true, intervalMinutes: 60, dailyHour: nil,
+                                        slots: Array(stride(from: 0, to: 1440, by: 60)))
+        state.onBattery = true
         state.onRequestScheduleMenu = {}
         let window = NSWindow(contentRect: NSRect(x: 200, y: 600, width: 120, height: 40),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -52,6 +55,9 @@ extension CLIHandler {
             }
         }
         report("disco assente")
+        state.storeOpening = true
+        report("apertura backup cifrato")
+        state.storeOpening = false
         state.appState = .running
         var st = BackupStatusFile(); st.state = "running"; st.phase = "scanning"
         st.filesDone = 151_000; st.filesTotal = 156_000; st.scanFinished = false
@@ -107,6 +113,13 @@ extension CLIHandler {
             isStoreOpen: { _ in true }, diskutil: { _ in Shell.Result(status: 1, stdout: "", stderr: "") }, processesUsing: { _ in "Finder, Terminal" },
             progress: { _ in })
         report("chiusura fallita (motivo lungo)")
+        state.ejection?.phase = DiskEjection.run(
+            disk: disk, store: EncryptedStore.Setup(container: "/Volumes/Backup demo/demo.sparsebundle", volume: "Demo"),
+            closeStore: { _, _ in .failed("Unmount of disk12 failed: at least one volume could not be unmounted\n"
+                + "Unmount was dissented by PID 14647 (/Applications/Microsoft Defender.app/Contents/MacOS/dlp_agent.app/Contents/MacOS/dlp_agent)") },
+            isStoreOpen: { _ in true }, diskutil: { _ in Shell.Result(status: 1, stdout: "", stderr: "") }, processesUsing: { _ in "" },
+            progress: { _ in })
+        report("chiusura rifiutata da Defender")
         state.ejection?.phase = DiskEjection.run(
             disk: disk, store: nil,
             diskutil: { _ in Shell.Result(status: 1, stdout: "Volume could not be unmounted by process 12345", stderr: "") },

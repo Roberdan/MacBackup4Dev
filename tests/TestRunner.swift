@@ -130,6 +130,7 @@ struct TestRunner {
             ("Power.unknownBlocks", power.test_unknownBlocksScheduled),
             ("Power.plistPassesFlag", power.test_plistsPassScheduledFlag),
             ("Schedule.wallClockIntervals", power.test_intervalUsesWallClockCalendar),
+            ("Schedule.nextBackupInMenu", power.test_nextBackupIsExplainedInTheMenu),
             ("Schedule.customIntervalsPreserved", power.test_nonCalendarIntervalsArePreserved),
             ("Schedule.calendarMigration", power.test_calendarMigrationPreservesJob),
             ("Schedule.migrationLocksBackup", power.test_calendarMigrationSerializesWithBackup),

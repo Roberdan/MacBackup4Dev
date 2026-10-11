@@ -66,12 +66,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               let config, let setup = config.encryption.setup, !storeOpening, Date() >= storeRetryAfter,
               !EncryptedStore.isOpen(setup), FileManager.default.fileExists(atPath: setup.container) else { return }
         storeOpening = true
+        uiState.storeOpening = true
         DispatchQueue.global(qos: .utility).async {
             let failure: String?
             do { try EncryptedStore.ensureOpen(config); failure = nil }
             catch { failure = error.localizedDescription }
             DispatchQueue.main.async {
                 self.storeOpening = false
+                self.uiState.storeOpening = false
                 if let failure {
                     self.storeRetryAfter = Date().addingTimeInterval(300)
                     if self.lastStoreError != failure {
@@ -163,6 +165,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshScheduleLabel() {
         let s = ScheduleManager.scheduleStatus()
+        uiState.schedule = s
         if !s.installed {
             uiState.scheduleLabel = "Off"
         } else if let mins = s.intervalMinutes {
@@ -1120,6 +1123,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         uiState.status = statusManager.lastStatus
         uiState.config = config
+        uiState.onBattery = PowerGate.currentSource() != .ac
         // F-19: update cached disk-state values (disk I/O here, not in SwiftUI render)
         uiState.cachedHasBackups = config != nil && !RestoreEngine.findBackupSnapshots().isEmpty
         uiState.cachedCanUndo = RestoreEngine.hasPreRestoreBackup() || latestUndoDir() != nil

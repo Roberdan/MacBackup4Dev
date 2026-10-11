@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.1.13] - 2026-10-11
+
+### Added
+- The menu says when the next automatic backup starts ("Prossimo backup automatico:
+  oggi alle 16:00") and what it needs: wall power (it is skipped on battery) and the
+  disk connected. A switched-off schedule says so; an interval with no fixed clock time
+  is not given an invented one.
+
+### Fixed
+- While the encrypted volume is being opened and checked, the menu says so instead of
+  "Disco di backup non collegato".
+- When macOS names the program refusing an eject, the menu says it in plain words
+  instead of raw system text. For Microsoft Defender's data-loss prevention it explains
+  what to do (shut the Mac down to unplug safely, ask IT). Measured on throwaway images:
+  dlp_agent keeps any external volume busy a few seconds after files are written to it.
+- Long system errors are no longer cut in the middle of a word.
+
 ## [4.1.12] - 2026-10-11
 
 ### Fixed

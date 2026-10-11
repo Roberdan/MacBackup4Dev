@@ -264,9 +264,15 @@ struct EjectionTests {
                                      diskutil: { _ in fatalError("Never eject while the store is open") },
                                      processesUsing: { _ in "" }, isMounted: { _ in true }, progress: { _ in })
         guard case .failed(let reason) = result else { throw TestFailure.failed("Refusal must fail") }
-        try expect(reason.contains("Lo sta usando: Microsoft Defender (dlp_agent, PID 14647)."), "The refusing process is named")
+        try expect(reason.contains("macOS dice che lo sta usando Microsoft Defender (dlp_agent, PID 14647)."), "The refusing process is named")
+        try expect(reason.contains("spegni il Mac") && reason.contains("IT"), "Defender's DLP hold says what to do")
+        try expect(!reason.contains("/Applications/"), "No raw system paths when the process is named")
         try expect(!reason.contains("Nessun processo identificato"), "No contradiction with the named process")
         try expect(reason.contains("Non scollegare il disco"), "Still unsafe to unplug")
+        let own = DiskEjection.explain("Unmount was dissented by PID 77 (/usr/sbin/someprog)", holders: "")
+        try expectEqual(own, "macOS dice che lo sta usando someprog (PID 77).", "Other programs: named, no Defender advice")
+        let cut = Shell.Result(status: 1, stdout: "", stderr: String(repeating: "x", count: 290) + "\nVolume could not be unmounted\nUnmount was dissented by PID 9")
+        try expect(cut.failureReason.hasPrefix("Volume could not"), "Bounded text starts at a whole line: \(cut.failureReason)")
     }
 
     func test_failureIsDroppedOnlyWhenTheDiskIsGone() throws {

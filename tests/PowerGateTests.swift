@@ -42,7 +42,44 @@ struct PowerGateTests {
             let status = ScheduleManager.scheduleStatus(from: plist, installed: true)
             try expectEqual(status.intervalMinutes, minutes, "menu and CLI read calendar intervals")
             try expectNil(status.dailyHour, "interval must not be mistaken for daily")
+            var rome = Calendar(identifier: .gregorian)
+            rome.timeZone = TimeZone(identifier: "Europe/Rome")!
+            let now = rome.date(from: DateComponents(year: 2026, month: 10, day: 11, hour: 15, minute: 7))!
+            let nowMinute = 15 * 60 + 7
+            let nextMinute: Int = (nowMinute / minutes + 1) * minutes
+            let expected: Date = rome.date(byAdding: .minute, value: nextMinute - nowMinute, to: now)!
+            try expectEqual(status.nextRun(after: now, calendar: rome), expected, "next slot after 15:07 for every \(minutes) min")
         }
+        let dailyPlist = try plistDictionary(ScheduleManager.generatePlistDaily(hour: 3))
+        let daily = ScheduleManager.scheduleStatus(from: dailyPlist, installed: true)
+        var rome = Calendar(identifier: .gregorian)
+        rome.timeZone = TimeZone(identifier: "Europe/Rome")!
+        let afternoon = rome.date(from: DateComponents(year: 2026, month: 10, day: 11, hour: 15))!
+        let tomorrow3 = rome.date(from: DateComponents(year: 2026, month: 10, day: 12, hour: 3))
+        try expectEqual(daily.nextRun(after: afternoon, calendar: rome), tomorrow3, "daily runs tomorrow at 3:00")
+        let interval = ScheduleManager.scheduleStatus(from: ["StartInterval": 420], installed: true)
+        try expectNil(interval.nextRun(after: afternoon), "a launchd interval has no exact wall-clock time")
+        let off = ScheduleManager.scheduleStatus(from: dailyPlist, installed: false)
+        try expectNil(off.nextRun(after: afternoon), "no automatic backup when the schedule is off")
+    }
+
+    func test_nextBackupIsExplainedInTheMenu() throws {
+        let state = AppUIState()
+        try expectNil(state.nextBackupText, "unknown schedule: nothing invented")
+        var calendar = Calendar.current; calendar.timeZone = .current
+        let now = calendar.date(bySettingHour: 15, minute: 7, second: 0, of: Date())!
+        state.now = { now }
+        state.schedule = ScheduleStatus(installed: true, intervalMinutes: 60, dailyHour: nil, slots: Array(stride(from: 0, to: 1440, by: 60)))
+        state.appState = .idle
+        try expectEqual(state.nextBackupText, "Prossimo backup automatico: oggi alle 16:00", "time of the next run")
+        state.onBattery = true
+        try expect(state.nextBackupText?.contains("solo con l'alimentatore collegato") == true, "battery skips the run, said up front")
+        state.appState = .diskAbsent
+        try expect(state.nextBackupText?.hasSuffix("se colleghi il disco") == true, "needs the disk")
+        state.schedule = ScheduleStatus(installed: false, intervalMinutes: nil, dailyHour: nil)
+        try expectEqual(state.nextBackupText, "Backup automatico disattivato", "schedule off is explicit")
+        state.schedule = ScheduleStatus(installed: true, intervalMinutes: 7, dailyHour: nil)
+        try expectEqual(state.nextBackupText, "Backup automatico ogni 7 min", "inexact interval: no invented time")
     }
 
     func test_calendarMigrationPreservesJob() throws {
