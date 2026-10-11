@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.1.10] - 2026-10-11
+
+### Fixed
+- The menu distinguishes an active backup's final phase from completion and explicitly
+  says whether a backup is still running. Finalization is not a safe-to-unplug result.
+- A completed backup shows its finish time, using matching terminal status or the
+  complete snapshot's manifest. Old snapshots with no finish time label their start
+  time as a start, never as completion. Protection freshness still uses snapshot time.
+- Idle, cancelled and failed status files no longer describe a residual finalization
+  phase as active progress. Backup, restore, stop and disk-ejection policies are unchanged.
+
 ## [4.1.9] - 2026-10-10
 
 ### Fixed

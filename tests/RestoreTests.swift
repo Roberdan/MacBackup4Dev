@@ -139,6 +139,17 @@ final class ProtectionSummaryTests {
         try expect(s.headline.contains("2 ore fa"), "headline says how long ago: \(s.headline)")
         try expectEqual(s.days.count, 14, "14-day strip")
         try expectEqual(s.days.last, .complete, "today is green")
+        try expectNil(s.lastCompleteFinishedDate, "legacy empty timestamp does not become a finish time")
+        let completedSnapshot = dest.appendingPathComponent(name(now.addingTimeInterval(-7_500)))
+        guard var manifest = SnapshotManifest.read(from: completedSnapshot) else {
+            throw TestFailure.failed("complete fixture has no manifest")
+        }
+        let finishedAt = ISO8601DateFormatter().string(from: now.addingTimeInterval(-7_000))
+        manifest.finishedAt = finishedAt
+        try manifest.write(to: completedSnapshot)
+        s = ProtectionSummary.build(destination: dest, now: now)
+        try expectEqual(s.lastCompleteFinishedDate, ISO8601DateFormatter().date(from: finishedAt),
+                        "summary reads completion from the manifest, not folder naming")
 
         try safety.makeSnapshot(dest, name(now.addingTimeInterval(-600)), complete: false)
         s = ProtectionSummary.build(destination: dest, now: now)

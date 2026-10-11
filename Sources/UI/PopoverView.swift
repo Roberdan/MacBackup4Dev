@@ -129,12 +129,12 @@ struct PopoverView: View {
 
     private var heroHeadline: String {
         switch state.appState {
-        case .running: return "Backup in corso"
+        case .running: return state.backupHeadline
         case .stopping: return "Interrompo il backup…"
         case .restoring: return "Ripristino in corso"
         case .diskAbsent: return "Disco di backup non collegato"
         case .error: return "L'ultimo backup non è riuscito"
-        default: return state.protection?.headline ?? "Nessun backup"
+        default: return state.backupHeadline
         }
     }
 
@@ -143,10 +143,12 @@ struct PopoverView: View {
         case .diskAbsent:
             let last = state.protection?.lastCompleteDate.map { "Ultimo completo \(ProtectionSummary.ago(Date().timeIntervalSince($0))). " } ?? ""
             return last + "Collegalo: riparte da solo all'orario previsto."
-        case .error, .running, .stopping, .restoring:
-            return state.protection?.lastCompleteDate.map { "Ultimo completo: \(ProtectionSummary.dateLabel($0))" } ?? ""
+        case .running:
+            return state.backupDetail
+        case .error, .stopping, .restoring:
+            return state.protection?.lastCompleteDate.map { "Backup completo avviato: \(ProtectionSummary.dateLabel($0))" } ?? ""
         default:
-            return state.protection?.detail ?? ""
+            return state.backupDetail
         }
     }
 
