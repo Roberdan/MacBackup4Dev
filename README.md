@@ -572,7 +572,9 @@ colour, sized to its content.
 - **Scegli cartelle** opens the folder picker. Every configured folder is listed (also the ones
   added by hand or from the coverage audit, under *Le tue cartelle*); **Tutti** never selects
   items that hold credentials (SSH keys, tokens): those are chosen one by one.
-- **Ripristina…** opens the restore window: *Argomento*, *File* (every version), *Nuovo Mac*.
+- **Ripristina…** opens *File* recovery first, with *Argomento* and *Nuovo Mac* also available.
+  **Apri backup** and **Ripristina…** are disabled without the backup disk or while its
+  encrypted store is opening. They check the mounted destination again when clicked.
 - **Espelli disco** refuses while a backup runs (also a scheduled one), says which apps keep
   the disk busy, and forces the unmount only for recognized read-only indexers or antivirus.
   That includes Microsoft Defender when macOS itself names it (`dlp_agent` or
@@ -686,6 +688,17 @@ and publishes the `.pkg` and `.app.zip`.
 
 Three ways, in the menu (**Ripristina…**) and in the CLI. Each one previews first and can be
 undone file by file (`undo`, or *Annulla l'ultimo ripristino* in the menu).
+
+For an accidentally deleted file, connect the backup disk and wait for the encrypted store
+to open, then choose **Ripristina… → File**. Search by filename or part of its path:
+the search includes retained older backups, even if the newest one no longer contains it.
+Results are limited to 200 distinct paths; narrow the search if needed.
+
+Select the file and a saved version, then **Anteprima**. By default the restored copy goes
+to `~/Desktop/Ripristinati <snapshot>` without replacing the current file. To recover at
+the original location, turn off the Desktop option and make a new preview. Check the
+destination and replacement counts, then confirm **Ripristina**. No files are written
+before confirmation. Local **Annulla ripristino** does not require the backup disk.
 
 ```bash
 MacBackup4Dev snapshots                    # completo / incompleto / non verificato

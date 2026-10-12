@@ -236,7 +236,18 @@ struct PopoverView: View {
                     }
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(Look.secondaryText)
-                    if !s.currentFile.isEmpty {
+                    if let file = state.backupFileActivity {
+                        Label(file.name, systemImage: "doc")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Look.text)
+                            .lineLimit(1).truncationMode(.middle)
+                            .help(file.path)
+                            .accessibilityLabel("File del backup: \(file.path)")
+                        if !file.directory.isEmpty {
+                            Text(file.directory).font(.system(size: 10)).foregroundColor(Look.tertiaryText)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                    } else if !s.currentFile.isEmpty {
                         Text(s.currentFile).font(.system(size: 10)).foregroundColor(Look.tertiaryText)
                             .lineLimit(1).truncationMode(.middle)
                     }
@@ -524,11 +535,13 @@ struct PopoverView: View {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity)
             case .needsSetup, .diskAbsent:
                 glassButton("Ripristina…", icon: "clock.arrow.circlepath") { state.onRequestRestore?() }
-                    .disabled(!state.hasBackups).opacity(state.hasBackups ? 1 : 0.4)
+                    .disabled(!state.canRestore).opacity(state.canRestore ? 1 : 0.4)
+                    .help("Collega il disco di backup per recuperare file cancellati o versioni precedenti.")
             default:
                 gradientButton("Esegui ora", icon: "arrow.up.circle.fill", colors: [Look.gold, Look.orange]) { state.onRequestBackup?() }
                 glassButton("Ripristina…", icon: "clock.arrow.circlepath") { state.onRequestRestore?() }
-                    .disabled(!state.hasBackups).opacity(state.hasBackups ? 1 : 0.4)
+                    .disabled(!state.canRestore).opacity(state.canRestore ? 1 : 0.4)
+                    .help("Recupera un file cancellato o una versione precedente: cerca, scegli e controlla l'anteprima.")
             }
         }
     }
@@ -550,7 +563,7 @@ struct PopoverView: View {
             Tile(id: "Libera spazio", icon: "trash.fill", tint: Look.orange,
                  enabled: !state.isRunning && state.config != nil && state.appState != .diskAbsent,
                  action: { state.onRequestCleanupMenu?() }),
-            Tile(id: "Apri cartella", icon: "folder.fill", tint: Look.green, enabled: true,
+            Tile(id: "Apri backup", icon: "folder.fill", tint: Look.green, enabled: state.canOpenBackupFolder,
                  action: { state.onRequestOpenFolder?() }),
             Tile(id: "Espelli disco", icon: "eject.fill", tint: Color.gray, enabled: !state.isRunning && state.appState != .diskAbsent,
                  action: { state.onRequestEject?() }),

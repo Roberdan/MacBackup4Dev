@@ -102,6 +102,29 @@ final class BackupEngineTests {
                                       startedAt: iso.string(from: start))
         state.appState = .running
         state.status = status
+        try expect(state.canRefreshBackupProgress, "active backup permits visible progress updates")
+        try expectNil(state.backupFileActivity, "startup text is not a file")
+        status.filesDone = 500
+        status.currentFile = "Documents/Progetto molto lungo/relazione.txt"
+        state.status = status
+        try expectEqual(state.backupFileActivity?.name, "relazione.txt", "filename is separate from its folder")
+        try expectEqual(state.backupFileActivity?.directory, "Documents/Progetto molto lungo",
+                        "folder remains available without obscuring the filename")
+        try expectEqual(state.backupFileActivity?.path, status.currentFile, "full path is retained for help")
+        status.phase = "copying"; status.currentFile = ".zshrc"
+        state.status = status
+        try expectEqual(state.backupFileActivity?.name, ".zshrc", "root-level dotfile names remain intact")
+        try expectEqual(state.backupFileActivity?.directory, "", "root-level files have no invented folder")
+        state.cleanupPhase = .reading
+        try expect(!state.canRefreshBackupProgress, "cleanup prevents extra progress reads")
+        state.cleanupPhase = nil
+        state.ejection = EjectionFeedback(disk: URL(fileURLWithPath: "/Volumes/Backup demo"), phase: .closingStore)
+        try expect(!state.canRefreshBackupProgress, "ejection prevents extra progress reads")
+        state.ejection = nil
+        state.appState = .restoring
+        try expect(!state.canRefreshBackupProgress, "backup polling cannot overwrite restore progress")
+        try expectNil(state.backupFileActivity, "restore is not presented as backup file activity")
+        state.appState = .running
         try expectEqual(state.backupHeadline, "Backup in corso", "discovery is active")
         try expect(state.backupDetail.contains("Avviato \(ProtectionSummary.dateLabel(start))"), "start is named as start")
         try expect(state.backupDetail.contains("Ancora in corso"), "activity is explicit")
@@ -120,6 +143,7 @@ final class BackupEngineTests {
         try expectEqual(dbProgress.map { $0.0 }, [1], "database step reports actual index")
         try expectEqual(dbProgress.map { $0.1 }, [1], "database step reports configured total")
         state.status = status
+        try expectNil(state.backupFileActivity, "finalization text is not a filename")
         try expectEqual(state.backupHeadline, "Backup: fase finale", "finalization is distinct from copying")
         try expect(state.backupDetail.contains("Non scollegare il disco"), "finalization is not safe completion")
         try expect(!state.backupDetail.contains("Terminato"), "no premature completion")
@@ -129,6 +153,8 @@ final class BackupEngineTests {
         try expectNil(status.finalizationStepDate, "terminal metadata cannot keep the activity timer running")
         status.lastSnapshot = "snapshot"; status.lastCompleteAt = iso.string(from: finish)
         state.status = status
+        try expect(!state.canRefreshBackupProgress, "idle stops extra progress reads")
+        try expectNil(state.backupFileActivity, "idle cannot keep an old filename active")
         try expectEqual(state.backupHeadline, "Backup completato", "idle and manifest complete")
         try expect(state.backupDetail.contains("Terminato \(ProtectionSummary.dateLabel(finish))"), "matching operation uses actual finish")
         try expect(state.backupDetail.contains("Nessun backup in corso"), "idle is explicit")
@@ -148,5 +174,47 @@ final class BackupEngineTests {
         state.protection?.level = .attention
         state.protection?.headline = "Ultimo backup incompleto"
         try expectEqual(state.backupHeadline, "Ultimo backup incompleto", "attention is not changed into success")
+    }
+
+    func test_backupActionsRequireAccessibleDisk() throws {
+        let state = AppUIState()
+        state.config = Config(source: SourceConfig(paths: []),
+                              destination: DestinationConfig(path: "/Volumes/Backup demo/MacBackup4Dev"),
+                              exclude: ExcludeConfig(patterns: []), retention: RetentionConfig())
+        state.cachedHasBackups = true
+        state.cachedCanUndo = true
+        try expect(!state.canOpenBackupFolder && !state.canRestore, "cached history cannot enable an inaccessible disk")
+        state.cachedBackupAccessible = true
+        try expect(state.canOpenBackupFolder && state.canRestore, "mounted backup enables browsing and recovery")
+        for mode in [AppState.diskAbsent, .needsSetup] {
+            state.appState = mode
+            try expect(!state.canOpenBackupFolder && !state.canRestore, "disconnected/setup state overrides stale cache")
+        }
+        state.appState = .idle
+        state.storeOpening = true
+        try expect(!state.canOpenBackupFolder && !state.canRestore, "opening the encrypted store is not readiness")
+        state.storeOpening = false
+        state.cleanupPhase = .reading
+        try expect(!state.canOpenBackupFolder && !state.canRestore, "cleanup blocks backup access")
+        state.cleanupPhase = nil
+        for phase in [EjectionPhase.closingStore, .ejecting, .succeeded] {
+            state.ejection = EjectionFeedback(disk: state.config!.diskURL, phase: phase)
+            try expect(!state.canOpenBackupFolder && !state.canRestore, "eject and successful removal block stale access")
+        }
+        state.ejection = nil
+        for mode in [AppState.running, .restoring, .stopping] {
+            state.appState = mode
+            try expect(state.canOpenBackupFolder, "read-only browsing remains available during a mounted operation")
+            try expect(!state.canRestore, "recovery cannot start during another operation")
+        }
+        state.appState = .error
+        try expect(state.canRestore, "a failed latest backup does not hide retained history")
+        state.cachedBackupAccessible = false
+        try expect(state.canUndo, "undo is local and remains available without the backup disk")
+        state.cachedBackupAccessible = true
+        state.cachedHasBackups = false
+        try expect(state.canOpenBackupFolder && !state.canRestore, "an empty mounted destination can be browsed but not restored")
+        state.config = nil
+        try expect(!state.canOpenBackupFolder && !state.canRestore, "missing configuration cannot enable backup access")
     }
 }

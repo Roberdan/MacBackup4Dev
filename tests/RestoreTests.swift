@@ -30,11 +30,71 @@ final class RestoreTests {
         try expectEqual(backup.backupDir.path, destination.path, "discovery finds the stored backup folder")
         try expectEqual(backup.snapshots, [newer, older], "older snapshots remain available")
         let state = AppUIState()
+        state.config = Config(source: SourceConfig(paths: []),
+                              destination: DestinationConfig(path: destination.path),
+                              exclude: ExcludeConfig(patterns: []), retention: RetentionConfig())
         state.cachedHasBackups = !backups.isEmpty
+        state.cachedBackupAccessible = true
         try expect(state.hasBackups, "restore is available when the encrypted store has backups")
+
+        let model = RestoreCenterModel(destination: destination, config: state.config, home: box.home)
+        try expectEqual(model.tab, .file, "restore starts with file recovery")
+        try expect(model.restoreToFolder, "file recovery defaults to a separate Desktop copy")
+        func waitForModel(_ model: RestoreCenterModel) throws {
+            let deadline = Date().addingTimeInterval(5)
+            while model.busy && Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            }
+            try expect(!model.busy, "sandbox restore model completes its background read")
+        }
+        try safety.makeSnapshot(destination, "2026-10-12_130000", complete: false)
+        model.load()
+        try waitForModel(model)
+        try expectEqual(model.selectedSnapshot, newer, "an incomplete newest backup is never the default")
+        model.query = "deleted"
+        model.search()
+        try waitForModel(model)
+        try expectEqual(model.results, [relativePath], "the actual restore search reaches older retained files")
+        let onlyIncomplete = box.root.appendingPathComponent("incomplete-history")
+        try safety.makeSnapshot(onlyIncomplete, newer, complete: false)
+        let incompleteModel = RestoreCenterModel(destination: onlyIncomplete, config: nil, home: box.home)
+        incompleteModel.load()
+        try waitForModel(incompleteModel)
+        try expectEqual(incompleteModel.selectedSnapshot, "", "only incomplete history requires an explicit choice")
+        let history = SnapshotCatalog.list(at: destination).map(\.url)
+        try expectEqual(FileVersions.search("DELETED", in: history), [relativePath],
+                        "search finds a deleted file even though the latest snapshot does not have it")
+        try expect(try FileVersions.search("deleted", in: destination.appendingPathComponent(newer)).isEmpty,
+                   "fixture pins a file absent from the newest snapshot")
+        try safety.write("common", to: destination.appendingPathComponent(newer).path + "/Documents/common.txt")
+        try safety.write("common", to: destination.appendingPathComponent(older).path + "/Documents/common.txt")
+        try expectEqual(Set(FileVersions.search(".txt", in: history, limit: 2)),
+                        Set([relativePath, "Documents/common.txt"]),
+                        "duplicate paths do not consume the history search limit")
+        try expectEqual(FileVersions.search(".txt", in: history, limit: 1).count, 1,
+                        "history search retains the existing result bound")
+        do {
+            _ = try FileVersions.search("deleted", in: [box.root.appendingPathComponent("missing-snapshot")])
+            throw TestFailure.failed("missing snapshot must report a search error")
+        } catch is CocoaError {
+            // An unavailable backup is not a successful search with zero matches.
+        }
 
         let versions = FileVersions.list(relativePath: relativePath, at: backup.backupDir)
         try expectEqual(versions.map(\.snapshot), [older], "a deleted file is found in its older snapshot")
+        model.snapshots = SnapshotCatalog.list(at: destination)
+        model.selectedFile = relativePath
+        model.restore(version: versions[0])
+        try expectEqual(model.plan?.destinationRoot, box.home + "/Desktop/Ripristinati \(older)",
+                        "the first preview saves a separate copy and never uses the real home")
+        try expectEqual(model.plan?.snapshot.path, model.snapshots.first { $0.name == older }?.url.path,
+                        "preview uses the chosen older version, not the newest snapshot")
+        model.restoreToFolder = false
+        try expectNil(model.plan, "changing the destination invalidates the old preview")
+        model.restore(version: versions[0])
+        try expectEqual(model.plan?.destinationRoot, box.home, "original-location recovery is an explicit choice")
+        model.tab = .topic
+        try expectNil(model.plan, "switching recovery mode invalidates the old preview")
         try expect(!FileManager.default.fileExists(atPath: box.home + "/" + relativePath),
                    "the file is absent from the test home before restore")
         let plan = SelectiveRestore.plan(snapshot: backup.backupDir.appendingPathComponent(older),

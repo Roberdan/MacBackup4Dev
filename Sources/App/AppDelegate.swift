@@ -13,6 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusManager = StatusManager()
     private var iconManager: IconManager!
     private var pollTimer: Timer?
+    private var visibleProgressTimer: Timer?
     private var updateTimer: Timer?
     private var onboardingWC: OnboardingWindowController?
     private var encryptionWC: EncryptionSetupWindowController?
@@ -480,6 +481,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func updateVisibleProgressPolling() {
+        guard popover.isShown, uiState.canRefreshBackupProgress else {
+            visibleProgressTimer?.invalidate()
+            visibleProgressTimer = nil
+            return
+        }
+        guard visibleProgressTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshVisibleBackupProgress() }
+        }
+        timer.tolerance = 0.2
+        visibleProgressTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func refreshVisibleBackupProgress() {
+        guard popover.isShown, uiState.canRefreshBackupProgress else {
+            updateVisibleProgressPolling()
+            return
+        }
+        guard let status = StatusWriter().read() else { return }
+        guard status.state == "running" else {
+            pollStatus()
+            return
+        }
+        uiState.status = status
+    }
+
     // MARK: - Action handlers
 
     private func handleRequestCleanupMenu() {
@@ -610,14 +639,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleRequestRestore() {
-        guard !uiState.isCleaning, !uiState.isEjecting else { return }
-        let backups = RestoreEngine.findBackupSnapshots()
-        guard let first = backups.first, !first.snapshots.isEmpty else { return }
+        guard requireBackupAccess(restoring: true), let config else { return }
+        let snapshots = SnapshotCatalog.list(at: URL(fileURLWithPath: config.destination.path))
+        guard !snapshots.isEmpty else { return }
         popover.performClose(nil)
 
-        let entries = first.snapshots.map {
-            SnapshotEntry(url: first.backupDir.appendingPathComponent($0))
-        }
+        let entries = snapshots.map { SnapshotEntry(url: $0.url) }
 
         if entries.count == 1 {
             openRestoreTree(snapshotURL: entries[0].url)
@@ -807,9 +834,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleOpenFolder() {
-        guard !uiState.isEjecting else { return }
-        guard let config = config else { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: config.destination.path))
+        guard requireBackupAccess(restoring: false), let config else { return }
+        if !NSWorkspace.shared.open(URL(fileURLWithPath: config.destination.path)) {
+            sendNotification(title: "Backup non aperto", body: "Finder non riesce ad aprire la cartella di backup.")
+        }
+    }
+
+    @discardableResult
+    private func refreshBackupAccess() -> Bool {
+        guard let config else {
+            uiState.cachedBackupAccessible = false
+            return false
+        }
+        var directory: ObjCBool = false
+        let accessible = BackupEngine.isVolumeReallyMounted(config.diskURL.path)
+            && BackupEngine.isVolumeReallyMounted(config.destination.path)
+            && FileManager.default.fileExists(atPath: config.destination.path, isDirectory: &directory)
+            && directory.boolValue
+        uiState.cachedBackupAccessible = accessible
+        if !accessible { uiState.cachedHasBackups = false }
+        return accessible
+    }
+
+    private func requireBackupAccess(restoring: Bool) -> Bool {
+        if refreshBackupAccess(), restoring, let config {
+            uiState.cachedHasBackups = !SnapshotCatalog.list(at: URL(fileURLWithPath: config.destination.path)).isEmpty
+        }
+        guard restoring ? uiState.canRestore : uiState.canOpenBackupFolder else {
+            sendNotification(title: "Backup non disponibile",
+                             body: "Collega il disco e attendi l'apertura del backup cifrato. Riprova quando non ci sono operazioni in corso.")
+            pollStatus()
+            return false
+        }
+        return true
     }
 
     private func handleSelectDisk(_ volumeURL: URL) {
@@ -1136,7 +1193,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         openStoreInBackground()
         compactStoreIfNeeded()
-        let newState = statusManager.poll(config: config)
+        let accessible = refreshBackupAccess()
+        let newState: AppState = config != nil && !accessible ? .diskAbsent : statusManager.poll(config: config)
         // F-14: don't clobber .stopping/.restoring set by action handlers
         if newState != .running || (uiState.appState != .stopping && uiState.appState != .restoring) {
             iconManager.setState(newState)
@@ -1146,13 +1204,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.config = config
         uiState.onBattery = PowerGate.currentSource() != .ac
         // F-19: update cached disk-state values (disk I/O here, not in SwiftUI render)
-        uiState.cachedHasBackups = config != nil && !RestoreEngine.findBackupSnapshots().isEmpty
+        uiState.cachedHasBackups = accessible && config.map {
+            !SnapshotCatalog.list(at: URL(fileURLWithPath: $0.destination.path)).isEmpty
+        } == true
         uiState.cachedCanUndo = RestoreEngine.hasPreRestoreBackup() || latestUndoDir() != nil
         refreshProtection(force: forceProtection)
         if let completed = uiState.status?.lastCompleted, !completed.isEmpty,
            completed != lastRecoveryCompletion {
             refreshRecoveryAppOnDisk()
         }
+        updateVisibleProgressPolling()
     }
 
     /// Snapshot manifests live on the backup disk: read them at most every 20 s (or right
@@ -1188,12 +1249,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 3.0: restore center and coverage
 
     private func handleOpenRestoreCenter() {
-        guard let config else { return }
-        openRestoreCenter(destination: URL(fileURLWithPath: config.destination.path), tab: .topic)
+        guard requireBackupAccess(restoring: true), let config else { return }
+        openRestoreCenter(destination: URL(fileURLWithPath: config.destination.path), tab: .file)
     }
 
     private func openRestoreCenter(destination: URL, tab: RestoreCenterModel.Tab) {
-        guard !uiState.isEjecting else { return }
+        guard !uiState.isEjecting, !uiState.isCleaning, !uiState.isRunning,
+              BackupEngine.isVolumeReallyMounted(destination.path),
+              FileManager.default.fileExists(atPath: destination.path) else {
+            sendNotification(title: "Ripristino non disponibile",
+                             body: "Collega il disco di backup e attendi che le operazioni in corso finiscano.")
+            return
+        }
         popover.performClose(nil)
         if let wc = restoreCenterWC, wc.window?.isVisible == true {
             wc.window?.makeKeyAndOrderFront(nil)
@@ -1255,7 +1322,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - NSPopoverDelegate
 
 extension AppDelegate: NSPopoverDelegate {
+    func popoverDidShow(_ notification: Notification) {
+        updateVisibleProgressPolling()
+    }
+
     func popoverDidClose(_ notification: Notification) {
         stopWatchingForOutsideClick()
+        visibleProgressTimer?.invalidate()
+        visibleProgressTimer = nil
     }
 }

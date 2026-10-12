@@ -88,6 +88,7 @@ extension CLIHandler {
             let state = AppUIState()
             state.config = cfg
             state.cachedHasBackups = true
+            state.cachedBackupAccessible = name != "disco-espulso"
             state.cachedCanUndo = true
             state.scheduleLabel = "ogni 1h"
             state.onRequestScheduleMenu = {}

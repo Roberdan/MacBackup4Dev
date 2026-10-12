@@ -14,6 +14,7 @@ extension CLIHandler {
             ? Self.menuDemoConfig : try? Config.load(from: Config.defaultPath)
         state.appState = .diskAbsent
         state.cachedHasBackups = true
+        state.cachedBackupAccessible = false
         state.cachedCanUndo = true
         state.scheduleLabel = "ogni 1h"
         state.schedule = ScheduleStatus(installed: true, intervalMinutes: 60, dailyHour: nil,
@@ -58,6 +59,7 @@ extension CLIHandler {
         state.storeOpening = true
         report("apertura backup cifrato")
         state.storeOpening = false
+        state.cachedBackupAccessible = true
         state.appState = .running
         var st = BackupStatusFile(); st.state = "running"; st.phase = "scanning"
         st.filesDone = 151_000; st.filesTotal = 156_000; st.scanFinished = false
