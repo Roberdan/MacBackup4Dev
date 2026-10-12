@@ -59,6 +59,7 @@ struct TestRunner {
         let suites: [(String, TestClosure)] = [
             ("Progress.terminalIsIdle", backup.test_terminalStatusNeverClaimsWorkInProgress),
             ("Progress.activityAndFinish", backup.test_backupActivityAndFinishTimeAreExplicit),
+            ("Actions.accessibleBackupDisk", backup.test_backupActionsRequireAccessibleDisk),
             ("Recovery.backupDoesNotCopyApp", recovery.test_backupFinishesWithoutRefreshingPhysicalDisk),
             ("Recovery.concurrentCopySkipped", recovery.test_competingCopyDoesNotWaitOrTouchStaging),
             ("Recovery.timeoutKeepsOldApp", recovery.test_timeoutPreservesExistingRecoveryApp),

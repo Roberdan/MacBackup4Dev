@@ -11,11 +11,15 @@ final class RestoreCenterModel: ObservableObject {
 
     let destination: URL
     let config: Config?
-    @Published var tab: Tab = .topic
+    private let restorationHome: String
+    @Published var tab: Tab = .file {
+        didSet { if oldValue != tab { plan = nil; message = ""; messageIsError = false } }
+    }
     @Published var snapshots: [SnapshotInfo] = []
     @Published var selectedSnapshot: String = "" { didSet { if oldValue != selectedSnapshot { stages = []; stageCounts = [:] } } }
     @Published var busy = false
     @Published var message: String = ""
+    @Published var messageIsError = false
 
     // Topic tab
     @Published var topics: [RestoreTopic] = []
@@ -27,7 +31,9 @@ final class RestoreCenterModel: ObservableObject {
     @Published var results: [String] = []
     @Published var selectedFile: String?
     @Published var versions: [FileVersion] = []
-    @Published var restoreToFolder = false
+    @Published var restoreToFolder = true {
+        didSet { if oldValue != restoreToFolder { plan = nil } }
+    }
 
     // New Mac tab
     @Published var checklist: [NewMacRestore.CheckItem] = []
@@ -50,9 +56,11 @@ final class RestoreCenterModel: ObservableObject {
     var onAdvanced: (() -> Void)?
     var onDone: ((RestoreResult) -> Void)?
 
-    init(destination: URL, config: Config?) {
+    init(destination: URL, config: Config?,
+         home: String = FileManager.default.homeDirectoryForCurrentUser.path) {
         self.destination = destination
         self.config = config
+        self.restorationHome = home
         self.topics = Topics.all(config: config)
     }
 
@@ -65,7 +73,7 @@ final class RestoreCenterModel: ObservableObject {
         let dest = destination
         DispatchQueue.global(qos: .userInitiated).async {
             let list = SnapshotCatalog.list(at: dest)
-            let preferred = SnapshotCatalog.defaultForRestore(at: dest)?.name ?? list.first?.name ?? ""
+            let preferred = SnapshotCatalog.defaultForRestore(at: dest)?.name ?? ""
             DispatchQueue.main.async {
                 self.snapshots = list
                 self.selectedSnapshot = preferred
@@ -103,10 +111,12 @@ final class RestoreCenterModel: ObservableObject {
                 self.busy = false
                 switch outcome {
                 case .success(let (r, _)):
+                    self.messageIsError = r.failed > 0
                     self.message = "Ripristinati \(r.restored) file (\(r.overwritten) sostituiti), \(r.failed) non riusciti. Annullabile dal menu."
                     self.plan = nil
                     self.onDone?(r)
                 case .failure(let e):
+                    self.messageIsError = true
                     self.message = "Ripristino non riuscito: \(e.localizedDescription)"
                 }
             }
@@ -116,32 +126,53 @@ final class RestoreCenterModel: ObservableObject {
     // MARK: File
 
     func search() {
-        guard let snap = snapshotURL, query.count >= 2 else { results = []; return }
+        guard !busy, query.count >= 2, !snapshots.isEmpty else { return }
         let q = query
+        let history = snapshots.map(\.url)
+        results = []; selectedFile = nil; versions = []; plan = nil; message = ""; messageIsError = false
         busy = true
         DispatchQueue.global(qos: .userInitiated).async {
-            let hits = FileVersions.search(q, in: snap)
-            DispatchQueue.main.async { self.results = hits; self.busy = false }
+            let outcome = Result { try FileVersions.search(q, in: history) }
+            DispatchQueue.main.async {
+                self.busy = false
+                switch outcome {
+                case .success(let hits):
+                    self.results = hits
+                    self.message = hits.isEmpty ? "Nessun file trovato nei backup conservati."
+                        : hits.count == 200 ? "Primi 200 risultati: precisa il nome o la cartella per restringere la ricerca." : ""
+                case .failure(let error):
+                    Log.error("Restore search failed: \(error.localizedDescription)")
+                    self.messageIsError = true
+                    self.message = "Ricerca non riuscita. Controlla che il disco sia collegato: \(error.localizedDescription)"
+                }
+            }
         }
     }
 
     func selectFile(_ rel: String) {
         selectedFile = rel
+        plan = nil
+        versions = []
+        busy = true
         let dest = destination
         DispatchQueue.global(qos: .userInitiated).async {
             let v = FileVersions.list(relativePath: rel, at: dest)
-            DispatchQueue.main.async { self.versions = v }
+            DispatchQueue.main.async {
+                guard self.selectedFile == rel else { return }
+                self.versions = v
+                self.busy = false
+            }
         }
     }
 
     func restore(version: FileVersion) {
         guard let rel = selectedFile,
               let snap = snapshots.first(where: { $0.name == version.snapshot })?.url else { return }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
         let root = restoreToFolder ? home + "/Desktop/Ripristinati \(version.snapshot)" : home
         // Preview first, like every other restore: the user confirms with "Ripristina".
         self.plan = SelectiveRestore.plan(snapshot: snap, paths: [rel], destinationRoot: root)
         self.message = ""
+        self.messageIsError = false
     }
 
     // MARK: New Mac
@@ -155,7 +186,7 @@ final class RestoreCenterModel: ObservableObject {
         }
     }
 
-    var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
+    var home: String { restorationHome }
 
     /// Apps the user said they do not want back (config.toml [coverage] ignore_apps).
     var ignoredApps: [String] { (try? Config.load(from: Config.defaultPath))?.coverage.ignoreApps ?? config?.coverage.ignoreApps ?? [] }
@@ -271,6 +302,13 @@ struct RestoreCenterView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
+                Text(model.tab == .file ? "Recupera un file cancellato o una versione precedente."
+                     : model.tab == .topic ? "Ripristina le impostazioni di un'app o un gruppo di file."
+                     : "Ricostruisci il tuo ambiente su un nuovo Mac.")
+                    .font(.headline)
+                Spacer()
+            }
+            HStack {
                 Picker("", selection: $model.tab) {
                     ForEach(RestoreCenterModel.Tab.allCases) { Text($0.rawValue).tag($0) }
                 }
@@ -279,15 +317,18 @@ struct RestoreCenterView: View {
                 Spacer()
                 if model.busy { ProgressView().controlSize(.small) }
             }
-            HStack {
-                Text("Da:").foregroundColor(.secondary)
-                Picker("", selection: $model.selectedSnapshot) {
-                    ForEach(model.snapshots, id: \.name) { s in Text(model.label(for: s)).tag(s.name) }
+            if model.tab != .file {
+                HStack {
+                    Text("Backup del:").foregroundColor(.secondary)
+                    Picker("", selection: $model.selectedSnapshot) {
+                        Text("Scegli un backup").tag("")
+                        ForEach(model.snapshots, id: \.name) { s in Text(model.label(for: s)).tag(s.name) }
+                    }
+                    .labelsHidden()
+                    .onChange(of: model.selectedSnapshot) { _, _ in model.plan = nil; model.results = []; model.checklist = [] }
                 }
-                .labelsHidden()
-                .onChange(of: model.selectedSnapshot) { _, _ in model.plan = nil; model.results = []; model.checklist = [] }
             }
-            if let s = model.snapshots.first(where: { $0.name == model.selectedSnapshot }), s.state == .incomplete {
+            if model.tab != .file, let s = model.snapshots.first(where: { $0.name == model.selectedSnapshot }), s.state == .incomplete {
                 Text("Questo snapshot è incompleto: alcuni file mancano. " + (s.manifest?.incompleteReasons.first ?? ""))
                     .font(.caption).foregroundColor(.orange)
             }
@@ -298,7 +339,7 @@ struct RestoreCenterView: View {
             case .newMac: newMacTab
             }
             if !model.message.isEmpty {
-                Text(model.message).font(.callout).foregroundColor(.mlVerde)
+                Text(model.message).font(.callout).foregroundColor(model.messageIsError ? .red : .mlVerde)
             }
         }
         .padding(16)
@@ -351,11 +392,15 @@ struct RestoreCenterView: View {
 
     private var fileTab: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Text("1. Cerca nei backup conservati, anche se il file non esiste più sul Mac.\n2. Scegli la versione e controlla l'anteprima.\n3. Premi Ripristina: di default salvo una copia sulla Scrivania, senza sostituire l'originale.")
+                .font(.callout).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 TextField("Cerca un file (es. settings.toml)", text: $model.query)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { model.search() }
-                Button("Cerca") { model.search() }.disabled(model.query.count < 2)
+                    .disabled(model.busy)
+                Button("Cerca") { model.search() }.disabled(model.query.count < 2 || model.busy)
             }
             HSplitView {
                 List(model.results, id: \.self, selection: Binding(
@@ -370,17 +415,26 @@ struct RestoreCenterView: View {
                         List(model.versions, id: \.snapshot) { v in
                             HStack {
                                 VStack(alignment: .leading) {
-                                    Text("modificato " + ProtectionSummary.dateLabel(v.modified)).font(.callout)
-                                    Text("\(v.snapshot) · \(v.state.label) · \(Fmt.formatBytes(v.size))")
+                                    Text(model.snapshots.first { $0.name == v.snapshot }.map { model.label(for: $0) } ?? v.snapshot)
+                                        .font(.callout)
+                                    Text("Modificato \(ProtectionSummary.dateLabel(v.modified)) · \(Fmt.formatBytes(v.size))")
                                         .font(.caption2).foregroundColor(.secondary)
                                 }
                                 Spacer()
-                                Button("Scegli") { model.restore(version: v) }.controlSize(.small)
+                                Button("Anteprima") { model.restore(version: v) }.controlSize(.small)
+                                    .disabled(model.busy)
                             }
                         }
                         Toggle("Metti la copia sulla Scrivania invece di sostituire l'originale", isOn: $model.restoreToFolder)
                             .font(.caption)
                         if let plan = model.plan {
+                            Text("Destinazione: \(plan.destinationRoot)")
+                                .font(.caption).foregroundColor(.secondary)
+                                .textSelection(.enabled)
+                            if model.snapshots.first(where: { $0.url == plan.snapshot })?.state == .incomplete {
+                                Text("Questa versione viene da un backup incompleto: alcuni file possono mancare.")
+                                    .font(.caption).foregroundColor(.orange)
+                            }
                             HStack {
                                 Text("Anteprima: \(plan.summary)").font(.caption.weight(.semibold))
                                 Spacer()

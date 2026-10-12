@@ -3,12 +3,22 @@
 ## [4.1.16] - 2026-10-12
 
 ### Changed
+- File recovery opens first and explains search, version selection, preview and confirmation.
+  Search includes retained older snapshots, including files absent from the latest backup.
+  Recovery defaults to a separate Desktop copy; changing the destination clears the preview.
 - During backup, the menu shows the sampled filename prominently and its folder beneath
   it, with the full path available on hover. Startup and finalization messages remain
   messages, not filenames.
 - While the menu is open during backup, progress refreshes once a second from the existing
   status file. Closing the menu or leaving the backup stops those extra reads; hidden-menu
   polling, backup writes and copy-worker limits are unchanged.
+
+### Fixed
+- Opening the backup folder and starting a restore require both the physical disk and backup
+  destination to be mounted. Actions also check availability again on click, reject stale
+  cached state and remain disabled while the encrypted store opens or the disk is ejected.
+- Restore availability follows the configured destination, not another attached backup disk.
+  Local restore undo remains available without the backup disk.
 
 ## [4.1.15] - 2026-10-12
 

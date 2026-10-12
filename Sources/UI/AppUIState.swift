@@ -86,6 +86,7 @@ final class AppUIState: ObservableObject {
 
     // MARK: - Cached disk state (F-19) — updated by pollStatus(), not computed on render
     @Published var cachedHasBackups: Bool = false
+    @Published var cachedBackupAccessible: Bool = false
     @Published var cachedCanUndo: Bool = false
 
     // MARK: - Action callbacks — set by AppDelegate before popover is shown
@@ -167,7 +168,13 @@ final class AppUIState: ObservableObject {
     }
 
     // F-19: hasBackups and canUndo are now cached — no disk I/O on SwiftUI render
-    var hasBackups: Bool { cachedHasBackups }
+    var canOpenBackupFolder: Bool {
+        config != nil && cachedBackupAccessible && appState != .diskAbsent && appState != .needsSetup
+            && !storeOpening && !isCleaning && !isEjecting && ejection?.phase != .succeeded
+    }
+
+    var hasBackups: Bool { cachedHasBackups && canOpenBackupFolder }
+    var canRestore: Bool { hasBackups && !isRunning }
     var canUndo: Bool { cachedCanUndo }
 }
 

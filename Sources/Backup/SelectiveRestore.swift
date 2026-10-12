@@ -99,18 +99,33 @@ enum FileVersions {
     }
 
     /// Files in a snapshot whose path contains `query` (case-insensitive), for "cerca un file".
-    static func search(_ query: String, in snapshot: URL, limit: Int = 200) -> [String] {
+    static func search(_ query: String, in snapshot: URL, limit: Int = 200) throws -> [String] {
+        try search(query, in: [snapshot], limit: limit)
+    }
+
+    /// Search retained history too: a deleted file may be absent from the newest snapshot.
+    static func search(_ query: String, in snapshots: [URL], limit: Int = 200) throws -> [String] {
         let q = query.lowercased()
-        guard !q.isEmpty, let e = FileManager.default.enumerator(atPath: snapshot.path) else { return [] }
+        guard !q.isEmpty, limit > 0 else { return [] }
         var out: [String] = []
-        while let rel = e.nextObject() as? String {
-            if rel.hasPrefix(SnapshotManifest.directoryName) || rel.hasPrefix("_environment") {
-                e.skipDescendants(); continue
+        var seen: Set<String> = []
+        for snapshot in snapshots {
+            guard let e = FileManager.default.enumerator(atPath: snapshot.path) else {
+                throw CocoaError(.fileReadUnknown, userInfo: [NSFilePathErrorKey: snapshot.path])
             }
-            if rel.lowercased().contains(q) {
-                var isDir: ObjCBool = false
-                FileManager.default.fileExists(atPath: snapshot.appendingPathComponent(rel).path, isDirectory: &isDir)
-                if !isDir.boolValue { out.append(rel); if out.count >= limit { break } }
+            while let rel = e.nextObject() as? String {
+                if rel.hasPrefix(SnapshotManifest.directoryName) || rel.hasPrefix("_environment") {
+                    e.skipDescendants(); continue
+                }
+                if rel.lowercased().contains(q), !seen.contains(rel) {
+                    var isDir: ObjCBool = false
+                    FileManager.default.fileExists(atPath: snapshot.appendingPathComponent(rel).path, isDirectory: &isDir)
+                    if !isDir.boolValue {
+                        seen.insert(rel)
+                        out.append(rel)
+                        if out.count >= limit { return out }
+                    }
+                }
             }
         }
         return out

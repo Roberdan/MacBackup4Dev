@@ -108,7 +108,7 @@ extension CLIHandler {
         guard let query = flags.positional.first else { throw err("Uso: find <testo> [--snapshot S]") }
         let (_, dest) = try destination(configPath)
         let snap = try pickSnapshot(flags, at: dest)
-        let hits = FileVersions.search(query, in: snap.url)
+        let hits = try FileVersions.search(query, in: snap.url)
         print(bold("In \(snap.name) (\(snap.state.label)): \(hits.count) file"))
         for h in hits { print("  ~/\(h)") }
     }

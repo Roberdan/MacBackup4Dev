@@ -175,4 +175,46 @@ final class BackupEngineTests {
         state.protection?.headline = "Ultimo backup incompleto"
         try expectEqual(state.backupHeadline, "Ultimo backup incompleto", "attention is not changed into success")
     }
+
+    func test_backupActionsRequireAccessibleDisk() throws {
+        let state = AppUIState()
+        state.config = Config(source: SourceConfig(paths: []),
+                              destination: DestinationConfig(path: "/Volumes/Backup demo/MacBackup4Dev"),
+                              exclude: ExcludeConfig(patterns: []), retention: RetentionConfig())
+        state.cachedHasBackups = true
+        state.cachedCanUndo = true
+        try expect(!state.canOpenBackupFolder && !state.canRestore, "cached history cannot enable an inaccessible disk")
+        state.cachedBackupAccessible = true
+        try expect(state.canOpenBackupFolder && state.canRestore, "mounted backup enables browsing and recovery")
+        for mode in [AppState.diskAbsent, .needsSetup] {
+            state.appState = mode
+            try expect(!state.canOpenBackupFolder && !state.canRestore, "disconnected/setup state overrides stale cache")
+        }
+        state.appState = .idle
+        state.storeOpening = true
+        try expect(!state.canOpenBackupFolder && !state.canRestore, "opening the encrypted store is not readiness")
+        state.storeOpening = false
+        state.cleanupPhase = .reading
+        try expect(!state.canOpenBackupFolder && !state.canRestore, "cleanup blocks backup access")
+        state.cleanupPhase = nil
+        for phase in [EjectionPhase.closingStore, .ejecting, .succeeded] {
+            state.ejection = EjectionFeedback(disk: state.config!.diskURL, phase: phase)
+            try expect(!state.canOpenBackupFolder && !state.canRestore, "eject and successful removal block stale access")
+        }
+        state.ejection = nil
+        for mode in [AppState.running, .restoring, .stopping] {
+            state.appState = mode
+            try expect(state.canOpenBackupFolder, "read-only browsing remains available during a mounted operation")
+            try expect(!state.canRestore, "recovery cannot start during another operation")
+        }
+        state.appState = .error
+        try expect(state.canRestore, "a failed latest backup does not hide retained history")
+        state.cachedBackupAccessible = false
+        try expect(state.canUndo, "undo is local and remains available without the backup disk")
+        state.cachedBackupAccessible = true
+        state.cachedHasBackups = false
+        try expect(state.canOpenBackupFolder && !state.canRestore, "an empty mounted destination can be browsed but not restored")
+        state.config = nil
+        try expect(!state.canOpenBackupFolder && !state.canRestore, "missing configuration cannot enable backup access")
+    }
 }
