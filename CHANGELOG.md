@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.1.15] - 2026-10-12
+
+### Fixed
+- Restore discovery includes hidden mounted volumes, so "Ripristina" remains available
+  when backups are inside the encrypted store. The same discovery serves the menu and
+  advanced snapshot picker; older snapshots remain accessible for recovering deleted files.
+- Backup contents, retention, encryption and restore-write safeguards are unchanged.
+
 ## [4.1.14] - 2026-10-11
 
 ### Fixed

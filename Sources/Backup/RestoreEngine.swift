@@ -67,11 +67,15 @@ enum RestoreEngine {
     }
 
     /// Find backup snapshots on all connected volumes.
-    static func findBackupSnapshots() -> [(volume: String, backupDir: URL, snapshots: [String])] {
+    static func findBackupSnapshots(
+        mountedVolumes: (FileManager.VolumeEnumerationOptions) -> [URL]? = { options in
+            FileManager.default.mountedVolumeURLs(
+                includingResourceValuesForKeys: [.volumeNameKey], options: options)
+        }
+    ) -> [(volume: String, backupDir: URL, snapshots: [String])] {
         let fm = FileManager.default
-        guard let volumes = fm.mountedVolumeURLs(
-            includingResourceValuesForKeys: [.volumeNameKey],
-            options: [.skipHiddenVolumes]) else { return [] }
+        // Encrypted stores are mounted nobrowse: restore must include hidden volumes.
+        guard let volumes = mountedVolumes([]) else { return [] }
 
         var results: [(volume: String, backupDir: URL, snapshots: [String])] = []
         for vol in volumes {

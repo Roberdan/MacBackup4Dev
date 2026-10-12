@@ -10,6 +10,42 @@ final class RestoreTests {
         return url
     }
 
+    func test_hiddenVolumeMakesDeletedFilesRestorable() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let volume = box.root.appendingPathComponent("encrypted-volume")
+        let destination = volume.appendingPathComponent(AppIdentity.backupFolderName)
+        let older = "2026-10-12_090000"
+        let newer = "2026-10-12_120000"
+        try safety.makeSnapshot(destination, older, complete: true)
+        try safety.makeSnapshot(destination, newer, complete: true)
+        let relativePath = "Documents/deleted.txt"
+        try safety.write("saved before deletion",
+                         to: destination.appendingPathComponent(older).path + "/" + relativePath)
+
+        let backups = RestoreEngine.findBackupSnapshots { options in
+            options.contains(.skipHiddenVolumes) ? [] : [volume]
+        }
+        try expectEqual(backups.count, 1, "the hidden encrypted store must be discoverable")
+        let backup = backups[0]
+        try expectEqual(backup.backupDir.path, destination.path, "discovery finds the stored backup folder")
+        try expectEqual(backup.snapshots, [newer, older], "older snapshots remain available")
+        let state = AppUIState()
+        state.cachedHasBackups = !backups.isEmpty
+        try expect(state.hasBackups, "restore is available when the encrypted store has backups")
+
+        let versions = FileVersions.list(relativePath: relativePath, at: backup.backupDir)
+        try expectEqual(versions.map(\.snapshot), [older], "a deleted file is found in its older snapshot")
+        try expect(!FileManager.default.fileExists(atPath: box.home + "/" + relativePath),
+                   "the file is absent from the test home before restore")
+        let plan = SelectiveRestore.plan(snapshot: backup.backupDir.appendingPathComponent(older),
+                                         paths: [relativePath], destinationRoot: box.home)
+        let (result, _) = try SelectiveRestore.apply(plan, undoRoot: box.root.appendingPathComponent("undo"))
+        try expectEqual(result.restored, 1, "the deleted file is recovered")
+        try expectEqual(result.failed, 0, "the sandbox restore succeeds")
+        try expectEqual(try String(contentsOfFile: box.home + "/" + relativePath, encoding: .utf8),
+                        "saved before deletion", "the recovered file has its original contents")
+    }
+
     func test_topicFilesExpandWildcardsAndSkipJunk() throws {
         let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
         let snap = try snapshotDir(box, "2026-10-05_000000")

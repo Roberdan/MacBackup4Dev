@@ -96,6 +96,7 @@ struct TestRunner {
             ("Safety.sqliteCopied", safety.test_sqliteIsCopiedConsistently),
             ("Safety.coverageFindsUncovered", safety.test_coverageFindsActiveUncoveredFolder),
             ("Safety.configRoundTrip", safety.test_configRoundTripNewSections),
+            ("Restore.hiddenVolumeDeletedFile", restore.test_hiddenVolumeMakesDeletedFilesRestorable),
             ("Restore.topicWildcardsAndJunk", restore.test_topicFilesExpandWildcardsAndSkipJunk),
             ("Restore.configTopics", restore.test_configTopicsOverrideAndExtend),
             ("Restore.planApplyPerFileUndo", restore.test_planApplyAndPerFileUndo),
