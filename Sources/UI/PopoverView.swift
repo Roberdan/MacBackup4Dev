@@ -236,7 +236,18 @@ struct PopoverView: View {
                     }
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(Look.secondaryText)
-                    if !s.currentFile.isEmpty {
+                    if let file = state.backupFileActivity {
+                        Label(file.name, systemImage: "doc")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Look.text)
+                            .lineLimit(1).truncationMode(.middle)
+                            .help(file.path)
+                            .accessibilityLabel("File del backup: \(file.path)")
+                        if !file.directory.isEmpty {
+                            Text(file.directory).font(.system(size: 10)).foregroundColor(Look.tertiaryText)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                    } else if !s.currentFile.isEmpty {
                         Text(s.currentFile).font(.system(size: 10)).foregroundColor(Look.tertiaryText)
                             .lineLimit(1).truncationMode(.middle)
                     }

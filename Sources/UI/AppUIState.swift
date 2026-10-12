@@ -108,6 +108,18 @@ final class AppUIState: ObservableObject {
 
     var isRunning: Bool { appState == .running || appState == .restoring || appState == .stopping }
 
+    var canRefreshBackupProgress: Bool {
+        appState == .running && !isCleaning && !isEjecting
+    }
+
+    var backupFileActivity: (name: String, directory: String, path: String)? {
+        guard appState == .running, let status, status.state == "running",
+              status.phase == "scanning" || status.phase == "copying",
+              status.filesDone > 0, !status.currentFile.isEmpty else { return nil }
+        let path = status.currentFile as NSString
+        return (path.lastPathComponent, path.deletingLastPathComponent, status.currentFile)
+    }
+
     var progressFraction: Double? {
         guard let status else { return nil }
         if appState == .running { return status.progressFraction }

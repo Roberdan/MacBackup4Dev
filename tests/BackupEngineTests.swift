@@ -102,6 +102,29 @@ final class BackupEngineTests {
                                       startedAt: iso.string(from: start))
         state.appState = .running
         state.status = status
+        try expect(state.canRefreshBackupProgress, "active backup permits visible progress updates")
+        try expectNil(state.backupFileActivity, "startup text is not a file")
+        status.filesDone = 500
+        status.currentFile = "Documents/Progetto molto lungo/relazione.txt"
+        state.status = status
+        try expectEqual(state.backupFileActivity?.name, "relazione.txt", "filename is separate from its folder")
+        try expectEqual(state.backupFileActivity?.directory, "Documents/Progetto molto lungo",
+                        "folder remains available without obscuring the filename")
+        try expectEqual(state.backupFileActivity?.path, status.currentFile, "full path is retained for help")
+        status.phase = "copying"; status.currentFile = ".zshrc"
+        state.status = status
+        try expectEqual(state.backupFileActivity?.name, ".zshrc", "root-level dotfile names remain intact")
+        try expectEqual(state.backupFileActivity?.directory, "", "root-level files have no invented folder")
+        state.cleanupPhase = .reading
+        try expect(!state.canRefreshBackupProgress, "cleanup prevents extra progress reads")
+        state.cleanupPhase = nil
+        state.ejection = EjectionFeedback(disk: URL(fileURLWithPath: "/Volumes/Backup demo"), phase: .closingStore)
+        try expect(!state.canRefreshBackupProgress, "ejection prevents extra progress reads")
+        state.ejection = nil
+        state.appState = .restoring
+        try expect(!state.canRefreshBackupProgress, "backup polling cannot overwrite restore progress")
+        try expectNil(state.backupFileActivity, "restore is not presented as backup file activity")
+        state.appState = .running
         try expectEqual(state.backupHeadline, "Backup in corso", "discovery is active")
         try expect(state.backupDetail.contains("Avviato \(ProtectionSummary.dateLabel(start))"), "start is named as start")
         try expect(state.backupDetail.contains("Ancora in corso"), "activity is explicit")
@@ -120,6 +143,7 @@ final class BackupEngineTests {
         try expectEqual(dbProgress.map { $0.0 }, [1], "database step reports actual index")
         try expectEqual(dbProgress.map { $0.1 }, [1], "database step reports configured total")
         state.status = status
+        try expectNil(state.backupFileActivity, "finalization text is not a filename")
         try expectEqual(state.backupHeadline, "Backup: fase finale", "finalization is distinct from copying")
         try expect(state.backupDetail.contains("Non scollegare il disco"), "finalization is not safe completion")
         try expect(!state.backupDetail.contains("Terminato"), "no premature completion")
@@ -129,6 +153,8 @@ final class BackupEngineTests {
         try expectNil(status.finalizationStepDate, "terminal metadata cannot keep the activity timer running")
         status.lastSnapshot = "snapshot"; status.lastCompleteAt = iso.string(from: finish)
         state.status = status
+        try expect(!state.canRefreshBackupProgress, "idle stops extra progress reads")
+        try expectNil(state.backupFileActivity, "idle cannot keep an old filename active")
         try expectEqual(state.backupHeadline, "Backup completato", "idle and manifest complete")
         try expect(state.backupDetail.contains("Terminato \(ProtectionSummary.dateLabel(finish))"), "matching operation uses actual finish")
         try expect(state.backupDetail.contains("Nessun backup in corso"), "idle is explicit")

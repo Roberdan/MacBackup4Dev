@@ -13,6 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusManager = StatusManager()
     private var iconManager: IconManager!
     private var pollTimer: Timer?
+    private var visibleProgressTimer: Timer?
     private var updateTimer: Timer?
     private var onboardingWC: OnboardingWindowController?
     private var encryptionWC: EncryptionSetupWindowController?
@@ -478,6 +479,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(monitor)
             outsideClickMonitor = nil
         }
+    }
+
+    private func updateVisibleProgressPolling() {
+        guard popover.isShown, uiState.canRefreshBackupProgress else {
+            visibleProgressTimer?.invalidate()
+            visibleProgressTimer = nil
+            return
+        }
+        guard visibleProgressTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshVisibleBackupProgress() }
+        }
+        timer.tolerance = 0.2
+        visibleProgressTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func refreshVisibleBackupProgress() {
+        guard popover.isShown, uiState.canRefreshBackupProgress else {
+            updateVisibleProgressPolling()
+            return
+        }
+        guard let status = StatusWriter().read() else { return }
+        guard status.state == "running" else {
+            pollStatus()
+            return
+        }
+        uiState.status = status
     }
 
     // MARK: - Action handlers
@@ -1153,6 +1182,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
            completed != lastRecoveryCompletion {
             refreshRecoveryAppOnDisk()
         }
+        updateVisibleProgressPolling()
     }
 
     /// Snapshot manifests live on the backup disk: read them at most every 20 s (or right
@@ -1255,7 +1285,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - NSPopoverDelegate
 
 extension AppDelegate: NSPopoverDelegate {
+    func popoverDidShow(_ notification: Notification) {
+        updateVisibleProgressPolling()
+    }
+
     func popoverDidClose(_ notification: Notification) {
         stopWatchingForOutsideClick()
+        visibleProgressTimer?.invalidate()
+        visibleProgressTimer = nil
     }
 }
