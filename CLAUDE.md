@@ -92,8 +92,11 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   menu all ask it. Never pick "the newest directory" anywhere else.
 - **Excluded source roots are not missing protected sources.** Filter them before
   existence checks and manifest recording. Restore undo data (`~/.rustybackup-pre-restore`)
-  is always excluded, even with old configs. Other missing protected sources still make
-  snapshots incomplete. Glob optimization must preserve Unicode and slash boundaries.
+  is always excluded, even with old configs. Deleted sources are recorded without making
+  an otherwise successful backup incomplete; keep them configured so recreated paths are
+  backed up again. Unreadable sources, disconnected source disks, no remaining sources and
+  the large-drop guard still make snapshots incomplete. Glob optimization must preserve
+  Unicode and slash boundaries.
 - **The scanner → copy queue must never drop entries.** `AsyncStream` stays `.unbounded`,
   bounded by the `QUEUE_LIMIT` semaphore. `bufferingNewest`/`bufferingOldest` drop silently.
 - **Never fall back to the bare file name for a relative path** (`FileScanner`): use

@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.1.17] - 2026-10-18
+
+### Fixed
+- Deleting a configured file or folder no longer marks an otherwise successful backup
+  incomplete. Missing sources remain recorded without changing the configuration, so a
+  recreated folder is automatically backed up again; older snapshots retain deleted files
+  according to the existing retention policy.
+- Source inspection distinguishes missing paths from permission and other filesystem
+  errors. Unreadable sources, disconnected source disks, no remaining sources and unexpectedly
+  large drops in file counts still prevent a false complete result.
+
 ## [4.1.16] - 2026-10-12
 
 ### Changed
