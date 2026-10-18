@@ -98,6 +98,10 @@ and included again automatically if recreated. Deleted files remain recoverable 
 retained older snapshots. Unreadable sources, disconnected source disks, no remaining
 sources and unexpectedly large drops in file counts still make a snapshot incomplete;
 the large-drop protection also pauses snapshot cleanup.
+Regenerable local CI queues and GitHub Actions runner diagnostics, temporary files,
+downloaded tools and action copies are excluded before scanning their contents.
+Starting or retrying a backup reads the current saved configuration without rewriting
+the source list; only confirming the folder picker changes that selection.
 
 ---
 

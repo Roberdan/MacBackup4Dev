@@ -9,6 +9,12 @@ final class ExcludeFilterTests {
                      "GitHub/app/.pytest_cache/data", "GitHub/app/.ruff_cache/data",
                      "GitHub/app/.mypy_cache/data", "GitHub/app/__pycache__/mod.pyc",
                      "GitHub/app/.cache/data", "GitHub/app/.next/cache/data",
+                     ".npm/_cacache/content", ".pnpm-store/packages/pkg",
+                     ".local/state/dev-tool/ci-suite/queue/12345",
+                     "actions-runners/dev-runner/_diag/blocks/block.1",
+                     "actions-runners/dev-runner/_work/_temp/task",
+                     "actions-runners/dev-runner/_work/_tool/node/bin/node",
+                     "actions-runners/dev-runner/_work/_actions/action/index.js",
                      "GitHub/app/.turbo/data", "GitHub/app/file.tmp", "GitHub/app/file.swp",
                      ".rustybackup-pre-restore", ".rustybackup-pre-restore/old/undo.json"] {
             try expect(filter.isExcluded(relativePath: path), "Mandatory exclusion: \(path)")
@@ -20,6 +26,9 @@ final class ExcludeFilterTests {
                      "GitHub/app/data.sqlite", "GitHub/app/training.jsonl",
                      "GitHub/app/target/debugger/main.rs", "GitHub/app/.gradle/gradle.properties",
                      "GitHub/app/.yarnrc.yml", "GitHub/app/build/source.swift",
+                     ".local/state/dev-tool/settings.json", ".local/state/dev-tool/queue/notes.md",
+                     "actions-runners/dev-runner/.runner", "actions-runners/dev-runner/config.sh",
+                     "actions-runners/dev-runner/_work/project/project/source.swift",
                      "Documents/temp/report.docx", "GitHub/app/tmp/notes.md"] {
             try expect(!filter.isExcluded(relativePath: path), "Do not invent exclusions for real data: \(path)")
         }

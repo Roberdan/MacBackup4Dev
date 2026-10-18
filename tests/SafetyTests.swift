@@ -85,10 +85,16 @@ final class SafetyTests {
         for i in 0..<total {
             try write("file \(i)", to: "\(box.home)/data/d\(i % 40)/f\(i).txt")
         }
-        let result = try runEngine(config(box, sources: ["data"]), box)
+        try write("temporary", to: box.home + "/.local/state/dev-tool/ci-suite/queue/12345")
+        try write("temporary", to: box.home + "/actions-runners/dev-runner/_diag/blocks/block.1")
+        let result = try runEngine(config(box, sources: ["data", ".local/state", "actions-runners"]), box)
         try expectEqual(countFiles(result.snapshot.path), total, "every file must be in the snapshot")
         try expectEqual(result.manifest.filesDiscovered, Int64(total), "discovered count")
         try expectEqual(result.manifest.filesProcessed, Int64(total), "processed count")
+        try expect(!FileManager.default.fileExists(atPath: result.snapshot.path + "/actions-runners"),
+                   "runner diagnostics are pruned before copy")
+        try expect(!FileManager.default.fileExists(atPath: result.snapshot.path + "/.local/state"),
+                   "runtime queue files are pruned before copy")
         try expect(result.manifest.complete, "snapshot must be complete: \(result.manifest.incompleteReasons)")
         try expectEqual(SnapshotCatalog.latestComplete(at: URL(fileURLWithPath: box.dest))?.name,
                         result.snapshot.lastPathComponent, "catalog sees it as complete")

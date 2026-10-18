@@ -612,15 +612,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// "Esegui ora": back up what is configured, now. Choosing folders is a separate action
     /// (the picker used to stand in front of every backup and rewrite the source list).
     private func handleRequestBackup() {
-        guard !uiState.isCleaning, !uiState.isEjecting, let config = config else { return }
+        guard !uiState.isCleaning, !uiState.isEjecting else { return }
         popover.performClose(nil)
-        startBackup(selectedPaths: config.source.paths,
-                    includeRightsManagedFiles: config.protection.includeRightsManagedFiles)
+        startBackup()
     }
 
     private func handleChooseSources() {
         guard !uiState.isCleaning, !uiState.isEjecting else { return }
-        guard let config = config else { return }
+        guard let config = freshConfig() else { return }
         popover.performClose(nil)
 
         let treeWC = TreeWindowController(
@@ -686,18 +685,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         (try? Config.load(from: Config.defaultPath)) ?? config
     }
 
-    private func startBackup(selectedPaths: [String], includeRightsManagedFiles: Bool) {
+    private func startBackup(selectedPaths: [String]? = nil, includeRightsManagedFiles: Bool? = nil) {
         guard !uiState.isCleaning, !uiState.isEjecting else { return }
         uiState.dismissEjection()
-        guard var pending = freshConfig() else { return }
-        pending.source.paths = selectedPaths
-        pending.protection.includeRightsManagedFiles = includeRightsManagedFiles
+        let pending: Config
         do {
-            try pending.save(to: Config.defaultPath)
+            pending = try Config.forBackup(selectedPaths: selectedPaths,
+                                           includeRightsManagedFiles: includeRightsManagedFiles)
+            if selectedPaths != nil || includeRightsManagedFiles != nil {
+                try pending.save(to: Config.defaultPath)
+            }
         } catch {
             Log.error("Cannot save backup preferences: \(error.localizedDescription)")
             let alert = NSAlert()
-            alert.messageText = "Impossibile salvare le impostazioni"
+            alert.messageText = "Impossibile leggere o salvare le impostazioni"
             alert.informativeText = "Backup non avviato. \(error.localizedDescription)"
             alert.alertStyle = .warning
             alert.runModal()

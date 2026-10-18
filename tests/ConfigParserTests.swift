@@ -89,6 +89,36 @@ final class ConfigParserTests {
         try expectEqual(config1.retention.hourly, config2.retention.hourly, "retention mismatch after round-trip")
     }
 
+    func test_backupUsesFreshChoicesUnlessPickerConfirms() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".toml")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        var config = Config(source: SourceConfig(paths: ["~/old-folder"]),
+                            destination: DestinationConfig(path: "/Volumes/Backup"),
+                            exclude: ExcludeConfig(patterns: ["custom-cache"]), retention: RetentionConfig())
+        try config.save(to: tmp)
+        let launchConfig = try Config.load(from: tmp)
+        config.source.paths = ["~/current-folder"]
+        config.protection.includeRightsManagedFiles = true
+        try config.save(to: tmp)
+        let bytesBefore = try Data(contentsOf: tmp)
+        let ordinaryBackup = try Config.forBackup(from: tmp)
+        try expectEqual(ordinaryBackup.source.paths, ["~/current-folder"], "retry never reintroduces cached sources")
+        try expect(ordinaryBackup.protection.includeRightsManagedFiles, "retry honors current protection choice")
+        try expectEqual(try Data(contentsOf: tmp), bytesBefore, "reading backup preferences never rewrites the file")
+        try expect(launchConfig.source.paths != ordinaryBackup.source.paths, "test really changed settings after launch")
+
+        let pickerBackup = try Config.forBackup(from: tmp, selectedPaths: ["~/chosen-folder"],
+                                               includeRightsManagedFiles: false)
+        try expectEqual(pickerBackup.source.paths, ["~/chosen-folder"], "explicit picker changes take effect")
+        try expect(!pickerBackup.protection.includeRightsManagedFiles, "explicit picker protection takes effect")
+        try expectEqual(pickerBackup.exclude.patterns, ["custom-cache"], "other fresh settings stay intact")
+        try FileManager.default.removeItem(at: tmp)
+        var refused = false
+        do { _ = try Config.forBackup(from: tmp) }
+        catch { refused = true }
+        try expect(refused, "a missing configuration never falls back to cached or default choices")
+    }
+
     func test_legacyConfigMigration() throws {
         let toml = """
         [source]

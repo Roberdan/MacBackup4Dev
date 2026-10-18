@@ -130,6 +130,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   LaunchServices (a child process dies with the app). One copy at a time via a distributed
   notification registered `.deliverImmediately` (never NSRunningApplication.terminate:
   silently blocked; plain observers: suspended for a menu-bar app).
+- **Backup/retry preferences (4.1.18):** `Config.forBackup` reads current saved choices.
+  A normal start never passes cached paths or rewrites the source list; only explicit
+  picker confirmation overrides it. Failed copies remain errors but do not count toward
+  the post-save source-disappearance emergency guard.
 - **Encrypted store (4.1):** destination lives inside `/Volumes/<encryption.volume>`, an
   encrypted sparsebundle on the disk (`Config.diskURL` = the physical disk: name it, measure
   it, eject it — closing the store first). Password chosen by the user, in the login Keychain,

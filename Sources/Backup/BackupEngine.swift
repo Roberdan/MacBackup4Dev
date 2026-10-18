@@ -277,7 +277,7 @@ enum BackupEngine {
             processResult(result, stats: &stats, errors: &errorList, skips: &skipList)
             let isShellFile = entry.relativePath.hasSuffix("shrc") || entry.relativePath.hasSuffix("profile")
                 || entry.relativePath.hasSuffix("shenv") || entry.relativePath.hasSuffix("history")
-            if !isShellFile && !FileManager.default.fileExists(atPath: entry.absolutePath) {
+            if result.savedFile && !isShellFile && !FileManager.default.fileExists(atPath: entry.absolutePath) {
                 vanishedCount += 1
                 Log.warn("Source file vanished after copy: \(entry.relativePath) (\(vanishedCount)/\(VANISHED_THRESHOLD))")
             }

@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.1.18] - 2026-10-18
+
+### Fixed
+- "Esegui ora" and "Riprova" read the current saved configuration without overwriting
+  it with the source list cached at launch. Only confirming the folder picker changes
+  the source selection; a missing or unreadable configuration stops with an explicit error.
+- Regenerable local CI queue files and GitHub Actions runner diagnostics, temporary
+  files, downloaded tools and action copies are excluded even with an old configuration.
+- A failed copy is still reported as an error, but no longer counts as a source
+  disappearing after a successful save. The emergency guard remains active for files
+  that disappear after a successful copy or hard link.
+
 ## [4.1.17] - 2026-10-18
 
 ### Fixed

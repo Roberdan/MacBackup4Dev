@@ -12,6 +12,9 @@ struct ExcludeFilter {
         ".venv", ".tox", ".nox", "*.pyc", "*.pyo",
         ".build", "DerivedData", "build/intermediates", "target/debug", "target/release",
         ".gradle/caches", ".gradle/daemon", ".gradle/workers",
+        ".local/state/*/ci-suite/queue",
+        "actions-runners/*/_diag", "actions-runners/*/_work/_temp",
+        "actions-runners/*/_work/_tool", "actions-runners/*/_work/_actions",
         // Re-clonable/re-downloadable working copies (e.g. ~/.gbrain/checkouts, 11 GB+).
         "checkouts",
         // "cache" (no dot) is a distinct literal from ".cache" above -- e.g. a plugin
