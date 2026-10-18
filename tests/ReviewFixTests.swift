@@ -39,19 +39,91 @@ final class ReviewFixTests {
         try expect(!result.manifest.complete, "snapshot incomplete when a repo cannot be read")
     }
 
-    /// H3: a folder that was in the last complete snapshot and is gone now.
-    func test_missingSourceAfterCompleteSnapshotIsIncomplete() throws {
+    /// Deleting configured sources is normal; the remaining files still get a complete backup.
+    func test_deletedSourcesDoNotMakeSnapshotIncomplete() throws {
         let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
         try safety.write("a", to: box.home + "/keep/a.txt")
         try safety.write("b", to: box.home + "/projects/b.txt")
-        let cfg = safety.config(box, sources: ["keep", "projects"])
+        try safety.write("config", to: box.home + "/tool.conf")
+        let cfg = safety.config(box, sources: ["keep", "projects", "tool.conf"])
         let first = try safety.runEngine(cfg, box)
         try expect(first.manifest.complete, "first run complete")
         try FileManager.default.removeItem(atPath: box.home + "/projects")
+        try FileManager.default.removeItem(atPath: box.home + "/tool.conf")
         let second = try safety.runEngine(cfg, box)
-        try expect(!second.manifest.complete, "second run incomplete")
-        try expect(second.manifest.incompleteReasons.contains { $0.contains("projects") },
-                   "reason names the folder: \(second.manifest.incompleteReasons)")
+        try expect(second.manifest.complete, "deleted sources are not errors: \(second.manifest.incompleteReasons)")
+        try expectEqual(second.manifest.missingSources, [box.home + "/projects", box.home + "/tool.conf"],
+                        "missing sources remain recorded")
+        try expectEqual(second.manifest.sources, [box.home + "/keep"], "only existing sources were backed up")
+        try expectEqual(try String(contentsOf: second.snapshot.appendingPathComponent("keep/a.txt"),
+                                   encoding: .utf8), "a", "remaining files saved")
+        try expectEqual(try String(contentsOf: first.snapshot.appendingPathComponent("projects/b.txt"),
+                                   encoding: .utf8), "b", "deleted files remain in the older snapshot")
+        let writer = StatusWriter(directory: box.state)
+        try expectEqual(writer.read()?.lastResult, "complete", "menu no longer reports a false failure")
+        try expectEqual(writer.read()?.incompleteReasons, [], "no stale missing-source error")
+        try expectEqual(SnapshotCatalog.defaultForRestore(at: URL(fileURLWithPath: box.dest))?.name,
+                        second.snapshot.lastPathComponent, "latest backup is usable")
+        let third = try safety.runEngine(cfg, box)
+        try expect(third.manifest.complete, "repeated backups work without changing the configuration")
+        try safety.write("recreated", to: box.home + "/projects/new.txt")
+        let fourth = try safety.runEngine(cfg, box)
+        try expect(fourth.manifest.complete, "a recreated source is automatically backed up again")
+        try expectEqual(try String(contentsOf: fourth.snapshot.appendingPathComponent("projects/new.txt"),
+                                   encoding: .utf8), "recreated", "recreated source saved")
+    }
+
+    func test_noRemainingSourcesIsStillIncomplete() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        try safety.write("a", to: box.home + "/projects/a.txt")
+        let cfg = safety.config(box, sources: ["projects"])
+        let first = try safety.runEngine(cfg, box)
+        try FileManager.default.removeItem(atPath: box.home + "/projects")
+        let second = try safety.runEngine(cfg, box)
+        try expect(!second.manifest.complete, "nothing left to back up is not success")
+        try expect(second.manifest.incompleteReasons.contains { $0.contains("Nessuna") }, "empty backup explained")
+        try expectEqual(SnapshotCatalog.latestComplete(at: URL(fileURLWithPath: box.dest))?.name,
+                        first.snapshot.lastPathComponent, "older good backup stays the restore default")
+    }
+
+    func test_inaccessibleSourceIsNotTreatedAsDeleted() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        try safety.write("a", to: box.home + "/keep/a.txt")
+        try safety.write("b", to: box.home + "/locked/projects/b.txt")
+        let cfg = safety.config(box, sources: ["keep", "locked/projects"])
+        let first = try safety.runEngine(cfg, box)
+        try expect(first.manifest.complete, "first backup complete")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: box.home + "/locked")
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: box.home + "/locked") }
+        let second = try safety.runEngine(cfg, box)
+        try expect(!second.manifest.complete, "a permission failure is not an intentional deletion")
+        try expect(second.manifest.incompleteReasons.contains { $0.contains("locked/projects") },
+                   "inaccessible source is named")
+        try expect(!second.manifest.missingSources.contains(box.home + "/locked/projects"),
+                   "unreadable is not missing")
+    }
+
+    func test_deletedSourcesKeepShrinkAndVolumeGuards() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        try safety.write("a", to: box.home + "/keep/a.txt")
+        for index in 0..<1_000 {
+            try safety.write("b", to: box.home + "/projects/f\(index)")
+        }
+        var cfg = safety.config(box, sources: ["keep", "projects"])
+        let first = try safety.runEngine(cfg, box)
+        try expect(first.manifest.complete, "baseline complete")
+        try FileManager.default.removeItem(atPath: box.home + "/projects")
+        let second = try safety.runEngine(cfg, box)
+        try expectNotNil(second.manifest.shrinkWarning, "large losses still pause cleanup")
+        try expect(!second.manifest.complete, "large losses still protect the older complete backup")
+
+        let absentVolume = "/Volumes/mb4d-missing-source-\(UUID().uuidString)/projects"
+        cfg.source.paths.append(absentVolume)
+        let third = try safety.runEngine(cfg, box)
+        try expect(!third.manifest.complete, "a disconnected source disk is not an intentional deletion")
+        try expect(third.manifest.incompleteReasons.contains {
+            $0.contains(absentVolume) && $0.contains("disco")
+        }, "missing source disk explained")
     }
 
     /// H4: the remote branch was squash-merged and deleted; local commits sit on top of it.

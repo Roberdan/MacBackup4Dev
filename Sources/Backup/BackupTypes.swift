@@ -32,6 +32,13 @@ enum FileResult {
     /// the backup must always be explainable.
     case skipped(path: String, reason: String)
     case error(path: String, error: Error)
+
+    var savedFile: Bool {
+        switch self {
+        case .hardlinked, .copied: return true
+        case .skipped, .error: return false
+        }
+    }
 }
 
 enum BackupError: LocalizedError {

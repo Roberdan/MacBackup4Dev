@@ -1,5 +1,32 @@
 # Changelog
 
+## [4.1.18] - 2026-10-18
+
+### Fixed
+- Deleting a configured file or folder no longer marks an otherwise successful backup
+  incomplete. New files and subfolders inside configured sources are included automatically,
+  without changing the selection; deleted files stay deleted on the Mac and remain
+  recoverable from retained older snapshots.
+- "Esegui ora" and "Riprova" read the current saved configuration without overwriting
+  it with the source list cached at launch. Only confirming the folder picker changes
+  the source selection; a missing or unreadable configuration stops with an explicit error.
+- Regenerable local CI queue files and GitHub Actions runner diagnostics, temporary
+  files, downloaded tools and action copies are excluded even with an old configuration.
+- A failed copy is still reported as an error, but no longer counts as a source
+  disappearing after a successful save. The emergency guard remains active for files
+  that disappear after a successful copy or hard link.
+
+## [4.1.17] - 2026-10-18
+
+### Fixed
+- Deleting a configured file or folder no longer marks an otherwise successful backup
+  incomplete. Missing sources remain recorded without changing the configuration, so a
+  recreated folder is automatically backed up again; older snapshots retain deleted files
+  according to the existing retention policy.
+- Source inspection distinguishes missing paths from permission and other filesystem
+  errors. Unreadable sources, disconnected source disks, no remaining sources and unexpectedly
+  large drops in file counts still prevent a false complete result.
+
 ## [4.1.16] - 2026-10-12
 
 ### Changed

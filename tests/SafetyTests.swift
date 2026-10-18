@@ -85,10 +85,16 @@ final class SafetyTests {
         for i in 0..<total {
             try write("file \(i)", to: "\(box.home)/data/d\(i % 40)/f\(i).txt")
         }
-        let result = try runEngine(config(box, sources: ["data"]), box)
+        try write("temporary", to: box.home + "/.local/state/dev-tool/ci-suite/queue/12345")
+        try write("temporary", to: box.home + "/actions-runners/dev-runner/_diag/blocks/block.1")
+        let result = try runEngine(config(box, sources: ["data", ".local/state", "actions-runners"]), box)
         try expectEqual(countFiles(result.snapshot.path), total, "every file must be in the snapshot")
         try expectEqual(result.manifest.filesDiscovered, Int64(total), "discovered count")
         try expectEqual(result.manifest.filesProcessed, Int64(total), "processed count")
+        try expect(!FileManager.default.fileExists(atPath: result.snapshot.path + "/actions-runners"),
+                   "runner diagnostics are pruned before copy")
+        try expect(!FileManager.default.fileExists(atPath: result.snapshot.path + "/.local/state"),
+                   "runtime queue files are pruned before copy")
         try expect(result.manifest.complete, "snapshot must be complete: \(result.manifest.incompleteReasons)")
         try expectEqual(SnapshotCatalog.latestComplete(at: URL(fileURLWithPath: box.dest))?.name,
                         result.snapshot.lastPathComponent, "catalog sees it as complete")
@@ -134,6 +140,30 @@ final class SafetyTests {
         try expect(second.manifest.complete, "deleted excluded sources must not poison the next backup")
         try expect(second.manifest.missingSources.isEmpty, "excluded roots are not missing backup sources")
         try expect(second.manifest.incompleteReasons.isEmpty, "no false missing-source warning")
+    }
+
+    func test_fileChangesInsideSourcesAreAutomatic() throws {
+        let box = try makeSandbox(); defer { cleanup(box) }
+        try write("old content", to: box.home + "/data/old.txt")
+        let cfg = config(box, sources: ["data"])
+        let first = try runEngine(cfg, box)
+        try expect(first.manifest.complete, "initial backup complete")
+
+        try FileManager.default.removeItem(atPath: box.home + "/data/old.txt")
+        try write("new content", to: box.home + "/data/new-folder/new.txt")
+        try write("downloaded package", to: box.home + "/data/node_modules/package/index.js")
+        let second = try runEngine(cfg, box)
+        try expect(second.manifest.complete, "normal additions and deletions need no selection change")
+        try expectEqual(second.manifest.sources, first.manifest.sources, "same configured source selection")
+        try expectEqual(second.manifest.filesProcessed, 1, "new files included and dependencies excluded")
+        try expectEqual(try String(contentsOf: second.snapshot.appendingPathComponent("data/new-folder/new.txt"),
+                                   encoding: .utf8), "new content", "new nested files backed up automatically")
+        try expect(!FileManager.default.fileExists(atPath: second.snapshot.path + "/data/old.txt"),
+                   "a deleted file is absent from the new snapshot")
+        try expect(!FileManager.default.fileExists(atPath: box.home + "/data/old.txt"),
+                   "a backup never restores a deleted source")
+        try expectEqual(try String(contentsOf: first.snapshot.appendingPathComponent("data/old.txt"),
+                                   encoding: .utf8), "old content", "older snapshots keep deleted content")
     }
 
     func test_shrinkWarningOnEmptiedHome() throws {

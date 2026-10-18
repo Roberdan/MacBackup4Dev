@@ -22,6 +22,17 @@ struct Config {
         return try parseTOML(content)
     }
 
+    /// A plain backup uses today's saved choices; only picker confirmation replaces them.
+    static func forBackup(from url: URL = defaultPath, selectedPaths: [String]? = nil,
+                          includeRightsManagedFiles: Bool? = nil) throws -> Config {
+        var config = try load(from: url)
+        if let selectedPaths { config.source.paths = selectedPaths }
+        if let includeRightsManagedFiles {
+            config.protection.includeRightsManagedFiles = includeRightsManagedFiles
+        }
+        return config
+    }
+
     func save(to url: URL) throws {
         let parent = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)

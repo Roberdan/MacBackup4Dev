@@ -96,6 +96,33 @@ final class BackupOptimizationTests {
         try expectEqual(try String(contentsOf: source, encoding: .utf8), "keep this", "Source is never modified")
     }
 
+    func test_failedCopiesNeverTriggerPostSaveDisappearanceGuard() throws {
+        let box = try SafetyTests().makeSandbox()
+        defer { SafetyTests().cleanup(box) }
+        let result = ResultBox<FileResult>()
+        let done = DispatchSemaphore(value: 0)
+        Task {
+            result.value = await BackupEngine.processFile(
+                entry: FileEntry(relativePath: "deleted.txt", absolutePath: box.home + "/deleted.txt",
+                                 size: 1, mtime: Date()),
+                destFile: box.dest + "/deleted.txt", prevFile: nil)
+            done.signal()
+        }
+        try expect(done.wait(timeout: .now() + 10) == .success, "failed copy finishes")
+        guard let failure = result.value, case .error = failure else {
+            throw TestFailure.failed("a file deleted before copy remains a reported error")
+        }
+        try expect(!failure.savedFile, "a failed copy is not a source lost after a successful save")
+        var stats = BackupStats()
+        var errors: [(path: String, error: Error)] = []
+        var skips: [(path: String, reason: String)] = []
+        BackupEngine.processResult(failure, stats: &stats, errors: &errors, skips: &skips)
+        try expectEqual(errors.count, 1, "real copy failures remain visible and prevent completeness")
+        try expect(FileResult.copied(bytes: 1).savedFile, "successful copies retain the disappearance guard")
+        try expect(FileResult.hardlinked.savedFile, "successful hard links retain the disappearance guard")
+        try expect(!FileResult.skipped(path: "cache", reason: "excluded").savedFile, "skips never claim a saved file")
+    }
+
     func test_previousMetadataRejectsSymlinksAndKeepsTolerance() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

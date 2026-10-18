@@ -92,8 +92,11 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   menu all ask it. Never pick "the newest directory" anywhere else.
 - **Excluded source roots are not missing protected sources.** Filter them before
   existence checks and manifest recording. Restore undo data (`~/.rustybackup-pre-restore`)
-  is always excluded, even with old configs. Other missing protected sources still make
-  snapshots incomplete. Glob optimization must preserve Unicode and slash boundaries.
+  is always excluded, even with old configs. Deleted sources are recorded without making
+  an otherwise successful backup incomplete; keep them configured so recreated paths are
+  backed up again. Unreadable sources, disconnected source disks, no remaining sources and
+  the large-drop guard still make snapshots incomplete. Glob optimization must preserve
+  Unicode and slash boundaries.
 - **The scanner → copy queue must never drop entries.** `AsyncStream` stays `.unbounded`,
   bounded by the `QUEUE_LIMIT` semaphore. `bufferingNewest`/`bufferingOldest` drop silently.
 - **Never fall back to the bare file name for a relative path** (`FileScanner`): use
@@ -127,6 +130,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   LaunchServices (a child process dies with the app). One copy at a time via a distributed
   notification registered `.deliverImmediately` (never NSRunningApplication.terminate:
   silently blocked; plain observers: suspended for a menu-bar app).
+- **Backup/retry preferences (4.1.18):** `Config.forBackup` reads current saved choices.
+  A normal start never passes cached paths or rewrites the source list; only explicit
+  picker confirmation overrides it. Failed copies remain errors but do not count toward
+  the post-save source-disappearance emergency guard.
 - **Encrypted store (4.1):** destination lives inside `/Volumes/<encryption.volume>`, an
   encrypted sparsebundle on the disk (`Config.diskURL` = the physical disk: name it, measure
   it, eject it — closing the store first). Password chosen by the user, in the login Keychain,

@@ -92,8 +92,20 @@ without inventing a percentage or countdown. Once the scan finishes, copy progre
 uses the known total and file throughput (including hard links); **Verifica finale**
 replaces the copy estimate while Git, databases and environment information are saved.
 Restore undo data (`~/.rustybackup-pre-restore`) is always excluded, including when
-an older configuration still lists it as a source. Other missing, previously protected
-sources continue to make a snapshot incomplete.
+an older configuration still lists it as a source. Deleting a configured file or folder
+does not make an otherwise successful backup incomplete: missing sources are recorded
+and included again automatically if recreated. Deleted files remain recoverable from
+retained older snapshots. Unreadable sources, disconnected source disks, no remaining
+sources and unexpectedly large drops in file counts still make a snapshot incomplete;
+the large-drop protection also pauses snapshot cleanup.
+Regenerable local CI queues and GitHub Actions runner diagnostics, temporary files,
+downloaded tools and action copies are excluded before scanning their contents.
+Starting or retrying a backup reads the current saved configuration without rewriting
+the source list; only confirming the folder picker changes that selection.
+Every new file or subfolder inside a configured source is included automatically on
+the next backup, without a per-file confirmation. Normal deletions before the run are
+reflected in the new snapshot and never undone on the Mac; only an explicit restore
+puts deleted content back. Cache and safety exclusions continue to apply.
 
 ---
 

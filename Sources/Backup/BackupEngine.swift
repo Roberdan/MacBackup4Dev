@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Knobs a test needs and the app does not: where "home" is, whether to run the slow
 /// environment capture, git and database safety.
@@ -89,6 +90,7 @@ enum BackupEngine {
         // Validate source paths: skip missing, block forbidden
         var allPaths: [String] = []
         var missing: [String] = []
+        var sourceReasons: [String] = []
         for path in config.source.allExpandedPaths() {
             let contracted = ConfigDiscovery.contract(path)
             if ConfigDiscovery.isForbidden(contracted, allowCloudStorage: config.protection.includeCloudStorage) {
@@ -101,11 +103,23 @@ enum BackupEngine {
                 Log.info("Skipping excluded source: \(contracted)")
                 continue
             }
-            if FileManager.default.fileExists(atPath: path) {
+            var metadata = stat()
+            if stat(path, &metadata) == 0 {
                 allPaths.append(path)
             } else {
-                missing.append(contracted)
-                Log.info("Skipping missing path: \(path)")
+                let code = errno
+                if code == ENOENT {
+                    missing.append(contracted)
+                    Log.info("Skipping missing path: \(path)")
+                    if path.hasPrefix("/Volumes/"), !isVolumeReallyMounted(path) {
+                        sourceReasons.append("Il disco della sorgente \(contracted) non è collegato.")
+                        Log.error("Source volume is not mounted: \(path)")
+                    }
+                } else {
+                    let message = String(cString: strerror(code))
+                    sourceReasons.append("La sorgente \(contracted) non è leggibile: \(message).")
+                    Log.error("Cannot inspect source \(path): \(message)")
+                }
             }
         }
         // Encrypted store: open it first (password from the Keychain) when its disk is there.
@@ -263,7 +277,7 @@ enum BackupEngine {
             processResult(result, stats: &stats, errors: &errorList, skips: &skipList)
             let isShellFile = entry.relativePath.hasSuffix("shrc") || entry.relativePath.hasSuffix("profile")
                 || entry.relativePath.hasSuffix("shenv") || entry.relativePath.hasSuffix("history")
-            if !isShellFile && !FileManager.default.fileExists(atPath: entry.absolutePath) {
+            if result.savedFile && !isShellFile && !FileManager.default.fileExists(atPath: entry.absolutePath) {
                 vanishedCount += 1
                 Log.warn("Source file vanished after copy: \(entry.relativePath) (\(vanishedCount)/\(VANISHED_THRESHOLD))")
             }
@@ -387,16 +401,9 @@ enum BackupEngine {
         let shrink = SnapshotManifest.shrinkWarning(processed: Int64(processedCount),
                                                     previous: previousComplete?.manifest,
                                                     baselineFiles: baselineFiles)
-        // A folder that was in the last complete snapshot and is gone now is not a normal
-        // day either (an unmounted volume, a moved project): say it (review H3).
-        var sourceReasons: [String] = []
+        // Deleted sources stay recorded, not errors. Empty backups, unreadable sources and
+        // an unexpectedly large drop in file count still fail the completeness checks.
         if allPaths.isEmpty { sourceReasons.append("Nessuna delle cartelle da salvare esiste su questo Mac.") }
-        if let previous = previousComplete?.manifest {
-            for gone in missing where previous.sources.contains(gone) {
-                sourceReasons.append("La cartella \(gone) non esiste più, ma era nell'ultimo backup completo. "
-                    + "Se non ti serve più, toglila dalle cartelle da salvare.")
-            }
-        }
         let (complete, reasons) = SnapshotManifest.evaluate(
             discovered: counts.discovered, processed: Int64(processedCount),
             walkerFinished: counts.walkerDone, errors: copyErrors, traversalErrors: traversalCount,
