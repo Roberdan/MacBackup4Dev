@@ -91,6 +91,7 @@ struct TestRunner {
             ("Optimization.previousMetadata", optimization.test_previousMetadataRejectsSymlinksAndKeepsTolerance),
             ("Safety.copyErrorMakesIncomplete", safety.test_copyErrorMakesSnapshotIncomplete),
             ("Safety.excludedSourceNotMissing", safety.test_excludedSourceDoesNotMakeSnapshotIncomplete),
+            ("Safety.automaticFileChanges", safety.test_fileChangesInsideSourcesAreAutomatic),
             ("Safety.shrinkWarning", safety.test_shrinkWarningOnEmptiedHome),
             ("Safety.retentionProtectsComplete", safety.test_retentionProtectsLastCompleteSnapshots),
             ("Safety.retentionPausesAfterShrink", safety.test_retentionPausesAfterShrink),

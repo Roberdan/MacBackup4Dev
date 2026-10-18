@@ -102,6 +102,10 @@ Regenerable local CI queues and GitHub Actions runner diagnostics, temporary fil
 downloaded tools and action copies are excluded before scanning their contents.
 Starting or retrying a backup reads the current saved configuration without rewriting
 the source list; only confirming the folder picker changes that selection.
+Every new file or subfolder inside a configured source is included automatically on
+the next backup, without a per-file confirmation. Normal deletions before the run are
+reflected in the new snapshot and never undone on the Mac; only an explicit restore
+puts deleted content back. Cache and safety exclusions continue to apply.
 
 ---
 

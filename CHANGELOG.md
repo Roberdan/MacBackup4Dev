@@ -3,6 +3,10 @@
 ## [4.1.18] - 2026-10-18
 
 ### Fixed
+- Deleting a configured file or folder no longer marks an otherwise successful backup
+  incomplete. New files and subfolders inside configured sources are included automatically,
+  without changing the selection; deleted files stay deleted on the Mac and remain
+  recoverable from retained older snapshots.
 - "Esegui ora" and "Riprova" read the current saved configuration without overwriting
   it with the source list cached at launch. Only confirming the folder picker changes
   the source selection; a missing or unreadable configuration stops with an explicit error.
