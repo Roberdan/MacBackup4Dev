@@ -246,7 +246,8 @@ struct TestRunner {
             ("Protection.reporting", protection.test_skipsAreReportedSeparately),
             ("FileScanner.excludedFileKeepsSibling", scanner.test_excludedFileDoesNotSwallowSiblingDirectory),
             ("FileScanner.excludedDirPruned", scanner.test_excludedDirectoryIsStillPruned),
-            ("FileScanner.multipleExcludedFiles", scanner.test_multipleExcludedFilesBeforeDirectory)
+            ("FileScanner.multipleExcludedFiles", scanner.test_multipleExcludedFilesBeforeDirectory),
+            ("FileScanner.missingChildren", scanner.test_onlyMissingChildrenAreTolerated)
         ]
 
         print("🧪 Running MacBackup4Dev tests (\(suites.count) total)...")

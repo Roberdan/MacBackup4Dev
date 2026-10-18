@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.1.19] - 2026-10-18
+
+### Fixed
+- A child file or directory deleted between listing and scanning no longer makes
+  an otherwise successful backup incomplete. Only explicit missing-entry errors are
+  tolerated; permission, disk and unknown errors still prevent a false complete result.
+- Metadata inspection uses the same error distinction instead of treating every
+  failed existence check as a normal deletion.
+
 ## [4.1.18] - 2026-10-18
 
 ### Fixed
