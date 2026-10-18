@@ -2,6 +2,27 @@ import Foundation
 
 /// Tests for the streaming file scanner.
 final class FileScannerTests {
+    func test_onlyMissingChildrenAreTolerated() throws {
+        for error in [
+            NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT)),
+            NSError(domain: NSCocoaErrorDomain, code: NSFileNoSuchFileError),
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError)
+        ] {
+            try expect(FileScanner.isMissingEntryError(error), "normal child deletion is not a traversal failure")
+        }
+        for error in [
+            NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES)),
+            NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM)),
+            NSError(domain: NSPOSIXErrorDomain, code: Int(EIO)),
+            NSError(domain: NSPOSIXErrorDomain, code: Int(ENOTDIR)),
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError),
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError),
+            NSError(domain: "OtherDomain", code: Int(ENOENT))
+        ] {
+            try expect(!FileScanner.isMissingEntryError(error), "permission, I/O and unknown failures stay actionable")
+        }
+    }
+
     func test_explicitSourcesCannotBypassExclusions() throws {
         let root = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -73,10 +73,9 @@ enum FileScanner {
                 at: source,
                 includingPropertiesForKeys: keys,
                 options: [.skipsPackageDescendants],
-                // F-08: Record traversal errors instead of silently swallowing them.
-                // Distinguishes permission skips from genuine I/O failures.
                 errorHandler: { url, error in
-                    onTraversalError?(url.path, error)
+                    // Children can be deleted after listing but before descent.
+                    if !isMissingEntryError(error) { onTraversalError?(url.path, error) }
                     return true  // continue traversal past unreadable entries
                 }
             ) else {
@@ -115,7 +114,7 @@ enum FileScanner {
                 } catch {
                     // A temp file deleted between listing and reading is normal; anything
                     // else that cannot be read is data not saved (review H3).
-                    if FileManager.default.fileExists(atPath: fullPath) { onTraversalError?(fullPath, error) }
+                    if !isMissingEntryError(error) { onTraversalError?(fullPath, error) }
                     continue
                 }
                 let isDirectory = values.isDirectory == true
@@ -162,6 +161,13 @@ enum FileScanner {
                 }
             }
         }
+    }
+
+    static func isMissingEntryError(_ error: Error) -> Bool {
+        let error = error as NSError
+        if error.domain == NSPOSIXErrorDomain { return error.code == Int(ENOENT) }
+        return error.domain == NSCocoaErrorDomain
+            && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError)
     }
 
     /// Canonical path through realpath(3). Unlike `resolvingSymlinksInPath`, it keeps the
