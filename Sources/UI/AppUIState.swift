@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 
 enum UpdatePhase {
     case downloading
@@ -22,6 +23,26 @@ final class AppUIState: ObservableObject {
     @Published var config: Config?
     @Published var scheduleLabel: String = "Off"   // human-readable current schedule
     @Published var schedule: ScheduleStatus?
+    @Published var loginItemStatus: SMAppService.Status = .notRegistered
+    @Published var loginItemError: String?
+
+    var loginItemLabel: String {
+        switch loginItemStatus {
+        case .notRegistered: return "Disattivato"
+        case .enabled: return "Attivo"
+        case .requiresApproval: return "Da consentire"
+        case .notFound: return "Non disponibile"
+        @unknown default: return "Non disponibile"
+        }
+    }
+
+    var canSetLoginItem: Bool {
+        switch loginItemStatus {
+        case .notRegistered, .enabled, .requiresApproval: return true
+        case .notFound: return false
+        @unknown default: return false
+        }
+    }
     /// The disk is there and the encrypted volume is being opened (and checked, after an
     /// unclean removal): not "disk missing" (user report 2026-10-11).
     @Published var storeOpening = false
@@ -104,6 +125,8 @@ final class AppUIState: ObservableObject {
     var onSetSchedule: ((Int?) -> Void)?
     var onRequestScheduleMenu: (() -> Void)?
     var onRequestCleanupMenu: (() -> Void)?
+    var onRequestLoginItemMenu: (() -> Void)?
+    var onRequestLoginItemSettings: (() -> Void)?
 
     // MARK: - Computed helpers
 

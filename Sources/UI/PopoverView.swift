@@ -45,6 +45,16 @@ struct PopoverView: View {
             }
             primaryActions.disabled(state.isCleaning || state.isEjecting)
             tiles.disabled(state.isCleaning || state.isEjecting)
+            if let error = state.loginItemError {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Avvio al login non modificato")
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(Look.red)
+                    Text(error).font(.system(size: 11)).foregroundColor(Look.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Apri Impostazioni di Sistema…") { state.onRequestLoginItemSettings?() }
+                        .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(Look.blue)
+                }
+            }
             footer
         }
         .padding(18)
@@ -567,6 +577,8 @@ struct PopoverView: View {
                  action: { state.onRequestOpenFolder?() }),
             Tile(id: "Espelli disco", icon: "eject.fill", tint: Color.gray, enabled: !state.isRunning && state.appState != .diskAbsent,
                  action: { state.onRequestEject?() }),
+            Tile(id: "Avvia al login\n\(state.loginItemLabel)", icon: "power.circle", tint: Look.blue,
+                 enabled: state.onRequestLoginItemMenu != nil, action: { state.onRequestLoginItemMenu?() }),
         ]
         if state.canUndo {
             out.insert(Tile(id: "Annulla ripristino", icon: "arrow.uturn.backward", tint: Look.red, enabled: true,

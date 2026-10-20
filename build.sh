@@ -49,6 +49,7 @@ swiftc \
     -framework Cocoa \
     -framework SwiftUI \
     -framework UserNotifications \
+    -framework ServiceManagement \
     -framework IOKit \
     -o "$BINARY" \
     $SWIFT_FILES

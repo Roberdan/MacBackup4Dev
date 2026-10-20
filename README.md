@@ -80,6 +80,12 @@ interval schedules are migrated when the app is idle; daily times and arbitrary
 custom intervals are preserved. Calendar jobs missed during sleep run on wake;
 scheduled backups still require AC power and never overlap another backup.
 
+To open the menu-bar app automatically when you sign in, choose **Avvia al login**
+in the app's panel, then select the same option in its menu. This uses macOS Login Items,
+not the backup schedule, and is never enabled automatically. **Da consentire** means
+macOS still needs your approval; the app opens the relevant System Settings page.
+Disabling login startup does not stop the app or disable scheduled backups.
+
 The installed menu-bar app maintains an unencrypted recovery copy of itself at the
 physical disk root, separately from backup jobs and only while idle. A stalled refresh
 does not keep a completed scheduled job or its destination locks occupied. Copy commands

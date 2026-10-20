@@ -1,6 +1,7 @@
 import Cocoa
 import UserNotifications
 import SwiftUI
+import ServiceManagement
 
 /// Main-actor isolated: every member touches AppKit or `uiState`, both of which are
 /// main-thread-only. Without the annotation the class is non-Sendable and every
@@ -99,6 +100,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var snapshotPickerWC: SnapshotPickerWindowController?
     private var restoreCenterWC: RestoreCenterWindowController?
     private var lastProtectionRefresh = Date.distantPast
+    private let loginItemManager = LoginItemManager()
 
     func setInitialConfig(_ config: Config?) {
         self.config = config
@@ -161,7 +163,72 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.onSetSchedule = { [weak self] option in self?.handleSetSchedule(option) }
         uiState.onRequestScheduleMenu = { [weak self] in self?.handleRequestScheduleMenu() }
         uiState.onRequestCleanupMenu = { [weak self] in self?.handleRequestCleanupMenu() }
+        uiState.onRequestLoginItemMenu = { [weak self] in self?.handleRequestLoginItemMenu() }
+        uiState.onRequestLoginItemSettings = { [weak self] in self?.openLoginItemSettings() }
         refreshScheduleLabel()
+        refreshLoginItemStatus()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if uiState != nil { refreshLoginItemStatus() }
+    }
+
+    private func refreshLoginItemStatus() {
+        let status = loginItemManager.status
+        if status != uiState.loginItemStatus { uiState.loginItemError = nil }
+        uiState.loginItemStatus = status
+    }
+
+    private func handleRequestLoginItemMenu() {
+        refreshLoginItemStatus()
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let toggle = NSMenuItem(title: "Avvia al login", action: #selector(toggleLoginItem), keyEquivalent: "")
+        toggle.target = self
+        toggle.isEnabled = uiState.canSetLoginItem
+        switch uiState.loginItemStatus {
+        case .enabled: toggle.state = .on
+        case .requiresApproval: toggle.state = .mixed
+        default: toggle.state = .off
+        }
+        menu.addItem(toggle)
+
+        let explanation: String
+        switch uiState.loginItemStatus {
+        case .requiresApproval: explanation = "Non attivo: serve il tuo consenso nelle Impostazioni di Sistema."
+        case .notFound: explanation = "macOS non trova questa app."
+        default: explanation = "Apre l'app nella barra dei menu, senza modificare i backup automatici."
+        }
+        let info = NSMenuItem(title: explanation, action: nil, keyEquivalent: "")
+        info.isEnabled = false
+        menu.addItem(info)
+        menu.addItem(.separator())
+        let settings = NSMenuItem(title: "Apri Elementi login nelle Impostazioni di Sistema…",
+                                  action: #selector(openLoginItemSettings), keyEquivalent: "")
+        settings.target = self
+        menu.addItem(settings)
+        if let button = statusItem.button {
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.frame.height + 4), in: button)
+        }
+    }
+
+    @objc private func toggleLoginItem() {
+        let current = loginItemManager.status
+        let enable = current != .enabled && current != .requiresApproval
+        do {
+            uiState.loginItemStatus = try loginItemManager.setEnabled(enable)
+            uiState.loginItemError = nil
+            if enable && uiState.loginItemStatus == .requiresApproval { openLoginItemSettings() }
+        } catch {
+            refreshLoginItemStatus()
+            uiState.loginItemError = error.localizedDescription
+            Log.error("Login startup not changed: \(error.localizedDescription)")
+        }
+    }
+
+    @objc private func openLoginItemSettings() {
+        popover.performClose(nil)
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     private func refreshScheduleLabel() {
@@ -1188,6 +1255,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Status polling
 
     private func pollStatus(forceProtection: Bool = false) {
+        refreshLoginItemStatus()
         guard !uiState.isEjecting else { return }
         if let disk = config?.diskURL {
             uiState.reconcileEjection(diskMounted: BackupEngine.isVolumeReallyMounted(disk.path))
