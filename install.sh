@@ -65,6 +65,26 @@ else
     echo "  ⚠️  Disco di backup non montato, skip sync"
 fi
 
+# Leave exactly one copy behind. Hand-made staging/rollback copies next to the app
+# (/Applications/.MacBackup4Dev-*.app) and old local installers each show up as another
+# "MacBackup4Dev" in macOS app lists. The updater already removes its own copies; this
+# catches the rest, plus anything an interrupted update left. CLEANUP_APPS_DIR is for tests.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+APPS_DIR="${CLEANUP_APPS_DIR:-/Applications}"
+CURRENT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+    "$BUILD_PATH/Contents/Info.plist" 2>/dev/null || true)
+find "$APPS_DIR" -maxdepth 1 -name ".${APP_NAME}-*.app" -print0 | while IFS= read -r -d '' old; do
+    "$LSREGISTER" -u "$old" 2>/dev/null || true
+    rm -rf "$old" && echo "  🧹 Rimossa copia vecchia: $(basename "$old")"
+done
+if [ -n "$CURRENT" ]; then
+    find . -maxdepth 1 \( -name "${APP_NAME}-*.pkg" -o -name "${APP_NAME}-*.app.zip" \
+        -o -name "RustyMacBackup-*.pkg" -o -name "RustyMacBackup-*.app.zip" \) \
+        ! -name "*-${CURRENT}-arm64.pkg" ! -name "*-${CURRENT}.app.zip" -print -delete \
+        | sed 's|^\./|  🧹 Rimosso installer vecchio: |'
+fi
+"$LSREGISTER" -u "$BUILD_PATH" 2>/dev/null || true
+
 # Relaunch
 echo "  Avvio $APP_NAME..."
 open "$INSTALL_PATH"
