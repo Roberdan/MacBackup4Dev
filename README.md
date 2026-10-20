@@ -692,7 +692,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 175 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 197 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
@@ -701,7 +701,8 @@ build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popov
 Tests cover the engine end to end in a sandbox (no file dropped, incomplete snapshots, git
 bundles applied to a fresh clone, SQLite/WAL copies, coverage noise), retention protection,
 selective restore and per-file undo, a whole *Nuovo Mac* rebuild, the folder picker, config
-round-trips and the pre-3.0 suites. Releases: push a `v*` tag; the workflow runs the tests
+round-trips, login-item activation/approval/error handling through a fake macOS boundary,
+and the pre-3.0 suites. Releases: push a `v*` tag; the workflow runs the tests
 and publishes the `.pkg` and `.app.zip`.
 
 ---
