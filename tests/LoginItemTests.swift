@@ -39,12 +39,12 @@ struct LoginItemTests {
             (.notRegistered, "Disattivato", true, "Attiva avvio al login"),
             (.enabled, "Attivo", true, "Disattiva avvio al login"),
             (.requiresApproval, "Da consentire", true, "Apri Elementi login…"),
-            (.notFound, "Non disponibile", false, "Non disponibile"),
+            (.notFound, "Da configurare", true, "Riprova attivazione"),
         ]
         for (status, label, canSet, actionTitle) in cases {
             state.loginItemStatus = status
             try expectEqual(state.loginItemLabel, label, "pending approval is never presented as active")
-            try expectEqual(state.canSetLoginItem, canSet, "only known, available service states can be toggled")
+            try expectEqual(state.canSetLoginItem, canSet, "a failed lookup still offers explicit registration recovery")
             try expectEqual(state.loginItemActionTitle, actionTitle, "the next action matches the real OS state")
         }
         try expectNil(state.schedule, "login startup does not install a backup schedule")
@@ -74,8 +74,33 @@ struct LoginItemTests {
 
         state.loginItemStatus = .notFound
         state.requestLoginItemPrimaryAction()
-        try expectEqual(choices, [true, false], "unavailable services cannot be opted in")
-        try expectNotNil(state.loginItemError, "an unavailable action explains the problem")
+        try expectEqual(choices, [true, false, true], "a failed lookup must not block an explicit registration retry")
+        try expectNil(state.loginItemError, "do not invent a missing-app failure before calling macOS")
+    }
+
+    func test_failedLookupCanRetryRegistrationWithoutHidingTheState() throws {
+        for result: SMAppService.Status in [.enabled, .requiresApproval] {
+            let service = Service(.notFound)
+            service.registrationResult = result
+            let state = AppUIState()
+            state.onSetLoginItem = { [weak state] enabled in
+                do {
+                    state?.updateLoginItemStatus(try service.manager.setEnabled(enabled))
+                } catch {
+                    state?.loginItemError = error.localizedDescription
+                }
+            }
+            state.updateLoginItemStatus(service.manager.status)
+            try expectEqual(state.loginItemStatus, .notFound, "a failed lookup is not silently relabelled as off or active")
+            try expect(state.canSetLoginItem, "the installed app must not leave activation disabled")
+            try expectEqual(service.registrations, 0, "reading the failed lookup never opts in or repairs automatically")
+
+            state.requestLoginItemPrimaryAction()
+            try expectEqual(service.registrations, 1, "the recovery button reaches the real registration boundary")
+            try expectEqual(state.loginItemStatus, result, "only the observed result determines whether approval is still needed")
+            try expectNil(state.loginItemError, "successful registration clears the dead end without inventing an error")
+            try expectEqual(service.settingsOpened, 0, "a registration retry never opens settings automatically")
+        }
     }
 
     func test_settingsOnlyOpenForAnActualPendingRegistration() throws {
@@ -109,6 +134,8 @@ struct LoginItemTests {
             (.requiresApproval, true, .requiresApproval, 0, 0),
             (.requiresApproval, false, .notRegistered, 0, 1),
             (.notRegistered, true, .requiresApproval, 1, 0),
+            (.notFound, true, .enabled, 1, 0),
+            (.notFound, true, .requiresApproval, 1, 0),
         ]
         for (initial, enabled, expected, registrations, unregistrations) in cases {
             let service = Service(initial)
@@ -122,13 +149,13 @@ struct LoginItemTests {
     }
 
     func test_nativeErrorsAreNotReportedAsSuccess() throws {
-        for initial: SMAppService.Status in [.notRegistered, .enabled, .requiresApproval] {
+        for initial: SMAppService.Status in [.notRegistered, .enabled, .requiresApproval, .notFound] {
             let service = Service(initial)
             let failure = NSError(domain: "LoginItemTests", code: 42,
                                   userInfo: [NSLocalizedDescriptionKey: "Registration denied"])
             service.failure = failure
             do {
-                _ = try service.manager.setEnabled(initial == .notRegistered)
+                _ = try service.manager.setEnabled(initial == .notRegistered || initial == .notFound)
                 try fail("a native error must reach the app's visible error handler")
             } catch let error as NSError {
                 try expectEqual(error.domain, failure.domain, "preserve the original error")
@@ -139,20 +166,19 @@ struct LoginItemTests {
     }
 
     func test_unavailableAndUnchangedStatesFailLoudly() throws {
-        for enabled in [true, false] {
-            let service = Service(.notFound)
-            do {
-                _ = try service.manager.setEnabled(enabled)
-                try fail("an unavailable service must not appear to accept the choice")
-            } catch LoginItemManager.Failure.notFound {}
-            try expectEqual(service.registrations + service.unregistrations, 0, "do not write when macOS cannot find the app")
-        }
-        for initial: SMAppService.Status in [.notRegistered, .enabled] {
+        let missing = Service(.notFound)
+        do {
+            _ = try missing.manager.setEnabled(false)
+            try fail("a failed lookup cannot prove that login startup was disabled")
+        } catch LoginItemManager.Failure.notFound {}
+        try expectEqual(missing.registrations + missing.unregistrations, 0, "disabling after a failed lookup must not register the app")
+
+        for initial: SMAppService.Status in [.notRegistered, .enabled, .notFound] {
             let service = Service(initial)
             service.registrationResult = initial
             service.unregistrationResult = initial
             do {
-                _ = try service.manager.setEnabled(initial == .notRegistered)
+                _ = try service.manager.setEnabled(initial != .enabled)
                 try fail("an API returning without applying the change is not success")
             } catch LoginItemManager.Failure.notApplied {}
         }

@@ -17,7 +17,9 @@ struct LoginItemManager {
             // Re-registering an enabled or denied item is not an approval request.
             if !enabled { try unregister() }
         case .notFound:
-            throw Failure.notFound
+            guard enabled else { throw Failure.notFound }
+            // A failed status lookup must not block an explicit registration retry.
+            try register()
         @unknown default:
             throw Failure.unknownStatus
         }
@@ -41,7 +43,7 @@ struct LoginItemManager {
         var errorDescription: String? {
             switch self {
             case .notFound:
-                return "macOS non trova questa app. Avviala dalla cartella Applicazioni e riprova."
+                return "macOS non riesce a riconoscere l'avvio al login di questa app. Puoi riprovare la configurazione da questa finestra."
             case .unknownStatus:
                 return "macOS restituisce uno stato di avvio al login non riconosciuto."
             case .notApplied:

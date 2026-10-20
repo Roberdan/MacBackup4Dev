@@ -89,6 +89,10 @@ only then does **Apri Elementi login** open System Settings. The guide remains a
 and returning to the app or pressing **Ricontrolla** reads the real system state.
 **Attivo** is shown only after macOS confirms it. Pending requests can be cancelled.
 Disabling login startup in the window does not stop the app or disable scheduled backups.
+If macOS cannot recognize the login registration, **Da configurare** keeps
+**Riprova attivazione** available instead of asking you to reopen an already installed app.
+The retry requests registration only when selected; any native error stays visible, and
+the app never presents a failed lookup as disabled or active.
 
 The installed menu-bar app maintains an unencrypted recovery copy of itself at the
 physical disk root, separately from backup jobs and only while idle. A stalled refresh
@@ -692,7 +696,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 197 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 198 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?

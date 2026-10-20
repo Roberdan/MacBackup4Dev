@@ -31,15 +31,14 @@ final class AppUIState: ObservableObject {
         case .notRegistered: return "Disattivato"
         case .enabled: return "Attivo"
         case .requiresApproval: return "Da consentire"
-        case .notFound: return "Non disponibile"
+        case .notFound: return "Da configurare"
         @unknown default: return "Non disponibile"
         }
     }
 
     var canSetLoginItem: Bool {
         switch loginItemStatus {
-        case .notRegistered, .enabled, .requiresApproval: return true
-        case .notFound: return false
+        case .notRegistered, .enabled, .requiresApproval, .notFound: return true
         @unknown default: return false
         }
     }
@@ -49,7 +48,7 @@ final class AppUIState: ObservableObject {
         case .notRegistered: return "Attiva avvio al login"
         case .enabled: return "Disattiva avvio al login"
         case .requiresApproval: return "Apri Elementi login…"
-        case .notFound: return "Non disponibile"
+        case .notFound: return "Riprova attivazione"
         @unknown default: return "Non disponibile"
         }
     }
@@ -61,12 +60,9 @@ final class AppUIState: ObservableObject {
 
     func requestLoginItemPrimaryAction() {
         switch loginItemStatus {
-        case .notRegistered: onSetLoginItem?(true)
+        case .notRegistered, .notFound: onSetLoginItem?(true)
         case .enabled: onSetLoginItem?(false)
         case .requiresApproval: onRequestLoginItemSettings?()
-        case .notFound:
-            loginItemError = LoginItemManager.Failure.notFound.localizedDescription
-            Log.error("Login startup unavailable: \(loginItemError ?? "")")
         @unknown default:
             loginItemError = LoginItemManager.Failure.unknownStatus.localizedDescription
             Log.error("Login startup unavailable: \(loginItemError ?? "")")

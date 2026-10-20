@@ -150,6 +150,7 @@ struct TestRunner {
             ("LoginItem.nativeErrors", loginItem.test_nativeErrorsAreNotReportedAsSuccess),
             ("LoginItem.unavailableAndUnchanged", loginItem.test_unavailableAndUnchangedStatesFailLoudly),
             ("LoginItem.activationBeforeSettings", loginItem.test_primaryActionActivatesInAppBeforeAnySettingsHandoff),
+            ("LoginItem.failedLookupRecovery", loginItem.test_failedLookupCanRetryRegistrationWithoutHidingTheState),
             ("LoginItem.pendingSettingsOnly", loginItem.test_settingsOnlyOpenForAnActualPendingRegistration),
             ("Progress.unknownTotal", backup.test_progressUnknownUntilScanFinishes),
             ("Progress.hardlinksAndFinalization", backup.test_progressKnownCountsHardlinksAndFinalization),

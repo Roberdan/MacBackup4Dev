@@ -69,6 +69,8 @@ struct LoginItemView: View {
             Button("Annulla richiesta di avvio") { state.onSetLoginItem?(false) }
         case .notFound:
             Text(LoginItemManager.Failure.notFound.localizedDescription)
+            Text("Premi «Riprova attivazione»: chiediamo a macOS di registrare l'avvio. Se serve il tuo consenso, vedrai qui i passaggi.")
+                .foregroundColor(.secondary)
         @unknown default:
             Text(LoginItemManager.Failure.unknownStatus.localizedDescription)
         }
@@ -86,7 +88,7 @@ struct LoginItemView: View {
     private var statusColor: Color {
         switch state.loginItemStatus {
         case .enabled: return .green
-        case .requiresApproval: return .orange
+        case .requiresApproval, .notFound: return .orange
         case .notRegistered: return .secondary
         default: return .red
         }
