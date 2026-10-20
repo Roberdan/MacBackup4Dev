@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.20] - 2026-10-20
+
+### Added
+- "Avvia al login" in the app menu lets you enable or disable macOS login startup
+  without changing automatic backup schedules. It shows the current system setting
+  and directs you to System Settings when macOS requires approval.
+
 ## [4.1.19] - 2026-10-18
 
 ### Fixed
