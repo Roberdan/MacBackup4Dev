@@ -24,6 +24,14 @@ App and test compilation use `-warnings-as-errors`, including on the macOS 14 CI
 toolchain. Background UI callbacks capture result values explicitly and use a new
 weak capture at each nested asynchronous boundary.
 
+**Release hygiene — one installed copy, always.** After any release, install or rollback test,
+leave only `/Applications/MacBackup4Dev.app`: no hidden staging/rollback copies
+(`/Applications/.MacBackup4Dev-*.app`), no unpacked `.app` in scratch or session folders, no
+local installers older than the current version. Each leftover `.app` shows up as another
+"MacBackup4Dev" in macOS app lists. `install.sh` sweeps `/Applications` and old installers;
+an agent that unpacks or stages a copy elsewhere deletes it and runs `lsregister -u <path>` before
+it reports done.
+
 Version is set in one place: `VERSION` default in `build.sh`. `build-pkg.sh` reads it, the release workflow overrides it from the `v*` tag, and the CLI reads `CFBundleShortVersionString` at runtime.
 
 ## Module Map
