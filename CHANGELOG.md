@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.1.21] - 2026-10-20
+
+### Fixed
+- Login startup is configured in a dedicated app window, not an unexplained visit
+  to System Settings. Activation registers the app directly; only a real pending
+  macOS approval exposes the settings action, with instructions that remain available.
+- Returning from System Settings or checking again shows the actual result. Pending
+  approval is never shown as active, and failed changes can be retried in the same window.
+
 ## [4.1.20] - 2026-10-20
 
 ### Added

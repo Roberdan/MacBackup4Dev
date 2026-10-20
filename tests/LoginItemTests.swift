@@ -9,6 +9,7 @@ struct LoginItemTests {
         var failure: Error?
         var registrations = 0
         var unregistrations = 0
+        var settingsOpened = 0
 
         init(_ status: SMAppService.Status) { self.status = status }
 
@@ -21,7 +22,7 @@ struct LoginItemTests {
                 self.unregistrations += 1
                 if let failure = self.failure { throw failure }
                 self.status = self.unregistrationResult
-            })
+            }, openSettings: { self.settingsOpened += 1 })
         }
     }
 
@@ -34,19 +35,69 @@ struct LoginItemTests {
         try expectEqual(service.registrations + service.unregistrations, 0, "status reads never change login settings")
 
         let state = AppUIState()
-        let cases: [(SMAppService.Status, String, Bool)] = [
-            (.notRegistered, "Disattivato", true),
-            (.enabled, "Attivo", true),
-            (.requiresApproval, "Da consentire", true),
-            (.notFound, "Non disponibile", false),
+        let cases: [(SMAppService.Status, String, Bool, String)] = [
+            (.notRegistered, "Disattivato", true, "Attiva avvio al login"),
+            (.enabled, "Attivo", true, "Disattiva avvio al login"),
+            (.requiresApproval, "Da consentire", true, "Apri Elementi login…"),
+            (.notFound, "Non disponibile", false, "Non disponibile"),
         ]
-        for (status, label, canSet) in cases {
+        for (status, label, canSet, actionTitle) in cases {
             state.loginItemStatus = status
             try expectEqual(state.loginItemLabel, label, "pending approval is never presented as active")
             try expectEqual(state.canSetLoginItem, canSet, "only known, available service states can be toggled")
+            try expectEqual(state.loginItemActionTitle, actionTitle, "the next action matches the real OS state")
         }
         try expectNil(state.schedule, "login startup does not install a backup schedule")
         try expectNil(state.config, "login startup does not generate or rewrite a backup config")
+    }
+
+    func test_primaryActionActivatesInAppBeforeAnySettingsHandoff() throws {
+        let state = AppUIState()
+        var choices: [Bool] = []
+        var settingsOpened = 0
+        state.onSetLoginItem = { choices.append($0) }
+        state.onRequestLoginItemSettings = { settingsOpened += 1 }
+
+        state.requestLoginItemPrimaryAction()
+        try expectEqual(choices, [true], "an off app offers activation, not an unexplained settings page")
+        try expectEqual(settingsOpened, 0, "no system-settings handoff before registration")
+
+        state.loginItemStatus = .requiresApproval
+        state.requestLoginItemPrimaryAction()
+        try expectEqual(choices, [true], "a pending request is not toggled off by the main action")
+        try expectEqual(settingsOpened, 1, "only the explicit approval action opens settings")
+
+        state.loginItemStatus = .enabled
+        state.requestLoginItemPrimaryAction()
+        try expectEqual(choices, [true, false], "an enabled app can be disabled in-app")
+        try expectEqual(settingsOpened, 1, "disabling does not require a settings-page visit")
+
+        state.loginItemStatus = .notFound
+        state.requestLoginItemPrimaryAction()
+        try expectEqual(choices, [true, false], "unavailable services cannot be opted in")
+        try expectNotNil(state.loginItemError, "an unavailable action explains the problem")
+    }
+
+    func test_settingsOnlyOpenForAnActualPendingRegistration() throws {
+        let service = Service(.notRegistered)
+        let manager = service.manager
+        for status: SMAppService.Status in [.notRegistered, .enabled, .notFound] {
+            service.status = status
+            try expectEqual(manager.openApprovalSettingsIfNeeded(), status, "refresh stale state instead of opening the wrong page")
+            try expectEqual(service.settingsOpened, 0, "never send an unregistered or already enabled app to settings")
+        }
+        service.status = .requiresApproval
+        try expectEqual(manager.openApprovalSettingsIfNeeded(), .requiresApproval, "opening settings is not approval")
+        try expectEqual(service.settingsOpened, 1, "a registered pending item has an explicit settings action")
+        try expectEqual(service.registrations + service.unregistrations, 0, "guidance never changes the user's choice")
+        let state = AppUIState()
+        state.updateLoginItemStatus(.requiresApproval)
+        state.loginItemError = "The earlier activation was denied"
+        service.status = .enabled
+        state.updateLoginItemStatus(manager.openApprovalSettingsIfNeeded())
+        try expectEqual(state.loginItemLabel, "Attivo", "external approval is observed without another write")
+        try expectNil(state.loginItemError, "a successful external approval clears the stale failure message")
+        try expectEqual(service.settingsOpened, 1, "a stale approval button no longer opens settings after consent")
     }
 
     func test_enableDisableAndApprovalAreIdempotent() throws {

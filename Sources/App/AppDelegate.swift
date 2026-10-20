@@ -18,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var updateTimer: Timer?
     private var onboardingWC: OnboardingWindowController?
     private var encryptionWC: EncryptionSetupWindowController?
+    private var loginItemWC: LoginItemWindowController?
     /// Last encrypted-store error notified (said once, not every 30 s).
     private var lastStoreError: String?
     private var storeOpening = false
@@ -163,7 +164,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.onSetSchedule = { [weak self] option in self?.handleSetSchedule(option) }
         uiState.onRequestScheduleMenu = { [weak self] in self?.handleRequestScheduleMenu() }
         uiState.onRequestCleanupMenu = { [weak self] in self?.handleRequestCleanupMenu() }
-        uiState.onRequestLoginItemMenu = { [weak self] in self?.handleRequestLoginItemMenu() }
+        uiState.onRequestLoginItem = { [weak self] in self?.showLoginItemPreferences() }
+        uiState.onSetLoginItem = { [weak self] enabled in self?.setLoginItem(enabled) }
+        uiState.onRefreshLoginItem = { [weak self] in self?.refreshLoginItemStatus() }
         uiState.onRequestLoginItemSettings = { [weak self] in self?.openLoginItemSettings() }
         refreshScheduleLabel()
         refreshLoginItemStatus()
@@ -174,51 +177,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshLoginItemStatus() {
-        let status = loginItemManager.status
-        if status != uiState.loginItemStatus { uiState.loginItemError = nil }
-        uiState.loginItemStatus = status
+        uiState.updateLoginItemStatus(loginItemManager.status)
     }
 
-    private func handleRequestLoginItemMenu() {
+    private func showLoginItemPreferences() {
         refreshLoginItemStatus()
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let toggle = NSMenuItem(title: "Avvia al login", action: #selector(toggleLoginItem), keyEquivalent: "")
-        toggle.target = self
-        toggle.isEnabled = uiState.canSetLoginItem
-        switch uiState.loginItemStatus {
-        case .enabled: toggle.state = .on
-        case .requiresApproval: toggle.state = .mixed
-        default: toggle.state = .off
-        }
-        menu.addItem(toggle)
-
-        let explanation: String
-        switch uiState.loginItemStatus {
-        case .requiresApproval: explanation = "Non attivo: serve il tuo consenso nelle Impostazioni di Sistema."
-        case .notFound: explanation = "macOS non trova questa app."
-        default: explanation = "Apre l'app nella barra dei menu, senza modificare i backup automatici."
-        }
-        let info = NSMenuItem(title: explanation, action: nil, keyEquivalent: "")
-        info.isEnabled = false
-        menu.addItem(info)
-        menu.addItem(.separator())
-        let settings = NSMenuItem(title: "Apri Elementi login nelle Impostazioni di Sistema…",
-                                  action: #selector(openLoginItemSettings), keyEquivalent: "")
-        settings.target = self
-        menu.addItem(settings)
-        if let button = statusItem.button {
-            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.frame.height + 4), in: button)
-        }
+        popover.performClose(nil)
+        if loginItemWC == nil { loginItemWC = LoginItemWindowController(state: uiState) }
+        loginItemWC?.showWindow(nil)
+        loginItemWC?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc private func toggleLoginItem() {
-        let current = loginItemManager.status
-        let enable = current != .enabled && current != .requiresApproval
+    private func setLoginItem(_ enabled: Bool) {
         do {
-            uiState.loginItemStatus = try loginItemManager.setEnabled(enable)
+            uiState.updateLoginItemStatus(try loginItemManager.setEnabled(enabled))
             uiState.loginItemError = nil
-            if enable && uiState.loginItemStatus == .requiresApproval { openLoginItemSettings() }
+            Log.info("Login startup requested \(enabled): \(uiState.loginItemStatus)")
         } catch {
             refreshLoginItemStatus()
             uiState.loginItemError = error.localizedDescription
@@ -226,9 +201,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func openLoginItemSettings() {
-        popover.performClose(nil)
-        SMAppService.openSystemSettingsLoginItems()
+    private func openLoginItemSettings() {
+        uiState.updateLoginItemStatus(loginItemManager.openApprovalSettingsIfNeeded())
     }
 
     private func refreshScheduleLabel() {

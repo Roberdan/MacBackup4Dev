@@ -5,6 +5,7 @@ struct LoginItemManager {
     var readStatus: () -> SMAppService.Status = { SMAppService.mainApp.status }
     var register: () throws -> Void = { try SMAppService.mainApp.register() }
     var unregister: () throws -> Void = { try SMAppService.mainApp.unregister() }
+    var openSettings: () -> Void = { SMAppService.openSystemSettingsLoginItems() }
 
     var status: SMAppService.Status { readStatus() }
 
@@ -28,6 +29,12 @@ struct LoginItemManager {
         return updated
     }
 
+    func openApprovalSettingsIfNeeded() -> SMAppService.Status {
+        let current = status
+        if current == .requiresApproval { openSettings() }
+        return current
+    }
+
     enum Failure: LocalizedError {
         case notFound, unknownStatus, notApplied
 
@@ -38,7 +45,7 @@ struct LoginItemManager {
             case .unknownStatus:
                 return "macOS restituisce uno stato di avvio al login non riconosciuto."
             case .notApplied:
-                return "macOS non ha applicato la modifica. Controlla gli Elementi login nelle Impostazioni di Sistema."
+                return "macOS non ha applicato la modifica. Premi Ricontrolla e riprova da questa finestra."
             }
         }
     }

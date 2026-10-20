@@ -22,7 +22,7 @@ extension CLIHandler {
                                         slots: Array(stride(from: 0, to: 1440, by: 60)))
         state.onBattery = true
         state.onRequestScheduleMenu = {}
-        state.onRequestLoginItemMenu = {}
+        state.onRequestLoginItem = {}
         state.onRequestLoginItemSettings = {}
         let window = NSWindow(contentRect: NSRect(x: 200, y: 600, width: 120, height: 40),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -144,7 +144,7 @@ extension CLIHandler {
             state.loginItemStatus = status
             report("avvio al login (\(label))")
         }
-        state.loginItemError = "macOS non ha applicato la modifica. Controlla gli Elementi login nelle Impostazioni di Sistema."
+        state.loginItemError = "macOS non ha applicato la modifica. Riprova da Avvio al login."
         report("avvio al login (errore recuperabile)")
         popover.close()
         window.close()

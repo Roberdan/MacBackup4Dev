@@ -51,7 +51,7 @@ struct PopoverView: View {
                         .font(.system(size: 12, weight: .semibold)).foregroundColor(Look.red)
                     Text(error).font(.system(size: 11)).foregroundColor(Look.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Apri Impostazioni di Sistema…") { state.onRequestLoginItemSettings?() }
+                    Button("Gestisci avvio al login…") { state.onRequestLoginItem?() }
                         .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(Look.blue)
                 }
             }
@@ -578,7 +578,7 @@ struct PopoverView: View {
             Tile(id: "Espelli disco", icon: "eject.fill", tint: Color.gray, enabled: !state.isRunning && state.appState != .diskAbsent,
                  action: { state.onRequestEject?() }),
             Tile(id: "Avvia al login\n\(state.loginItemLabel)", icon: "power.circle", tint: Look.blue,
-                 enabled: state.onRequestLoginItemMenu != nil, action: { state.onRequestLoginItemMenu?() }),
+                 enabled: state.onRequestLoginItem != nil, action: { state.onRequestLoginItem?() }),
         ]
         if state.canUndo {
             out.insert(Tile(id: "Annulla ripristino", icon: "arrow.uturn.backward", tint: Look.red, enabled: true,

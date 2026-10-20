@@ -81,10 +81,14 @@ custom intervals are preserved. Calendar jobs missed during sleep run on wake;
 scheduled backups still require AC power and never overlap another backup.
 
 To open the menu-bar app automatically when you sign in, choose **Avvia al login**
-in the app's panel, then select the same option in its menu. This uses macOS Login Items,
-not the backup schedule, and is never enabled automatically. **Da consentire** means
-macOS still needs your approval; the app opens the relevant System Settings page.
-Disabling login startup does not stop the app or disable scheduled backups.
+in the app's panel, then press **Attiva avvio al login** in its dedicated window.
+The app registers itself with macOS; you do not need to add it manually in System Settings.
+This uses macOS Login Items, not the backup schedule, and is never enabled automatically.
+If macOS needs additional approval, **Da consentire** shows the steps in that same window;
+only then does **Apri Elementi login** open System Settings. The guide remains available,
+and returning to the app or pressing **Ricontrolla** reads the real system state.
+**Attivo** is shown only after macOS confirms it. Pending requests can be cancelled.
+Disabling login startup in the window does not stop the app or disable scheduled backups.
 
 The installed menu-bar app maintains an unencrypted recovery copy of itself at the
 physical disk root, separately from backup jobs and only while idle. A stalled refresh

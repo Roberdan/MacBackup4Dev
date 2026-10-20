@@ -43,6 +43,36 @@ final class AppUIState: ObservableObject {
         @unknown default: return false
         }
     }
+
+    var loginItemActionTitle: String {
+        switch loginItemStatus {
+        case .notRegistered: return "Attiva avvio al login"
+        case .enabled: return "Disattiva avvio al login"
+        case .requiresApproval: return "Apri Elementi login…"
+        case .notFound: return "Non disponibile"
+        @unknown default: return "Non disponibile"
+        }
+    }
+
+    func updateLoginItemStatus(_ status: SMAppService.Status) {
+        if status != loginItemStatus { loginItemError = nil }
+        loginItemStatus = status
+    }
+
+    func requestLoginItemPrimaryAction() {
+        switch loginItemStatus {
+        case .notRegistered: onSetLoginItem?(true)
+        case .enabled: onSetLoginItem?(false)
+        case .requiresApproval: onRequestLoginItemSettings?()
+        case .notFound:
+            loginItemError = LoginItemManager.Failure.notFound.localizedDescription
+            Log.error("Login startup unavailable: \(loginItemError ?? "")")
+        @unknown default:
+            loginItemError = LoginItemManager.Failure.unknownStatus.localizedDescription
+            Log.error("Login startup unavailable: \(loginItemError ?? "")")
+        }
+    }
+
     /// The disk is there and the encrypted volume is being opened (and checked, after an
     /// unclean removal): not "disk missing" (user report 2026-10-11).
     @Published var storeOpening = false
@@ -125,7 +155,9 @@ final class AppUIState: ObservableObject {
     var onSetSchedule: ((Int?) -> Void)?
     var onRequestScheduleMenu: (() -> Void)?
     var onRequestCleanupMenu: (() -> Void)?
-    var onRequestLoginItemMenu: (() -> Void)?
+    var onRequestLoginItem: (() -> Void)?
+    var onSetLoginItem: ((Bool) -> Void)?
+    var onRefreshLoginItem: (() -> Void)?
     var onRequestLoginItemSettings: (() -> Void)?
 
     // MARK: - Computed helpers
