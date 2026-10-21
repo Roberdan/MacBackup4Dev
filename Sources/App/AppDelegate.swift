@@ -457,27 +457,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Refreshes launchd's app identity after updates, including existing calendar jobs.
     /// Busy or disconnected destinations are retried without stopping a scheduled process.
-    private func refreshSchedulesWhenIdle() {
-        guard !isBusyForUpdate else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.refreshSchedulesWhenIdle() }
-            return
-        }
-        do {
-            if FileManager.default.fileExists(atPath: ScheduleManager.plistPath.path), let current = freshConfig() {
-                guard try ScheduleManager.refreshScheduleRegistrationWhenIdle(
-                    destination: URL(fileURLWithPath: current.destination.path)) else {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.refreshSchedulesWhenIdle() }
-                    return
-                }
-                refreshScheduleLabel()
-            }
-        } catch BackupError.lockExists {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.refreshSchedulesWhenIdle() }
-            return
-        } catch {
+    private lazy var scheduleRefresher = ScheduleRegistrationRefresher(
+        isBusy: { [weak self] in self?.isBusyForUpdate ?? true },
+        refresh: { [weak self] in
+            guard let self, FileManager.default.fileExists(atPath: ScheduleManager.plistPath.path),
+                  let current = self.freshConfig() else { return .notNeeded }
+            return try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+                destination: URL(fileURLWithPath: current.destination.path)) ? .refreshed : .deferred
+        },
+        scheduleRetry: { delay, work in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
+        },
+        updateScheduleLabel: { [weak self] in self?.refreshScheduleLabel() },
+        reportFailure: { [weak self] readable, error in
             Log.error("Schedule registration refresh failed: \(error.localizedDescription)")
-            sendNotification(title: "Pianificazione non aggiornata", body: error.localizedDescription)
-        }
+            self?.sendNotification(title: "Pianificazione non aggiornata", body: readable)
+        },
+        onFinished: { [weak self] in self?.migrateLegacyScheduleAgent() })
+
+    private func refreshSchedulesWhenIdle() {
+        scheduleRefresher.run()
+    }
+
+    private func migrateLegacyScheduleAgent() {
         let legacy = AppIdentity.home + "/Library/LaunchAgents/\(AppIdentity.legacyLaunchAgentLabel).plist"
         guard FileManager.default.fileExists(atPath: legacy) else { return }
         if let done = ScheduleManager.migrateLegacyAgent() {

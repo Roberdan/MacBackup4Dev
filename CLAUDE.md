@@ -43,7 +43,8 @@ Sources/
                 RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
                 SelectiveRestore (+Topics, FileVersions), NewMacRestore, NewMacStages, ToolInventory, ProtectionSummary, Shell
-  Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager
+  Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager,
+                ScheduleRegistrationRefresher
   CLI/          CLIHandler, CLIRestore (3.0 commands), PruneOptions
   Diagnostics/  Log, ErrorReporter, DiskDiagnostics, FDACheck
   UI/           PopoverView, OnboardingView, EncryptionSetupView, LoginItemView, RestoreCenter, TreeView, AppUIState, ProgressBarView,

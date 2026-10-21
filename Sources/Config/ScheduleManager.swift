@@ -91,9 +91,11 @@ enum ScheduleManager {
 
     /// App replacement can invalidate launchd's cached code requirement even when the job
     /// is still listed. Refresh its registration while holding the backup's operation lock.
-    static func refreshScheduleRegistrationWhenIdle(destination: URL, path: URL = plistPath,
-                                                    jobIsRunning: () throws -> Bool = scheduleJobIsRunning,
-                                                    install: (String) throws -> Void = installSchedule) throws -> Bool {
+    static func refreshScheduleRegistrationWhenIdle(
+        destination: URL, path: URL = plistPath,
+        jobIsRunning: () throws -> Bool = { try scheduleJobIsRunning() },
+        install: (String) throws -> Void = { try installSchedule(plistContent: $0, beforeUnload: { try ensureScheduleJobIdle() }) }
+    ) throws -> Bool {
         guard FileManager.default.fileExists(atPath: path.path),
               FileManager.default.fileExists(atPath: destination.path) else { return false }
         let data = try Data(contentsOf: path)
@@ -111,6 +113,9 @@ enum ScheduleManager {
         guard try !jobIsRunning() else { throw BackupError.lockExists }
         do {
             try install(xml)
+        } catch BackupError.lockExists {
+            // The job started after the first check: install stopped before unloading it.
+            throw BackupError.lockExists
         } catch {
             let originalError = error
             guard let original = String(data: data, encoding: .utf8) else { throw originalError }
@@ -123,14 +128,31 @@ enum ScheduleManager {
         return true
     }
 
-    private static func scheduleJobIsRunning() throws -> Bool {
-        let result = runLaunchctl(arguments: ["list", label])
+    typealias LaunchctlRunner = ([String]) -> (status: Int32, stdout: String, stderr: String)
+
+    /// True while launchd reports a process for the scheduled job. Errors other than
+    /// "not loaded" are thrown: an unknown state must not be treated as idle.
+    static func scheduleJobIsRunning(launchctl: LaunchctlRunner = { runLaunchctl(arguments: $0) }) throws -> Bool {
+        let result = launchctl(["list", label])
         guard result.status == 0 else {
             if result.stderr.lowercased().contains("could not find service") { return false }
             throw scheduleError("Cannot inspect scheduled backup: \(result.stderr)")
         }
         return result.stdout.contains("\"PID\" = ")
     }
+
+    /// Re-checked by the refresh right before `bootout`, which would kill a job that started
+    /// after the first check. launchd offers no atomic "unload if idle": a job can still
+    /// start between this `list` and the `bootout` (two launchctl calls, milliseconds apart).
+    /// The backup's operation lock is held meanwhile, so such a job cannot write a snapshot.
+    static func ensureScheduleJobIdle(launchctl: LaunchctlRunner = { runLaunchctl(arguments: $0) }) throws {
+        guard try !scheduleJobIsRunning(launchctl: launchctl) else { throw BackupError.lockExists }
+    }
+
+    /// Readable text for a failed registration refresh; launchctl's raw error goes to the log.
+    static let registrationRefreshFailureMessage =
+        "I backup automatici potrebbero non partire dopo l'aggiornamento dell'app. "
+        + "Apri il menu di MacBackup4Dev e scegli di nuovo la frequenza dei backup."
 
     static func generatePlistDaily(hour: Int) -> String {
         generatePlistBody("""
@@ -144,17 +166,23 @@ enum ScheduleManager {
         """)
     }
 
-    static func installSchedule(plistContent: String) throws {
+    /// `beforeUnload` runs right before an existing job is booted out; throwing there leaves
+    /// the job and its plist untouched.
+    static func installSchedule(plistContent: String, path: URL = plistPath,
+                                logDirectory: URL = logPath.deletingLastPathComponent(),
+                                launchctl: LaunchctlRunner = { runLaunchctl(arguments: $0) },
+                                beforeUnload: () throws -> Void = {}) throws {
         let fm = FileManager.default
-        try fm.createDirectory(at: plistPath.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try fm.createDirectory(at: logPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: logDirectory, withIntermediateDirectories: true)
         // F-11: Use bootout before re-installing to avoid stale service state
-        if fm.fileExists(atPath: plistPath.path) {
-            _ = runLaunchctl(arguments: ["bootout", "gui/\(getuid())", plistPath.path])
+        if fm.fileExists(atPath: path.path) {
+            try beforeUnload()
+            _ = launchctl(["bootout", "gui/\(getuid())", path.path])
         }
-        try plistContent.write(to: plistPath, atomically: true, encoding: .utf8)
+        try plistContent.write(to: path, atomically: true, encoding: .utf8)
         // F-11: bootstrap/bootout replaces legacy load/unload on modern macOS
-        let result = runLaunchctl(arguments: ["bootstrap", "gui/\(getuid())", plistPath.path])
+        let result = launchctl(["bootstrap", "gui/\(getuid())", path.path])
         guard result.status == 0 else {
             throw scheduleError("Failed to bootstrap schedule: \(result.stderr)")
         }
