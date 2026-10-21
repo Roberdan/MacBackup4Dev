@@ -143,6 +143,8 @@ struct TestRunner {
             ("Schedule.nextBackupInMenu", power.test_nextBackupIsExplainedInTheMenu),
             ("Schedule.customIntervalsPreserved", power.test_nonCalendarIntervalsArePreserved),
             ("Schedule.calendarMigration", power.test_calendarMigrationPreservesJob),
+            ("Schedule.refreshExistingRegistration", power.test_existingSchedulesRefreshRegistration),
+            ("Schedule.refreshDisabledAndOffline", power.test_scheduleRefreshKeepsDisabledAndDefersOffline),
             ("Schedule.migrationLocksBackup", power.test_calendarMigrationSerializesWithBackup),
             ("Schedule.rollbackKeepsLock", power.test_calendarMigrationRollbackHoldsLock),
             ("LoginItem.liveStateWithoutOptIn", loginItem.test_statusComesFromMacOSWithoutOptingIn),

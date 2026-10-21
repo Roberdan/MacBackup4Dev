@@ -89,20 +89,26 @@ enum ScheduleManager {
         return new
     }
 
-    /// Holds the backup's operation lock through bootout and bootstrap, including rollback.
-    static func migrateIntervalScheduleWhenIdle(destination: URL, path: URL = plistPath,
-                                               install: (String) throws -> Void = installSchedule) throws -> Bool {
+    /// App replacement can invalidate launchd's cached code requirement even when the job
+    /// is still listed. Refresh its registration while holding the backup's operation lock.
+    static func refreshScheduleRegistrationWhenIdle(destination: URL, path: URL = plistPath,
+                                                    jobIsRunning: () throws -> Bool = scheduleJobIsRunning,
+                                                    install: (String) throws -> Void = installSchedule) throws -> Bool {
         guard FileManager.default.fileExists(atPath: path.path),
               FileManager.default.fileExists(atPath: destination.path) else { return false }
         let data = try Data(contentsOf: path)
-        guard let old = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let new = calendarPlist(from: old) else { return false }
-        let converted = try PropertyListSerialization.data(fromPropertyList: new, format: .xml, options: 0)
+        guard let old = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            throw scheduleError("Invalid backup schedule")
+        }
+        let migrated = calendarPlist(from: old)
+        let converted = try PropertyListSerialization.data(fromPropertyList: migrated ?? old, format: .xml, options: 0)
         guard let xml = String(data: converted, encoding: .utf8) else {
             throw scheduleError("Cannot encode calendar schedule")
         }
         let operationLock = try DestinationLock(at: destination)
         defer { withExtendedLifetime(operationLock) {} }
+        // A scheduled process can still be opening the encrypted store, before its lock.
+        guard try !jobIsRunning() else { throw BackupError.lockExists }
         do {
             try install(xml)
         } catch {
@@ -112,8 +118,18 @@ enum ScheduleManager {
             catch { Log.error("Schedule rollback failed: \(error.localizedDescription)") }
             throw originalError
         }
-        Log.info("Backup schedule migrated to fixed calendar times")
+        Log.info(migrated == nil ? "Backup schedule registration refreshed"
+                 : "Backup schedule registration refreshed and migrated to fixed calendar times")
         return true
+    }
+
+    private static func scheduleJobIsRunning() throws -> Bool {
+        let result = runLaunchctl(arguments: ["list", label])
+        guard result.status == 0 else {
+            if result.stderr.lowercased().contains("could not find service") { return false }
+            throw scheduleError("Cannot inspect scheduled backup: \(result.stderr)")
+        }
+        return result.stdout.contains("\"PID\" = ")
     }
 
     static func generatePlistDaily(hour: Int) -> String {

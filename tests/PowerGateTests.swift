@@ -106,6 +106,77 @@ struct PowerGateTests {
                       "irregular calendar is not an interval")
     }
 
+    func test_existingSchedulesRefreshRegistration() throws {
+        let schedules = [
+            ScheduleManager.generatePlist(intervalSeconds: 3600),
+            ScheduleManager.generatePlistDaily(hour: 3),
+            ScheduleManager.generatePlist(intervalSeconds: 90),
+        ]
+        for schedule in schedules {
+            let safety = SafetyTests()
+            let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+            let destination = URL(fileURLWithPath: box.dest)
+            let path = box.root.appendingPathComponent("schedule.plist")
+            var original = try plistDictionary(schedule)
+            original["ProgramArguments"] = ["/custom/on-ac", "/custom/backup", "backup", "--scheduled"]
+            original["StandardOutPath"] = "/custom/backup.log"
+            let data = try PropertyListSerialization.data(fromPropertyList: original, format: .xml, options: 0)
+            try data.write(to: path)
+            var installs = 0
+            let install: (String) throws -> Void = { xml in
+                installs += 1
+                do {
+                    _ = try DestinationLock(at: destination)
+                    try fail("registration refresh must hold the backup lock")
+                } catch BackupError.lockExists {}
+                try xml.write(to: path, atomically: true, encoding: .utf8)
+            }
+            do {
+                _ = try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+                    destination: destination, path: path, jobIsRunning: { true }, install: install)
+                try fail("a scheduled process opening the store must not be stopped")
+            } catch BackupError.lockExists {}
+            do {
+                let backup = try DestinationLock(at: destination)
+                try withExtendedLifetime(backup) {
+                    do {
+                        _ = try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+                            destination: destination, path: path, jobIsRunning: { false }, install: install)
+                        try fail("an existing schedule must defer refresh while a backup runs")
+                    } catch BackupError.lockExists {}
+                }
+            }
+            try expectEqual(installs, 0, "never unload a running calendar or custom job")
+            try expect(try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+                destination: destination, path: path, jobIsRunning: { false }, install: install),
+                       "refresh registration even when no interval migration is needed")
+            try expectEqual(installs, 1, "reload the existing job once")
+            let refreshed = try plistDictionary(String(contentsOf: path, encoding: .utf8))
+            try expect(NSDictionary(dictionary: refreshed).isEqual(to: original),
+                       "preserve calendar times, arbitrary intervals, wrappers and custom job settings")
+        }
+    }
+
+    func test_scheduleRefreshKeepsDisabledAndDefersOffline() throws {
+        let safety = SafetyTests()
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let path = box.root.appendingPathComponent("schedule.plist")
+        var installs = 0
+        let install: (String) throws -> Void = { _ in installs += 1 }
+        try expectEqual(try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+            destination: URL(fileURLWithPath: box.dest), path: path, jobIsRunning: { false }, install: install), false,
+                        "do not recreate a disabled schedule")
+        let original = Data(ScheduleManager.generatePlist(intervalSeconds: 3600).utf8)
+        try original.write(to: path)
+        let offline = box.root.appendingPathComponent("unmounted-destination")
+        try expectEqual(try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+            destination: offline, path: path, jobIsRunning: { false }, install: install), false,
+                        "wait for the destination before taking its operation lock")
+        try expectEqual(installs, 0, "neither disabled nor offline schedules are reinstalled")
+        try expectEqual(try Data(contentsOf: path), original, "keep the offline schedule intact")
+        try expect(!FileManager.default.fileExists(atPath: offline.path), "never create an unmounted destination")
+    }
+
     func test_nonCalendarIntervalsArePreserved() throws {
         for seconds in [90, 420, 90000] {
             let plist = try plistDictionary(ScheduleManager.generatePlist(intervalSeconds: seconds))
@@ -137,14 +208,16 @@ struct PowerGateTests {
             let backup = try DestinationLock(at: destination)
             try withExtendedLifetime(backup) {
                 do {
-                    _ = try ScheduleManager.migrateIntervalScheduleWhenIdle(destination: destination, path: path, install: install)
+                    _ = try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+                        destination: destination, path: path, jobIsRunning: { false }, install: install)
                     try fail("a running backup must defer migration")
                 } catch BackupError.lockExists {}
             }
         }
         try expectEqual(installs, 0, "never bootout a running backup")
         try expectEqual(try Data(contentsOf: path), old, "a busy schedule remains unchanged")
-        try expect(try ScheduleManager.migrateIntervalScheduleWhenIdle(destination: destination, path: path, install: install),
+        try expect(try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+            destination: destination, path: path, jobIsRunning: { false }, install: install),
                    "migration succeeds once the backup is idle")
         try expectEqual(installs, 1, "install only once")
         _ = try DestinationLock(at: destination)
@@ -159,7 +232,8 @@ struct PowerGateTests {
         try old.write(to: path)
         var installs = 0
         do {
-            _ = try ScheduleManager.migrateIntervalScheduleWhenIdle(destination: destination, path: path, install: { xml in
+            _ = try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+                destination: destination, path: path, jobIsRunning: { false }, install: { xml in
                 installs += 1
                 do {
                     _ = try DestinationLock(at: destination)

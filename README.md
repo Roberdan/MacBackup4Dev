@@ -79,6 +79,10 @@ Hourly and other whole-minute intervals that divide a day use fixed calendar tim
 interval schedules are migrated when the app is idle; daily times and arbitrary
 custom intervals are preserved. Calendar jobs missed during sleep run on wake;
 scheduled backups still require AC power and never overlap another backup.
+On launch, the app refreshes an existing schedule's macOS registration so an app
+update cannot leave a listed job pointing at an obsolete code identity. The refresh
+waits for an idle, connected destination, preserves custom settings and never enables
+a schedule that was switched off in the app.
 
 To open the menu-bar app automatically when you sign in, choose **Avvia al login**
 in the app's panel, then press **Attiva avvio al login** in its dedicated window.

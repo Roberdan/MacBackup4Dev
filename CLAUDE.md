@@ -87,6 +87,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   Existing interval schedules migrate only when idle; arbitrary intervals and daily
   times are preserved. Migration holds `DestinationLock` through install and rollback;
   a busy destination is retried later. Never bootout a running backup to migrate its schedule.
+  App startup also refreshes existing calendar/custom registrations after app replacement
+  (a listed launchd job can still fail its cached code requirement). Hold the same lock,
+  check for a scheduled process still opening the store, and retry busy/offline destinations.
+  Never recreate a schedule removed by the user.
 - **Config**: `~/.config/macbackup4dev/config.toml` (3.x paths are links to these, see `AppIdentity`)
 - **Lock file**: `<destination>/rustymacbackup.lock` (PID-based, stale detection via `kill(pid, 0)`).
   "Interrompi" sends SIGTERM to that PID when the backup runs in its own process (scheduled);

@@ -295,7 +295,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pollStatus()
 
         startUpdateSchedule()
-        migrateLegacyScheduleWhenIdle()
+        refreshSchedulesWhenIdle()
         refreshRecoveryAppOnDisk()
         // Only when there is no config file at all: an unreadable one is reported, never
         // replaced by the first-launch setup.
@@ -455,23 +455,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         handleRequestBackup()
     }
 
-    /// Moves the 3.x LaunchAgent to the new label once no backup is running (bootout would
-    /// stop it). Retried at every status poll until done.
-    private func migrateLegacyScheduleWhenIdle() {
+    /// Refreshes launchd's app identity after updates, including existing calendar jobs.
+    /// Busy or disconnected destinations are retried without stopping a scheduled process.
+    private func refreshSchedulesWhenIdle() {
         guard !isBusyForUpdate else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.migrateLegacyScheduleWhenIdle() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.refreshSchedulesWhenIdle() }
             return
         }
         do {
-            if let current = freshConfig(),
-               try ScheduleManager.migrateIntervalScheduleWhenIdle(destination: URL(fileURLWithPath: current.destination.path)) {
+            if FileManager.default.fileExists(atPath: ScheduleManager.plistPath.path), let current = freshConfig() {
+                guard try ScheduleManager.refreshScheduleRegistrationWhenIdle(
+                    destination: URL(fileURLWithPath: current.destination.path)) else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.refreshSchedulesWhenIdle() }
+                    return
+                }
                 refreshScheduleLabel()
             }
         } catch BackupError.lockExists {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.migrateLegacyScheduleWhenIdle() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in self?.refreshSchedulesWhenIdle() }
             return
         } catch {
-            Log.error("Calendar schedule migration failed: \(error.localizedDescription)")
+            Log.error("Schedule registration refresh failed: \(error.localizedDescription)")
             sendNotification(title: "Pianificazione non aggiornata", body: error.localizedDescription)
         }
         let legacy = AppIdentity.home + "/Library/LaunchAgents/\(AppIdentity.legacyLaunchAgentLabel).plist"
