@@ -1,6 +1,10 @@
 # Changelog
 
-## [4.1.22] - 2026-10-20
+## [4.1.22] - 2026-10-21
+
+### Added
+- "Avvia al login" opens a native configuration window with direct activation,
+  approval instructions, retry and cancellation, independently of backup schedules.
 
 ### Fixed
 - A failed macOS login-service lookup no longer disables activation or incorrectly says
