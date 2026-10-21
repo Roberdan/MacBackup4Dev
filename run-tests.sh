@@ -39,6 +39,7 @@ swiftc \
     -import-objc-header Sources/Backup/KeychainStatus.h \
     -framework Cocoa \
     -framework UserNotifications \
+    -framework ServiceManagement \
     -framework IOKit \
     -o build/MacBackup4DevTests \
     "${SOURCES[@]}" "${TESTS[@]}"

@@ -55,6 +55,7 @@ struct TestRunner {
         let optimization = BackupOptimizationTests()
         let ejection = EjectionTests()
         let recovery = RecoveryCopyTests()
+        let loginItem = LoginItemTests()
 
         let suites: [(String, TestClosure)] = [
             ("Progress.terminalIsIdle", backup.test_terminalStatusNeverClaimsWorkInProgress),
@@ -144,6 +145,13 @@ struct TestRunner {
             ("Schedule.calendarMigration", power.test_calendarMigrationPreservesJob),
             ("Schedule.migrationLocksBackup", power.test_calendarMigrationSerializesWithBackup),
             ("Schedule.rollbackKeepsLock", power.test_calendarMigrationRollbackHoldsLock),
+            ("LoginItem.liveStateWithoutOptIn", loginItem.test_statusComesFromMacOSWithoutOptingIn),
+            ("LoginItem.idempotentAndApproval", loginItem.test_enableDisableAndApprovalAreIdempotent),
+            ("LoginItem.nativeErrors", loginItem.test_nativeErrorsAreNotReportedAsSuccess),
+            ("LoginItem.unavailableAndUnchanged", loginItem.test_unavailableAndUnchangedStatesFailLoudly),
+            ("LoginItem.activationBeforeSettings", loginItem.test_primaryActionActivatesInAppBeforeAnySettingsHandoff),
+            ("LoginItem.failedLookupRecovery", loginItem.test_failedLookupCanRetryRegistrationWithoutHidingTheState),
+            ("LoginItem.pendingSettingsOnly", loginItem.test_settingsOnlyOpenForAnActualPendingRegistration),
             ("Progress.unknownTotal", backup.test_progressUnknownUntilScanFinishes),
             ("Progress.hardlinksAndFinalization", backup.test_progressKnownCountsHardlinksAndFinalization),
             ("Progress.legacyEta", backup.test_oldStatusDoesNotDisplayInventedEta),

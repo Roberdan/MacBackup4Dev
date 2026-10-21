@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ServiceManagement
 
 /// Debug-only: `MacBackup4Dev measure-menu` opens the real popover (same controller the app
 /// uses) next to a small window, lets it lay out, and prints the popover size against the
@@ -21,6 +22,8 @@ extension CLIHandler {
                                         slots: Array(stride(from: 0, to: 1440, by: 60)))
         state.onBattery = true
         state.onRequestScheduleMenu = {}
+        state.onRequestLoginItem = {}
+        state.onRequestLoginItemSettings = {}
         let window = NSWindow(contentRect: NSRect(x: 200, y: 600, width: 120, height: 40),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.makeKeyAndOrderFront(nil)
@@ -132,6 +135,17 @@ extension CLIHandler {
             diskutil: { _ in Shell.Result(status: 1, stdout: "", stderr: String(repeating: "Il sistema non riesce a espellere il disco. ", count: 10)) },
             processesUsing: { _ in "Finder, Terminal" }, isMounted: { _ in true }, progress: { _ in })
         report("espulsione fallita (motivo lungo)")
+        state.ejection = nil
+        state.appState = .idle
+        for (status, label): (SMAppService.Status, String) in [
+            (.notRegistered, "disattivato"), (.enabled, "attivo"),
+            (.requiresApproval, "da consentire"), (.notFound, "non disponibile"),
+        ] {
+            state.loginItemStatus = status
+            report("avvio al login (\(label))")
+        }
+        state.loginItemError = "macOS non ha applicato la modifica. Riprova da Avvio al login."
+        report("avvio al login (errore recuperabile)")
         popover.close()
         window.close()
     }

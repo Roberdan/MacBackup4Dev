@@ -80,6 +80,20 @@ interval schedules are migrated when the app is idle; daily times and arbitrary
 custom intervals are preserved. Calendar jobs missed during sleep run on wake;
 scheduled backups still require AC power and never overlap another backup.
 
+To open the menu-bar app automatically when you sign in, choose **Avvia al login**
+in the app's panel, then press **Attiva avvio al login** in its dedicated window.
+The app registers itself with macOS; you do not need to add it manually in System Settings.
+This uses macOS Login Items, not the backup schedule, and is never enabled automatically.
+If macOS needs additional approval, **Da consentire** shows the steps in that same window;
+only then does **Apri Elementi login** open System Settings. The guide remains available,
+and returning to the app or pressing **Ricontrolla** reads the real system state.
+**Attivo** is shown only after macOS confirms it. Pending requests can be cancelled.
+Disabling login startup in the window does not stop the app or disable scheduled backups.
+If macOS cannot recognize the login registration, **Da configurare** keeps
+**Riprova attivazione** available instead of asking you to reopen an already installed app.
+The retry requests registration only when selected; any native error stays visible, and
+the app never presents a failed lookup as disabled or active.
+
 The installed menu-bar app maintains an unencrypted recovery copy of itself at the
 physical disk root, separately from backup jobs and only while idle. A stalled refresh
 does not keep a completed scheduled job or its destination locks occupied. Copy commands
@@ -682,7 +696,7 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 175 tests, including real engine runs in a sandbox
+./run-tests.sh                  # 198 tests, including real engine runs in a sandbox
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
@@ -691,7 +705,8 @@ build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popov
 Tests cover the engine end to end in a sandbox (no file dropped, incomplete snapshots, git
 bundles applied to a fresh clone, SQLite/WAL copies, coverage noise), retention protection,
 selective restore and per-file undo, a whole *Nuovo Mac* rebuild, the folder picker, config
-round-trips and the pre-3.0 suites. Releases: push a `v*` tag; the workflow runs the tests
+round-trips, login-item activation/approval/error handling through a fake macOS boundary,
+and the pre-3.0 suites. Releases: push a `v*` tag; the workflow runs the tests
 and publishes the `.pkg` and `.app.zip`.
 
 ---

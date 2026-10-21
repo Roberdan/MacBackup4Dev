@@ -1,6 +1,7 @@
 import Cocoa
 import UserNotifications
 import SwiftUI
+import ServiceManagement
 
 /// Main-actor isolated: every member touches AppKit or `uiState`, both of which are
 /// main-thread-only. Without the annotation the class is non-Sendable and every
@@ -17,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var updateTimer: Timer?
     private var onboardingWC: OnboardingWindowController?
     private var encryptionWC: EncryptionSetupWindowController?
+    private var loginItemWC: LoginItemWindowController?
     /// Last encrypted-store error notified (said once, not every 30 s).
     private var lastStoreError: String?
     private var storeOpening = false
@@ -99,6 +101,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var snapshotPickerWC: SnapshotPickerWindowController?
     private var restoreCenterWC: RestoreCenterWindowController?
     private var lastProtectionRefresh = Date.distantPast
+    private let loginItemManager = LoginItemManager()
 
     func setInitialConfig(_ config: Config?) {
         self.config = config
@@ -161,7 +164,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.onSetSchedule = { [weak self] option in self?.handleSetSchedule(option) }
         uiState.onRequestScheduleMenu = { [weak self] in self?.handleRequestScheduleMenu() }
         uiState.onRequestCleanupMenu = { [weak self] in self?.handleRequestCleanupMenu() }
+        uiState.onRequestLoginItem = { [weak self] in self?.showLoginItemPreferences() }
+        uiState.onSetLoginItem = { [weak self] enabled in self?.setLoginItem(enabled) }
+        uiState.onRefreshLoginItem = { [weak self] in self?.refreshLoginItemStatus() }
+        uiState.onRequestLoginItemSettings = { [weak self] in self?.openLoginItemSettings() }
         refreshScheduleLabel()
+        refreshLoginItemStatus()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if uiState != nil { refreshLoginItemStatus() }
+    }
+
+    private func refreshLoginItemStatus() {
+        uiState.updateLoginItemStatus(loginItemManager.status)
+    }
+
+    private func showLoginItemPreferences() {
+        refreshLoginItemStatus()
+        popover.performClose(nil)
+        if loginItemWC == nil { loginItemWC = LoginItemWindowController(state: uiState) }
+        loginItemWC?.showWindow(nil)
+        loginItemWC?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func setLoginItem(_ enabled: Bool) {
+        do {
+            uiState.updateLoginItemStatus(try loginItemManager.setEnabled(enabled))
+            uiState.loginItemError = nil
+            Log.info("Login startup requested \(enabled): \(uiState.loginItemStatus)")
+        } catch {
+            refreshLoginItemStatus()
+            uiState.loginItemError = error.localizedDescription
+            Log.error("Login startup not changed: \(error.localizedDescription)")
+        }
+    }
+
+    private func openLoginItemSettings() {
+        uiState.updateLoginItemStatus(loginItemManager.openApprovalSettingsIfNeeded())
     }
 
     private func refreshScheduleLabel() {
@@ -1188,6 +1229,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Status polling
 
     private func pollStatus(forceProtection: Bool = false) {
+        refreshLoginItemStatus()
         guard !uiState.isEjecting else { return }
         if let disk = config?.diskURL {
             uiState.reconcileEjection(diskMounted: BackupEngine.isVolumeReallyMounted(disk.path))

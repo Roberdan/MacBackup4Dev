@@ -92,6 +92,7 @@ extension CLIHandler {
             state.cachedCanUndo = true
             state.scheduleLabel = "ogni 1h"
             state.onRequestScheduleMenu = {}
+            state.onRequestLoginItem = {}
             apply(state)
             let view = PopoverView().environmentObject(state)
             let renderer = ImageRenderer(content: view)

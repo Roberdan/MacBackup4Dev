@@ -38,7 +38,7 @@ Version is set in one place: `VERSION` default in `build.sh`. `build-pkg.sh` rea
 
 ```
 Sources/
-  App/          AppDelegate, AppIdentity, main, StatusManager, AutoUpdater, UpdateSignature, IconManager
+  App/          AppDelegate, AppIdentity, main, StatusManager, AutoUpdater, UpdateSignature, IconManager, LoginItemManager
   Backup/       BackupEngine(+Helpers), EncryptedStore, HomeRewrite, HardLinker, FileScanner, RestoreEngine,
                 RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
@@ -46,7 +46,7 @@ Sources/
   Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager
   CLI/          CLIHandler, CLIRestore (3.0 commands), PruneOptions
   Diagnostics/  Log, ErrorReporter, DiskDiagnostics, FDACheck
-  UI/           PopoverView, OnboardingView, EncryptionSetupView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
+  UI/           PopoverView, OnboardingView, EncryptionSetupView, LoginItemView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
                 SnapshotPickerView, DesignTokens, TreeWindowController, PopoverViewController
 ```
 
@@ -67,6 +67,12 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 ## Architecture Decisions
 
 - **Single binary**: CLI mode detected via `ProcessInfo.processInfo.arguments`. If args present → CLI, otherwise → menu bar app.
+- **Login startup (4.1.22)**: `LoginItemManager` reads `SMAppService.mainApp` status and
+  changes login startup only on explicit user action, independently of backup schedules. `LoginItemView` registers
+  the app first; only a real `.requiresApproval` status offers System Settings with a
+  persistent guide. Display the observed macOS status, never optimistic success.
+  `.notFound` is a failed service lookup, not a missing app or proof that startup is off:
+  keep an explicit registration retry available and surface unchanged states/native errors.
 - **Hard links for deduplication**: `HardLinker.shouldHardLink()` checks POSIX size + mtime delta < 0.001s. Only regular previous files are reused (never symlinks).
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
 - **4 parallel workers (4.1.4)**: backup entry points, scanner and copy tasks use background
@@ -207,6 +213,9 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (175 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh` (198 tests). No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.
+LoginItemTests use a fake macOS service boundary to cover registration, approval-only
+settings routing, failed-lookup recovery, cancellation, failures and status refresh without
+changing real login items.

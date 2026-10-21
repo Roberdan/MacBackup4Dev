@@ -1,5 +1,34 @@
 # Changelog
 
+## [4.1.22] - 2026-10-21
+
+### Added
+- "Avvia al login" opens a native configuration window with direct activation,
+  approval instructions, retry and cancellation, independently of backup schedules.
+
+### Fixed
+- A failed macOS login-service lookup no longer disables activation or incorrectly says
+  that the installed app is missing. **Riprova attivazione** explicitly retries registration
+  from the same window, without changing anything merely by reading the status.
+- Registration errors and unchanged lookup failures remain visible. A retry is shown as
+  active only when macOS confirms it; pending approval still requires the user's consent.
+
+## [4.1.21] - 2026-10-20
+
+### Fixed
+- Login startup is configured in a dedicated app window, not an unexplained visit
+  to System Settings. Activation registers the app directly; only a real pending
+  macOS approval exposes the settings action, with instructions that remain available.
+- Returning from System Settings or checking again shows the actual result. Pending
+  approval is never shown as active, and failed changes can be retried in the same window.
+
+## [4.1.20] - 2026-10-20
+
+### Added
+- "Avvia al login" in the app menu lets you enable or disable macOS login startup
+  without changing automatic backup schedules. It shows the current system setting
+  and directs you to System Settings when macOS requires approval.
+
 ## [4.1.19] - 2026-10-18
 
 ### Fixed
