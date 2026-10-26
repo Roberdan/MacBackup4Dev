@@ -86,8 +86,9 @@ final class SafetyTests {
             try write("file \(i)", to: "\(box.home)/data/d\(i % 40)/f\(i).txt")
         }
         try write("temporary", to: box.home + "/.local/state/dev-tool/ci-suite/queue/12345")
+        try write("temporary", to: box.home + "/.roberdan-os/locks/heavy-queue/q-0000000003/pid")
         try write("temporary", to: box.home + "/actions-runners/dev-runner/_diag/blocks/block.1")
-        let result = try runEngine(config(box, sources: ["data", ".local/state", "actions-runners"]), box)
+        let result = try runEngine(config(box, sources: ["data", ".local/state", ".roberdan-os", "actions-runners"]), box)
         try expectEqual(countFiles(result.snapshot.path), total, "every file must be in the snapshot")
         try expectEqual(result.manifest.filesDiscovered, Int64(total), "discovered count")
         try expectEqual(result.manifest.filesProcessed, Int64(total), "processed count")
@@ -95,6 +96,8 @@ final class SafetyTests {
                    "runner diagnostics are pruned before copy")
         try expect(!FileManager.default.fileExists(atPath: result.snapshot.path + "/.local/state"),
                    "runtime queue files are pruned before copy")
+        try expect(!FileManager.default.fileExists(atPath: result.snapshot.path + "/.roberdan-os"),
+                   "volatile heavy-queue tickets never enter the copy queue")
         try expect(result.manifest.complete, "snapshot must be complete: \(result.manifest.incompleteReasons)")
         try expectEqual(SnapshotCatalog.latestComplete(at: URL(fileURLWithPath: box.dest))?.name,
                         result.snapshot.lastPathComponent, "catalog sees it as complete")
@@ -145,17 +148,39 @@ final class SafetyTests {
     func test_fileChangesInsideSourcesAreAutomatic() throws {
         let box = try makeSandbox(); defer { cleanup(box) }
         try write("old content", to: box.home + "/data/old.txt")
+        try write("unchanged", to: box.home + "/data/stable.txt")
+        try write("before", to: box.home + "/data/changed.txt")
+        let originalTime = Date(timeIntervalSince1970: 1_700_000_000.125)
+        try FileManager.default.setAttributes([.modificationDate: originalTime],
+                                              ofItemAtPath: box.home + "/data/changed.txt")
         let cfg = config(box, sources: ["data"])
         let first = try runEngine(cfg, box)
         try expect(first.manifest.complete, "initial backup complete")
+        try expectEqual(first.manifest.filesCopied, 3, "first backup copies all protected files")
 
         try FileManager.default.removeItem(atPath: box.home + "/data/old.txt")
         try write("new content", to: box.home + "/data/new-folder/new.txt")
+        try write("after!", to: box.home + "/data/changed.txt")
+        try FileManager.default.setAttributes([.modificationDate: originalTime.addingTimeInterval(0.5)],
+                                              ofItemAtPath: box.home + "/data/changed.txt")
         try write("downloaded package", to: box.home + "/data/node_modules/package/index.js")
         let second = try runEngine(cfg, box)
         try expect(second.manifest.complete, "normal additions and deletions need no selection change")
         try expectEqual(second.manifest.sources, first.manifest.sources, "same configured source selection")
-        try expectEqual(second.manifest.filesProcessed, 1, "new files included and dependencies excluded")
+        try expectEqual(second.manifest.filesProcessed, 3, "new files included and dependencies excluded")
+        try expectEqual(second.manifest.filesCopied, 2, "only new and changed files are copied")
+        try expectEqual(second.manifest.filesHardlinked, 1, "unchanged files reuse the previous snapshot")
+        let firstAttributes = try FileManager.default.attributesOfItem(atPath: first.snapshot.path + "/data/stable.txt")
+        let secondAttributes = try FileManager.default.attributesOfItem(atPath: second.snapshot.path + "/data/stable.txt")
+        guard let firstInode = firstAttributes[.systemFileNumber] as? UInt64,
+              let secondInode = secondAttributes[.systemFileNumber] as? UInt64 else {
+            throw TestFailure.failed("hard-link identity could not be read")
+        }
+        try expectEqual(secondInode, firstInode, "unchanged content is genuinely hard-linked, not recopied")
+        try expectEqual(try String(contentsOfFile: second.snapshot.path + "/data/changed.txt", encoding: .utf8),
+                        "after!", "a same-size subsecond edit is copied")
+        try expectEqual(try String(contentsOfFile: first.snapshot.path + "/data/changed.txt", encoding: .utf8),
+                        "before", "a changed file never mutates an older snapshot")
         try expectEqual(try String(contentsOf: second.snapshot.appendingPathComponent("data/new-folder/new.txt"),
                                    encoding: .utf8), "new content", "new nested files backed up automatically")
         try expect(!FileManager.default.fileExists(atPath: second.snapshot.path + "/data/old.txt"),
@@ -164,6 +189,15 @@ final class SafetyTests {
                    "a backup never restores a deleted source")
         try expectEqual(try String(contentsOf: first.snapshot.appendingPathComponent("data/old.txt"),
                                    encoding: .utf8), "old content", "older snapshots keep deleted content")
+        let restoredHome = box.root.appendingPathComponent("restored").path
+        let plan = SelectiveRestore.plan(snapshot: first.snapshot, paths: ["data/old.txt"],
+                                         destinationRoot: restoredHome)
+        let (restored, _) = try SelectiveRestore.apply(plan, undoRoot: box.root.appendingPathComponent("undo"))
+        try expectEqual(restored.restored, 1, "selectively recover one deleted file from the real older backup")
+        try expectEqual(restored.failed, 0, "selective recovery succeeds")
+        try expectEqual(countFiles(restoredHome), 1, "unselected files are never restored")
+        try expectEqual(try String(contentsOfFile: restoredHome + "/data/old.txt", encoding: .utf8),
+                        "old content", "the selected older file retains its original contents")
     }
 
     func test_shrinkWarningOnEmptiedHome() throws {

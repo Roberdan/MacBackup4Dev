@@ -90,6 +90,7 @@ struct TestRunner {
             ("Optimization.removedDirectories", optimization.test_copyRecreatesRemovedCachedDirectory),
             ("Optimization.failedCopiesNotVanished", optimization.test_failedCopiesNeverTriggerPostSaveDisappearanceGuard),
             ("Optimization.previousMetadata", optimization.test_previousMetadataRejectsSymlinksAndKeepsTolerance),
+            ("Scanner.powerChanges", scanner.test_pacingFollowsPowerBetweenWalks),
             ("Safety.copyErrorMakesIncomplete", safety.test_copyErrorMakesSnapshotIncomplete),
             ("Safety.excludedSourceNotMissing", safety.test_excludedSourceDoesNotMakeSnapshotIncomplete),
             ("Safety.automaticFileChanges", safety.test_fileChangesInsideSourcesAreAutomatic),

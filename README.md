@@ -67,6 +67,12 @@ External Disk
 
 Each backup creates a timestamped snapshot. **Unchanged files are hard-linked** from the previous snapshot — so 100 snapshots of a 2 GB config tree might use only 2.1 GB total. Changed files are copied with full attribute preservation (`copyfile()` with DATA|XATTR|STAT|ACL flags).
 
+**Incremental file data does not mean a constant-time backup.** Each run still scans the
+configured sources and creates the new snapshot's hard links. Unchanged Git bundles are
+also reused, but database backups are currently **full copies on every run**: SQLite's
+online backup and PostgreSQL's `pg_dump`. The file-copy byte counter does not include
+these database archives, Git bundles or environment capture.
+
 > ⚠️ **`COPYFILE_CLONE` is intentionally disabled.** On macOS, APFS cloning silently becomes a destructive *move* when source and destination are on different filesystems (APFS → ExFAT/HFS+). We've seen this destroy entire home directories. We use `copyfile()` with `COPYFILE_ALL = 0x0F` only.
 
 Backups run:
@@ -118,6 +124,9 @@ sources and unexpectedly large drops in file counts still make a snapshot incomp
 the large-drop protection also pauses snapshot cleanup.
 Regenerable local CI queues and GitHub Actions runner diagnostics, temporary files,
 downloaded tools and action copies are excluded before scanning their contents.
+This includes `.roberdan-os/locks/heavy-queue` tickets, which disappear as jobs finish.
+Scanner pacing reads the current power source for each walk, rather than retaining
+a battery delay for the menu-bar app's entire lifetime.
 Starting or retrying a backup reads the current saved configuration without rewriting
 the source list; only confirming the folder picker changes that selection.
 Every new file or subfolder inside a configured source is included automatically on
@@ -428,7 +437,8 @@ These include `node_modules`, `.next`, `.nuxt`, `.svelte-kit`, `.cache`, `.parce
 `.turbo`, `.npm`, `.pnpm-store`, `.yarn/cache`, `.yarn/unplugged`, Python bytecode and
 test/type-checker caches, `.venv`, `.tox`, `.nox`, Swift `.build`/`DerivedData`,
 Rust `target/debug` and `target/release`, Android `build/intermediates`, Gradle runtime
-caches, macOS cache folders, `tmp`, `temp`, `*.tmp`, `*.temp`, editor swap/backup files.
+caches, macOS cache folders, `.roberdan-os/locks/heavy-queue`, `*.tmp`, `*.temp`,
+editor swap/backup files.
 Multi-component exclusions work inside nested repositories too.
 
 Your configured exclusions are added to this mandatory set. The mandatory rules do not
@@ -551,7 +561,8 @@ that specific file/folder if it doesn't need to be in the backup at all.
 - **Verified snapshots**: `_rustymacbackup/manifest.json` in every snapshot says whether it is
   complete. Incomplete ones are never the restore default and never count as "protected".
 - **Unpublished commits**: a `git bundle` per repository with only the commits not on a remote.
-- **Databases**: list them in config; they are copied consistently.
+- **Databases**: list them in config; each run saves a consistent full SQLite copy or
+  PostgreSQL logical archive, independently of file hard-link reuse.
 
 ```toml
 [databases]

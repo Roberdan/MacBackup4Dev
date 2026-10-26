@@ -11,6 +11,8 @@ final class ExcludeFilterTests {
                      "GitHub/app/.cache/data", "GitHub/app/.next/cache/data",
                      ".npm/_cacache/content", ".pnpm-store/packages/pkg",
                      ".local/state/dev-tool/ci-suite/queue/12345",
+                     ".roberdan-os/locks/heavy-queue/q-0000000003/pid",
+                     ".roberdan-os/locks/heavy-queue/q-0000000003/child",
                      "actions-runners/dev-runner/_diag/blocks/block.1",
                      "actions-runners/dev-runner/_work/_temp/task",
                      "actions-runners/dev-runner/_work/_tool/node/bin/node",
@@ -27,6 +29,8 @@ final class ExcludeFilterTests {
                      "GitHub/app/target/debugger/main.rs", "GitHub/app/.gradle/gradle.properties",
                      "GitHub/app/.yarnrc.yml", "GitHub/app/build/source.swift",
                      ".local/state/dev-tool/settings.json", ".local/state/dev-tool/queue/notes.md",
+                     ".roberdan-os/locks/important.lock", ".roberdan-os/locks/heavy-queue-notes/notes.md",
+                     "GitHub/app/locks/notes.md",
                      "actions-runners/dev-runner/.runner", "actions-runners/dev-runner/config.sh",
                      "actions-runners/dev-runner/_work/project/project/source.swift",
                      "Documents/temp/report.docx", "GitHub/app/tmp/notes.md"] {
