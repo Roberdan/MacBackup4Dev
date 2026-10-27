@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 extension PostgresBackup {
     private static func quotedSetting(_ value: String) -> String {
@@ -94,9 +95,20 @@ extension PostgresBackup {
         let destination = snapshot.deletingLastPathComponent()
         let parent = target.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
         let target = parent.appendingPathComponent(target.lastPathComponent).standardizedFileURL
-        guard target.path != destination.path, !target.path.hasPrefix(destination.path + "/"),
-              !FileManager.default.fileExists(atPath: target.path) else {
-            throw failure("L'export richiede un nuovo file fuori dalla destinazione di backup; non sovrascrivo file esistenti.")
+        let outputError = failure("L'export richiede un nuovo file fuori dalla destinazione di backup; non sovrascrivo file esistenti.")
+        guard !FileManager.default.fileExists(atPath: target.path) else { throw outputError }
+        let protected = try metadata(destination)
+        var ancestor = parent
+        while true {
+            var value = stat()
+            if lstat(ancestor.path, &value) == 0 {
+                guard value.st_dev != protected.st_dev || value.st_ino != protected.st_ino else { throw outputError }
+            } else if errno != ENOENT {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            let next = ancestor.deletingLastPathComponent()
+            if next.path == ancestor.path { break }
+            ancestor = next
         }
         let operationLock = try DestinationLock(at: destination)
         defer { withExtendedLifetime(operationLock) {} }
@@ -106,7 +118,10 @@ extension PostgresBackup {
         let tools = try Tools.find(major: chain.server.major)
         try verify(chain, at: directory, tools: tools)
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        let staged = parent.appendingPathComponent(".mbpg-" + UUID().uuidString + ".dump")
+        let staging = parent.appendingPathComponent(".mbpg-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o700])
+        let staged = staging.appendingPathComponent("database.dump")
         do {
             try withRecoveredCluster(chain: chain, directory: directory, tools: tools) { environment in
                 let result = Shell.run(tools.path("pg_dump"), ["-Fc", "--no-password", "-d", database, "-f", staged.path],
@@ -116,10 +131,10 @@ extension PostgresBackup {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staged.path)
             // link(2) publishes without an overwrite race; the staged archive is closed.
             try FileManager.default.linkItem(at: staged, to: target)
-            try FileManager.default.removeItem(at: staged)
+            try FileManager.default.removeItem(at: staging)
         } catch {
-            if FileManager.default.fileExists(atPath: staged.path) {
-                do { try FileManager.default.removeItem(at: staged) }
+            if FileManager.default.fileExists(atPath: staging.path) {
+                do { try FileManager.default.removeItem(at: staging) }
                 catch { throw failure("Pulizia dell'export fallita: \(error.localizedDescription)") }
             }
             throw error

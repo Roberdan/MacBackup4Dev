@@ -69,14 +69,17 @@ final class PostgresBackupTests {
         try refuses({ _ = try PostgresBackup.readChain(in: snapshot) }, "metadata ancestors cannot escape by symlink")
         let alias = box.root.appendingPathComponent("alias")
         try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: destination)
-        var unsafeTargetRefused = false
-        do {
-            try PostgresBackup.exportDatabase("postgres", snapshot: snapshot,
-                                              to: alias.appendingPathComponent("snapshot/export.dump"))
-        } catch {
-            unsafeTargetRefused = error.localizedDescription.contains("fuori dalla destinazione")
+        let alternateCase = box.root.appendingPathComponent("BACKUP")
+        for reference in [alias, alternateCase] where FileManager.default.fileExists(atPath: reference.path) {
+            var unsafeTargetRefused = false
+            do {
+                try PostgresBackup.exportDatabase("postgres", snapshot: snapshot,
+                                                  to: reference.appendingPathComponent("snapshot/export.dump"))
+            } catch {
+                unsafeTargetRefused = error.localizedDescription.contains("fuori dalla destinazione")
+            }
+            try expect(unsafeTargetRefused, "output aliases into any backup directory are rejected before reading inputs")
         }
-        try expect(unsafeTargetRefused, "an output alias into any backup directory is rejected before reading inputs")
         let lock = try DestinationLock(at: destination)
         var busy = false
         do {
@@ -186,6 +189,8 @@ final class PostgresBackupTests {
                                  timeout: 180, environment: source.environment, inheritEnvironment: false)
         try expect(exported.ok, "live CLI export after parent prune and source stop: \(exported.failureReason)")
         let archiveBytes = try Data(contentsOf: archive)
+        let permissions = try FileManager.default.attributesOfItem(atPath: archive.path)[.posixPermissions] as? NSNumber
+        try expect(permissions?.intValue == 0o600, "published archives are private to their owner")
         try refuses({ try PostgresBackup.exportDatabase("sample", snapshot: newest.snapshot, to: archive) },
                     "export never overwrites an existing file")
         try expectEqual(try Data(contentsOf: archive), archiveBytes, "existing archive is unchanged")
