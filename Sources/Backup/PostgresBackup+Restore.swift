@@ -106,9 +106,8 @@ extension PostgresBackup {
             } else if errno != ENOENT {
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
-            let next = ancestor.deletingLastPathComponent()
-            if next.path == ancestor.path { break }
-            ancestor = next
+            if ancestor.path == "/" { break }
+            ancestor = ancestor.deletingLastPathComponent()
         }
         let operationLock = try DestinationLock(at: destination)
         defer { withExtendedLifetime(operationLock) {} }
