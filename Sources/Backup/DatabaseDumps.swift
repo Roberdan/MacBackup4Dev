@@ -11,11 +11,15 @@ struct DatabaseRecord: Codable, Equatable {
     var file: String?         // path inside the snapshot, relative to its root
     var bytes: UInt64
     var error: String?
+    var databaseNames: [String]? = nil
+
+    var savedDatabaseCount: Int { file == nil ? 0 : (databaseNames?.count ?? 1) }
 }
 
 struct DatabaseConfig: Equatable {
     var sqlite: [String] = []
     var postgres: [String] = []
+    var postgresClusterIncremental = false
 }
 
 enum DatabaseDumps {
@@ -24,33 +28,51 @@ enum DatabaseDumps {
     static var sqlite3: String? { Shell.find(["/usr/bin/sqlite3", "/opt/homebrew/bin/sqlite3"]) }
 
     /// pg_dump must not be older than the server: prefer the newest Homebrew keg.
-    static var pgDump: String? {
+    static var postgresBinDirectories: [String] {
         let fm = FileManager.default
         var candidates: [String] = []
         for root in ["/opt/homebrew/opt", "/usr/local/opt"] {
             let kegs = ((try? fm.contentsOfDirectory(atPath: root)) ?? [])
                 .filter { $0.hasPrefix("postgresql@") }
                 .sorted { (Int($0.dropFirst("postgresql@".count)) ?? 0) > (Int($1.dropFirst("postgresql@".count)) ?? 0) }
-            candidates += kegs.map { "\(root)/\($0)/bin/pg_dump" }
+            candidates += kegs.map { "\(root)/\($0)/bin" }
         }
-        candidates += ["/opt/homebrew/bin/pg_dump", "/usr/local/bin/pg_dump",
-                       "/Applications/Postgres.app/Contents/Versions/latest/bin/pg_dump"]
-        return Shell.find(candidates)
+        candidates += ["/opt/homebrew/bin", "/usr/local/bin",
+                       "/Applications/Postgres.app/Contents/Versions/latest/bin"]
+        return candidates
     }
 
+    static var pgDump: String? { Shell.find(postgresBinDirectories.map { $0 + "/pg_dump" }) }
+
     static func captureAll(config: DatabaseConfig, home: String, into snapshot: URL,
+                           previousSnapshot: URL? = nil, now: Date = Date(),
+                           postgresEnvironment: [String: String]? = nil,
+                           cancelled: () -> Bool = { false },
                            onProgress: (_ index: Int, _ total: Int) -> Void = { _, _ in }) -> [DatabaseRecord] {
         let root = snapshot.appendingPathComponent(SnapshotManifest.directoryName)
             .appendingPathComponent(directoryName)
         var records: [DatabaseRecord] = []
-        let total = config.sqlite.count + config.postgres.count
+        let total = config.sqlite.count + (config.postgresClusterIncremental ? 1 : config.postgres.count)
         for path in config.sqlite {
             onProgress(records.count + 1, total)
             records.append(captureSQLite(path: path, home: home, root: root, snapshot: snapshot))
         }
-        for name in config.postgres {
+        if config.postgresClusterIncremental {
             onProgress(records.count + 1, total)
-            records.append(capturePostgres(database: name, root: root, snapshot: snapshot))
+            do {
+                records.append(try PostgresBackup.capture(databases: config.postgres, into: snapshot,
+                                                          previousSnapshot: previousSnapshot, now: now,
+                                                          environment: postgresEnvironment, cancelled: cancelled))
+            } catch {
+                records.append(DatabaseRecord(kind: PostgresBackup.kind, source: "PostgreSQL (cluster)",
+                                              file: nil, bytes: 0, error: error.localizedDescription))
+            }
+        } else {
+            for name in config.postgres {
+                onProgress(records.count + 1, total)
+                records.append(capturePostgres(database: name, root: root, snapshot: snapshot,
+                                               environment: postgresEnvironment))
+            }
         }
         return records
     }
@@ -90,7 +112,8 @@ enum DatabaseDumps {
         return record
     }
 
-    static func capturePostgres(database: String, root: URL, snapshot: URL) -> DatabaseRecord {
+    static func capturePostgres(database: String, root: URL, snapshot: URL,
+                                environment: [String: String]? = nil) -> DatabaseRecord {
         var record = DatabaseRecord(kind: "postgres", source: database, file: nil, bytes: 0)
         guard let pgDump else { record.error = "pg_dump non trovato"; return record }
         let target = root.appendingPathComponent("postgres").appendingPathComponent("\(database).dump")
@@ -103,7 +126,7 @@ enum DatabaseDumps {
         }
         // Custom format: compressed, restorable table by table with pg_restore.
         let result = Shell.run(pgDump, ["-Fc", "--no-password", "-d", database, "-f", target.path],
-                               timeout: 1800)
+                               timeout: 1800, environment: environment, inheritEnvironment: environment == nil)
         if result.ok, let size = fileSize(target) {
             record.file = relative(target, to: snapshot)
             record.bytes = size

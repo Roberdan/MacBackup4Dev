@@ -62,7 +62,7 @@ extension CLIHandler {
                 extra = "\(m.filesProcessed) file"
                 let unpushed = m.git.filter { $0.bundle != nil }.count
                 if unpushed > 0 { extra += " · \(unpushed) repo con commit non pubblicati salvati" }
-                if !m.databases.isEmpty { extra += " · \(m.databases.filter { $0.file != nil }.count) database" }
+                if !m.databases.isEmpty { extra += " · \(m.databases.reduce(0) { $0 + $1.savedDatabaseCount }) database" }
             }
             print("  \(s.name)  \(label)  \(extra)")
             if let m = s.manifest, !m.complete {
@@ -101,6 +101,30 @@ extension CLIHandler {
             print("  \(v.snapshot)  \(v.state.label.padding(toLength: 14, withPad: " ", startingAt: 0))  modificato \(df.string(from: v.modified))  \(BackupEngine.formatBytes(v.size))")
         }
         print("\nPer rimetterne una: restore-file ~/\(rel) --snapshot <nome> [--to <cartella>] --yes")
+    }
+
+    static func runExportDatabase(subArgs: [String], configPath: String?) throws {
+        let flags = Flags(subArgs, valued: ["--snapshot", "--to"])
+        guard let database = flags.positional.first, let output = flags.values["--to"] else {
+            throw err("Uso: export-database <nome> [--snapshot S] --to <nuovo.dump> [--yes]")
+        }
+        let (_, dest) = try destination(configPath)
+        let snapshot = try pickSnapshot(flags, at: dest)
+        guard snapshot.manifest?.databases.contains(where: {
+            $0.kind == PostgresBackup.kind && $0.file == PostgresBackup.relativeManifest && $0.error == nil
+        }) == true else {
+            throw err("Questo snapshot non contiene un backup incrementale PostgreSQL utilizzabile.")
+        }
+        let chain = try PostgresBackup.readChain(in: snapshot.url)
+        guard chain.server.databases.contains(database) else { throw err("Database non presente nello snapshot.") }
+        let target = URL(fileURLWithPath: expandPath(output))
+        guard !FileManager.default.fileExists(atPath: target.path) else {
+            throw err("Il file di destinazione esiste gia': non lo sovrascrivo.")
+        }
+        print("Esporto \(database) da \(snapshot.name) in \(target.path); il server originale non viene modificato.")
+        guard flags.switches.contains("--yes") else { print("Anteprima: aggiungi --yes per esportare."); return }
+        try PostgresBackup.exportDatabase(database, snapshot: snapshot.url, to: target)
+        print("Database esportato in un nuovo archivio.")
     }
 
     static func runFind(subArgs: [String], configPath: String?) throws {

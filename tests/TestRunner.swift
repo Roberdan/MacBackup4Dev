@@ -5,6 +5,11 @@ typealias TestClosure = () throws -> Void
 @main
 struct TestRunner {
     static func main() throws {
+        if CommandLine.arguments.count > 2, CommandLine.arguments[1] == "--postgres-cli-worker" {
+            Log.logURL = FileManager.default.temporaryDirectory.appendingPathComponent("mbpg-cli-test-\(UUID().uuidString).log")
+            CLIHandler.run(args: Array(CommandLine.arguments.dropFirst(2)))
+            return
+        }
         if CommandLine.arguments.count == 5, CommandLine.arguments[1] == "--environment-worker" {
             let args = CommandLine.arguments
             try RecoveryCopyTests.runWorker(configPath: args[2], home: args[3], state: args[4])
@@ -56,8 +61,11 @@ struct TestRunner {
         let ejection = EjectionTests()
         let recovery = RecoveryCopyTests()
         let loginItem = LoginItemTests()
+        let postgres = PostgresBackupTests()
 
-        let suites: [(String, TestClosure)] = [
+        var suites: [(String, TestClosure)] = [
+            ("Postgres.metadataAndCompatibility", postgres.test_metadataAndLegacyRecords),
+            ("Postgres.symlinksAndCancellation", postgres.test_symlinkMetadataAndCancellation),
             ("Progress.terminalIsIdle", backup.test_terminalStatusNeverClaimsWorkInProgress),
             ("Progress.activityAndFinish", backup.test_backupActivityAndFinishTimeAreExplicit),
             ("Actions.accessibleBackupDisk", backup.test_backupActionsRequireAccessibleDisk),
@@ -266,6 +274,21 @@ struct TestRunner {
             ("FileScanner.missingChildren", scanner.test_onlyMissingChildrenAreTolerated)
         ]
 
+        if ProcessInfo.processInfo.environment["MACBACKUP_POSTGRES_TESTS"] == "1" {
+            suites += [
+                ("Postgres.integratedRoundtrip", postgres.test_integratedRoundtripRetentionAndCLI),
+                ("Postgres.preflightAndCancel", postgres.test_preflightAndCancellationAreSafe),
+                ("Postgres.corruptionAndFallback", postgres.test_corruptionRefusedAndFullFallback)
+            ]
+        } else {
+            print("  SKIP native PostgreSQL integration (set MACBACKUP_POSTGRES_TESTS=1; requires local PostgreSQL 17 tools)")
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--filter") {
+            guard index + 1 < CommandLine.arguments.count else { throw TestFailure.failed("--filter needs a test prefix") }
+            let prefixes = CommandLine.arguments[index + 1].split(separator: ",").map(String.init)
+            suites = suites.filter { test in prefixes.contains(where: { test.0.hasPrefix($0) }) }
+            guard !suites.isEmpty else { throw TestFailure.failed("No tests matched --filter") }
+        }
         print("🧪 Running MacBackup4Dev tests (\(suites.count) total)...")
         for (name, test) in suites {
             do {

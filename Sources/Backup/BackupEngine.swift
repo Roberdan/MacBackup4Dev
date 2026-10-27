@@ -9,6 +9,7 @@ struct BackupRunOptions {
     var captureGit = true
     var captureDatabases = true
     var auditCoverage = true
+    var databaseEnvironment: [String: String]? = nil
     var now: () -> Date = { Date() }
     var environmentCapture: (URL) -> Void = EnvironmentSnapshot.capture
 }
@@ -390,10 +391,24 @@ enum BackupEngine {
         reportFinalization("Preparo le copie dei database…")
         let dbRecords = options.captureDatabases
             ? DatabaseDumps.captureAll(config: config.databases, home: home, into: inProgressURL,
+                                     previousSnapshot: previousComplete?.url, now: options.now(),
+                                     postgresEnvironment: options.databaseEnvironment,
+                                     cancelled: { token.isCancelled || Task.isCancelled },
                                      onProgress: { index, total in
                                          reportFinalization("Salvo il database \(index) di \(total)")
                                      })
             : []
+
+        if token.isCancelled || Task.isCancelled {
+            token.cancel()
+            try FileManager.default.removeItem(at: inProgressURL)
+            status.state = "cancelled"
+            status.phase = "cancelled"
+            status.currentFile = "Backup annullato"
+            do { try statusWriter.write(status: status) }
+            catch { Log.error("Status write failed on finalization cancel: \(error)") }
+            return nil
+        }
 
         reportFinalization("Verifico e completo lo snapshot…")
         let traversalCount = counts.traversalErrors.count

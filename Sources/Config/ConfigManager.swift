@@ -78,6 +78,7 @@ struct Config {
         out.append("postgres = [")
         for name in databases.postgres { out.append("    \"\(Self.escape(name))\",") }
         out.append("]")
+        out.append("postgres_cluster_incremental = \(databases.postgresClusterIncremental)")
         out.append("")
         out.append("[coverage]")
         out.append("ignore = [")
@@ -215,6 +216,7 @@ struct Config {
         switch "\(section).\(key)" {
         case "protection.include_rights_managed_files": config.protection.includeRightsManagedFiles = boolValue
         case "protection.include_cloud_storage": config.protection.includeCloudStorage = boolValue
+        case "databases.postgres_cluster_incremental": config.databases.postgresClusterIncremental = boolValue
         default: break
         }
     }
