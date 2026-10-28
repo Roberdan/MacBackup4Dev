@@ -2,6 +2,33 @@ import Foundation
 
 /// Tests for the streaming file scanner.
 final class FileScannerTests {
+    func test_pacingFollowsPowerBetweenWalks() throws {
+        let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let total = FileScanner.BIRD_SAFE_BATCH_SIZE * 2
+        for index in 0..<total {
+            try "keep".write(to: root.appendingPathComponent("file-\(index).txt"),
+                             atomically: true, encoding: .utf8)
+        }
+        var powerReads = 0
+        for (onBattery, expectedPause) in [(true, UInt32(100_000)), (false, UInt32(5_000)),
+                                           (false, UInt32(5_000)), (true, UInt32(100_000))] {
+            var delays: [UInt32] = []
+            var seen = Set<String>()
+            FileScanner.walk(sources: [root], basePaths: [root.path],
+                             excludeFilter: ExcludeFilter(patterns: []),
+                             powerReader: { powerReads += 1; return onBattery },
+                             pause: { delays.append($0) }) { entry in
+                seen.insert(entry.relativePath)
+                return true
+            }
+            try expectEqual(seen.count, total, "Pacing never drops entries")
+            try expectEqual(delays, [expectedPause, expectedPause],
+                            "Each walk uses its current power source, not the first backup's")
+        }
+        try expectEqual(powerReads, 4, "Read power once per walk, never once per process or per file")
+    }
+
     func test_onlyMissingChildrenAreTolerated() throws {
         for error in [
             NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT)),

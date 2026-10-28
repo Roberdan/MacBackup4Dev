@@ -17,14 +17,17 @@ enum FileScanner {
     /// Bird-safe: pause every N files to let iCloud daemon settle.
     /// 100ms on battery (conservative), 5ms on AC (20x faster).
     static let BIRD_SAFE_BATCH_SIZE = 50
-    static let BIRD_SAFE_PAUSE_US: UInt32 = IOPriority.isOnBattery() ? 100_000 : 5_000
     static func walk(
         sources: [URL],
         basePaths: [String],
         excludeFilter: ExcludeFilter,
         onTraversalError: ((String, Error) -> Void)? = nil,
+        powerReader: () -> Bool = IOPriority.isOnBattery,
+        pause: (UInt32) -> Void = { _ = usleep($0) },
         handler: (FileEntry) -> Bool
     ) {
+        // A menu-bar process survives power changes between backups.
+        let pauseUS: UInt32 = powerReader() ? 100_000 : 5_000
         let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey,
                                        .fileSizeKey, .contentModificationDateKey]
         let keySet = Set(keys)
@@ -157,7 +160,7 @@ enum FileScanner {
                 batchCount += 1
                 if batchCount >= BIRD_SAFE_BATCH_SIZE {
                     batchCount = 0
-                    usleep(BIRD_SAFE_PAUSE_US)
+                    pause(pauseUS)
                 }
             }
         }

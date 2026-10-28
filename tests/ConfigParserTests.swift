@@ -51,6 +51,7 @@ final class ConfigParserTests {
         try expectEqual(config.retention.weekly, 52, "default weekly mismatch")
         try expectEqual(config.retention.monthly, 0, "default monthly mismatch")
         try expect(!config.protection.includeRightsManagedFiles, "old configs must exclude protected files by default")
+        try expect(!config.databases.postgresClusterIncremental, "old configs keep independent logical database exports")
     }
 
     func test_commentsIgnored() throws {
@@ -72,12 +73,14 @@ final class ConfigParserTests {
     }
 
     func test_roundTrip() throws {
-        let config1 = Config(
+        var config1 = Config(
             source: SourceConfig(paths: ["/Users/test/.zshrc", "/Users/test/GitHub"]),
             destination: DestinationConfig(path: "/Volumes/Backup"),
             exclude: ExcludeConfig(patterns: ["*.tmp"]),
             retention: RetentionConfig(hourly: 24, daily: 30, weekly: 52, monthly: 0)
         )
+        config1.databases.postgres = ["postgres", "sample"]
+        config1.databases.postgresClusterIncremental = true
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".toml")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try config1.save(to: tmp)
@@ -87,6 +90,7 @@ final class ConfigParserTests {
         try expectEqual(config1.destination.path, config2.destination.path, "destination mismatch after round-trip")
         try expectEqual(config1.exclude.patterns, config2.exclude.patterns, "exclude mismatch after round-trip")
         try expectEqual(config1.retention.hourly, config2.retention.hourly, "retention mismatch after round-trip")
+        try expectEqual(config1.databases, config2.databases, "native PostgreSQL opt-in survives save and reload")
     }
 
     func test_backupUsesFreshChoicesUnlessPickerConfirms() throws {

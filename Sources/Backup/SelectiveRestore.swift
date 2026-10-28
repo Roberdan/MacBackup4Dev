@@ -83,16 +83,15 @@ enum FileVersions {
     /// Hard-linked copies (same inode) and identical size+mtime are the same version.
     static func list(relativePath: String, at destination: URL) -> [FileVersion] {
         var out: [FileVersion] = []
-        var lastKey: String?
+        var lastVersion: (size: UInt64, modified: Date)?
         for snap in SnapshotCatalog.list(at: destination) {
             let path = snap.url.appendingPathComponent(relativePath).path
             guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
                   (attrs[.type] as? FileAttributeType) == .typeRegular else { continue }
             let size = attrs[.size] as? UInt64 ?? 0
             let mtime = attrs[.modificationDate] as? Date ?? .distantPast
-            let key = "\(size)-\(Int(mtime.timeIntervalSince1970))"
-            if key == lastKey { continue }
-            lastKey = key
+            if let lastVersion, size == lastVersion.size, mtime == lastVersion.modified { continue }
+            lastVersion = (size, mtime)
             out.append(FileVersion(snapshot: snap.name, state: snap.state, size: size, modified: mtime))
         }
         return out

@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [4.2.0] - 2026-10-28
 
 ### Added
 - Every backup discovers installed applications and saves portable bundles with their
@@ -11,6 +11,9 @@
   apps and moves unchanged restored copies aside.
 - "Dati delle applicazioni" offers recognized preferences/support paths as explicit,
   off-by-default choices. Protected containers, Keychain and login exclusions stay intact.
+- Opt-in PostgreSQL 17 cluster backups use verified full and native incremental copies,
+  with retained dependency chains, selective database export and missing-only recovery.
+  Logical per-database dumps remain the default.
 
 ### Changed
 - Failed application copies prevent a snapshot from being marked complete. Unchanged app
@@ -19,6 +22,12 @@
   folders such as `_apps` available to normal file recovery.
 - Application undo checks installation identity as well as contents, leaving an identical
   replacement from another installer untouched.
+
+### Fixed
+- Scheduled backups refresh stale executable registrations only while idle, preserving
+  the current schedule and retrying an unavailable destination instead of interrupting work.
+- Source scanning ignores regenerable queue bookkeeping, preserves filesystem-root
+  ancestry checks and tolerates only entries that actually disappeared during traversal.
 
 ## [4.1.22] - 2026-10-21
 

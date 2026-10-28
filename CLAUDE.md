@@ -44,7 +44,8 @@ Sources/
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
                 AppInventory, AppBundleCopy, AppCapture, AppInstallers, AppRestore,
                 SelectiveRestore (+Topics, FileVersions), NewMacRestore, NewMacStages, ToolInventory, ProtectionSummary, Shell
-  Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager
+  Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager,
+                ScheduleRegistrationRefresher
   CLI/          CLIHandler, CLIRestore (3.0 commands), PruneOptions
   Diagnostics/  Log, ErrorReporter, DiskDiagnostics, FDACheck
   UI/           PopoverView, OnboardingView, EncryptionSetupView, LoginItemView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
@@ -99,6 +100,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   Existing interval schedules migrate only when idle; arbitrary intervals and daily
   times are preserved. Migration holds `DestinationLock` through install and rollback;
   a busy destination is retried later. Never bootout a running backup to migrate its schedule.
+  App startup also refreshes existing calendar/custom registrations after app replacement
+  (a listed launchd job can still fail its cached code requirement). Hold the same lock,
+  check for a scheduled process still opening the store, and retry busy/offline destinations.
+  Never recreate a schedule removed by the user.
 - **Config**: `~/.config/macbackup4dev/config.toml` (3.x paths are links to these, see `AppIdentity`)
 - **Lock file**: `<destination>/rustymacbackup.lock` (PID-based, stale detection via `kill(pid, 0)`).
   "Interrompi" sends SIGTERM to that PID when the backup runs in its own process (scheduled);
@@ -243,3 +248,7 @@ Application tests use `AppTestFixture` with temporary application roots, homes, 
 undo directories, including real engine, CLI and native restore-model operations.
 Other engine fixtures disable app capture explicitly; never let a test scan real installed
 apps or restore into the real home. `./run-tests.sh Applications.` runs just these regressions.
+Native PostgreSQL integration tests are opt-in:
+`MACBACKUP_POSTGRES_TESTS=1 ./run-tests.sh --filter Postgres.`. They use fresh PostgreSQL 17
+Unix-socket clusters and explicit database environments, never the user's running server.
+Their engine runs also disable application capture.

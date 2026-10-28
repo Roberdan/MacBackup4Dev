@@ -74,6 +74,13 @@ External Disk
 
 Each backup creates a timestamped snapshot. **Unchanged files are hard-linked** from the previous snapshot — so 100 snapshots of a 2 GB config tree might use only 2.1 GB total. Changed files are copied with full attribute preservation (`copyfile()` with DATA|XATTR|STAT|ACL flags).
 
+**Incremental file data does not mean a constant-time backup.** Each run still scans the
+configured sources and creates the new snapshot's hard links. Unchanged Git bundles are
+also reused. By default, databases still use **full copies on every run**: SQLite's
+online backup and PostgreSQL's `pg_dump`. PostgreSQL 17+ also supports the explicit
+[native incremental mode](#postgresql-native-incrementals) below. The file-copy byte counter
+does not include database archives, Git bundles or environment capture.
+
 > ⚠️ **`COPYFILE_CLONE` is intentionally disabled.** On macOS, APFS cloning silently becomes a destructive *move* when source and destination are on different filesystems (APFS → ExFAT/HFS+). We've seen this destroy entire home directories. We use `copyfile()` with `COPYFILE_ALL = 0x0F` only.
 
 Backups run:
@@ -86,6 +93,10 @@ Hourly and other whole-minute intervals that divide a day use fixed calendar tim
 interval schedules are migrated when the app is idle; daily times and arbitrary
 custom intervals are preserved. Calendar jobs missed during sleep run on wake;
 scheduled backups still require AC power and never overlap another backup.
+On launch, the app refreshes an existing schedule's macOS registration so an app
+update cannot leave a listed job pointing at an obsolete code identity. The refresh
+waits for an idle, connected destination, preserves custom settings and never enables
+a schedule that was switched off in the app.
 
 To open the menu-bar app automatically when you sign in, choose **Avvia al login**
 in the app's panel, then press **Attiva avvio al login** in its dedicated window.
@@ -121,6 +132,9 @@ sources and unexpectedly large drops in file counts still make a snapshot incomp
 the large-drop protection also pauses snapshot cleanup.
 Regenerable local CI queues and GitHub Actions runner diagnostics, temporary files,
 downloaded tools and action copies are excluded before scanning their contents.
+This includes `.roberdan-os/locks/heavy-queue` tickets, which disappear as jobs finish.
+Scanner pacing reads the current power source for each walk, rather than retaining
+a battery delay for the menu-bar app's entire lifetime.
 Starting or retrying a backup reads the current saved configuration without rewriting
 the source list; only confirming the folder picker changes that selection.
 Every new file or subfolder inside a configured source is included automatically on
@@ -469,7 +483,8 @@ These include `node_modules`, `.next`, `.nuxt`, `.svelte-kit`, `.cache`, `.parce
 `.turbo`, `.npm`, `.pnpm-store`, `.yarn/cache`, `.yarn/unplugged`, Python bytecode and
 test/type-checker caches, `.venv`, `.tox`, `.nox`, Swift `.build`/`DerivedData`,
 Rust `target/debug` and `target/release`, Android `build/intermediates`, Gradle runtime
-caches, macOS cache folders, `tmp`, `temp`, `*.tmp`, `*.temp`, editor swap/backup files.
+caches, macOS cache folders, `.roberdan-os/locks/heavy-queue`, `*.tmp`, `*.temp`,
+editor swap/backup files.
 Multi-component exclusions work inside nested repositories too.
 
 Your configured exclusions are added to this mandatory set. The mandatory rules do not
@@ -596,12 +611,14 @@ that specific file/folder if it doesn't need to be in the backup at all.
 - **Verified snapshots**: `_rustymacbackup/manifest.json` in every snapshot says whether it is
   complete. Incomplete ones are never the restore default and never count as "protected".
 - **Unpublished commits**: a `git bundle` per repository with only the commits not on a remote.
-- **Databases**: list them in config; they are copied consistently.
+- **Databases**: list them in config; each run saves a consistent full SQLite copy or
+  PostgreSQL logical archive, independently of file hard-link reuse.
 
 ```toml
 [databases]
 sqlite = ["~/GitHub/MyApp/runtime/history.db"]
 postgres = ["my_app_db"]
+postgres_cluster_incremental = false
 
 [coverage]
 ignore = ["~/Scratch"]          # never report this folder as "not backed up"
@@ -613,6 +630,46 @@ ignore = ["~/Scratch"]          # never report this folder as "not backed up"
 - **Coverage audit**: active folders and databases outside the backup are shown in the menu.
 - **Retention**: the 3 newest complete snapshots are never deleted; nothing is pruned while the
   Mac looks new or emptied.
+
+### PostgreSQL native incrementals
+
+This mode is **off by default**. It uses existing PostgreSQL 17+ tools to save changed blocks,
+not another full logical export every hour. It does not remove the ordinary file scan or
+promise a particular backup duration.
+
+```toml
+[databases]
+postgres = ["postgres", "my_app_db"] # exactly ALL non-template databases on this server
+postgres_cluster_incremental = true
+```
+
+A physical backup includes the **whole cluster**, including template databases and role
+password hashes. Use an encrypted backup disk. An unlisted database, unlogged table,
+custom tablespace, standby server, missing permissions or disabled `summarize_wal` makes
+the snapshot incomplete. The app checks before and after capture and **never changes
+server settings or installs PostgreSQL**. Enable WAL summaries separately only after
+approving that server change. Client tools must match the server's major version.
+
+Each snapshot contains its full input chain under `_rustymacbackup/databases/postgres-native/`.
+Older inputs are regular-file hard links, so pruning an older snapshot cannot remove an input
+needed by a retained one. A new full base and dated `pg_dump` archives are taken after 24 hours
+or 24 incrementals. An unusable parent or failed incremental triggers one verified fresh-full
+attempt, with the reason recorded in `chain.json` and the log. The dated logical archives are
+fallback material, **not automatically substituted for the current captured state**.
+
+Every input is checked with `pg_verifybackup`, including WAL, and the ordered chain is checked
+with `pg_combinebackup --dry-run`. WAL is fetched without a background receiver; the server must
+retain the WAL generated during capture, otherwise the backup fails explicitly.
+
+To recover one database, use `export-database <name> --to <new.dump> [--snapshot S] [--yes]`.
+Without `--yes` it only previews. Recovery verifies **every input before combining**, then
+combines by ordinary copy into private scratch and verifies the result. It starts only that
+private copy, with TCP, logical subscription workers and inherited server commands disabled,
+exports the chosen database, stops it and removes the scratch. The original server and saved
+inputs are not changed. Recovery holds the shared backup/retention lock. The output must be
+a new file outside the entire backup destination, including when a path uses a symbolic link.
+*Nuovo Mac → Database* uses the same path and still leaves existing destination databases alone.
+Recovery needs the matching PostgreSQL tools and enough temporary disk space for the full cluster.
 
 ## Menu Bar App
 
@@ -750,8 +807,9 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # all tests, including real engine runs in a sandbox
+./run-tests.sh                  # engine and recovery tests in isolated sandboxes
 ./run-tests.sh Applications.    # focused application capture/restore regressions
+MACBACKUP_POSTGRES_TESTS=1 ./run-tests.sh --filter Postgres. # real, fresh PostgreSQL 17 clusters
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
@@ -765,6 +823,11 @@ application bundle/data recovery through the real engine, native restore model a
 and the pre-3.0 suites. Application tests inject temporary app roots, homes and status
 directories; they never restore into the user's `/Applications` or home. Releases: push a `v*` tag; the workflow runs the tests
 and publishes the `.pkg` and `.app.zip`.
+
+Native PostgreSQL integration tests are opt-in and report an explicit skip otherwise.
+They require PostgreSQL 17 tools already installed, use only fresh Unix-socket clusters and
+temporary backup/config/status paths, and exercise incremental capture, pruning, selective
+export, missing-only recovery, corruption, full fallback and cancellation.
 
 ---
 
@@ -790,6 +853,7 @@ MacBackup4Dev topics                       # Warp, Terminale e shell, Claude Cod
 MacBackup4Dev restore-topic warp           # preview; add --yes to restore
 MacBackup4Dev versions ~/.zshrc            # every distinct version of one file
 MacBackup4Dev restore-file ~/.zshrc --snapshot 2026-10-04_190948 --yes
+MacBackup4Dev export-database my_app_db --snapshot 2026-10-04_190948 --to ~/Desktop/my_app_db.dump --yes
 MacBackup4Dev new-mac                      # checklist + preview of a whole new Mac
 MacBackup4Dev new-mac --steps config,repos,databases --yes
 MacBackup4Dev new-mac --stage app --apps system:Shoji.app  # preview saved app recovery

@@ -260,7 +260,9 @@ extension NewMacRestore {
             }
         case .databases:
             for db in SnapshotManifest.read(from: snapshot)?.databases ?? [] {
-                log("  " + restoreDatabase(db, snapshot: snapshot, home: home, dryRun: dryRun))
+                let result = restoreDatabase(db, snapshot: snapshot, home: home, dryRun: dryRun)
+                log("  " + result.text)
+                if result.failed { out.ok = false }
             }
         case .homebrew:
             let r = run(snapshot: snapshot, steps: [.homebrew], home: home, dryRun: dryRun)

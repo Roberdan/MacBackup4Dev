@@ -45,6 +45,7 @@ enum CLIHandler {
             case "topics": try runTopics(configPath: configPath)
             case "restore-topic": try runRestoreTopic(subArgs: subArgs, configPath: configPath)
             case "restore-file": try runRestoreFile(subArgs: subArgs, configPath: configPath)
+            case "export-database": try runExportDatabase(subArgs: subArgs, configPath: configPath)
             case "undo": try runUndo(subArgs: subArgs)
             case "new-mac": try runNewMac(subArgs: subArgs, configPath: configPath)
             case "relaunch-test":
@@ -76,7 +77,8 @@ enum CLIHandler {
 
     static func commandNeedsConfig(_ command: String) -> Bool {
         ["backup", "stop", "list", "status", "prune", "restore", "config", "schedule", "errors",
-         "snapshots", "coverage", "versions", "find", "topics", "restore-topic", "restore-file", "new-mac"].contains(command)
+         "snapshots", "coverage", "versions", "find", "topics", "restore-topic", "restore-file",
+         "export-database", "new-mac"].contains(command)
     }
 
     static func printUsage() {
@@ -112,6 +114,8 @@ enum CLIHandler {
           restore-topic <nome> [--snapshot S] [--yes]
           restore-file <file> [--snapshot S] [--to <cartella>] [--yes]
                                         Senza --yes mostra solo l'anteprima
+          export-database <nome> [--snapshot S] --to <nuovo.dump> [--yes]
+                                        Estrae un database dal backup incrementale senza toccare il server
           undo [cartella] [--file <file>]   Annulla l'ultimo ripristino, o un solo file
           new-mac [--snapshot S] [--steps config,repos,databases,homebrew,launch-agents]
                   [--agents label1,label2] [--yes]

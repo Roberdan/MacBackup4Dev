@@ -164,12 +164,19 @@ final class RestoreTests {
         let s1 = try snapshotDir(box, "2026-10-01_000000")
         let s2 = try snapshotDir(box, "2026-10-02_000000")
         let s3 = try snapshotDir(box, "2026-10-03_000000")
+        let s4 = try snapshotDir(box, "2026-10-04_000000")
         try safety.write("v1", to: s1.path + "/.zshrc")
         try FileManager.default.linkItem(atPath: s1.path + "/.zshrc", toPath: s2.path + "/.zshrc") // unchanged day
         try safety.write("version two", to: s3.path + "/.zshrc")
+        try safety.write("version TWO", to: s4.path + "/.zshrc")
+        let modified = Date(timeIntervalSince1970: 1_700_000_000.125)
+        try FileManager.default.setAttributes([.modificationDate: modified],
+                                              ofItemAtPath: s3.path + "/.zshrc")
+        try FileManager.default.setAttributes([.modificationDate: modified.addingTimeInterval(0.5)],
+                                              ofItemAtPath: s4.path + "/.zshrc")
         let versions = FileVersions.list(relativePath: ".zshrc", at: URL(fileURLWithPath: box.dest))
-        try expectEqual(versions.map(\.snapshot), ["2026-10-03_000000", "2026-10-02_000000"],
-                        "hard-linked twin collapsed, newest first")
+        try expectEqual(versions.map(\.snapshot), ["2026-10-04_000000", "2026-10-03_000000", "2026-10-02_000000"],
+                        "same-size subsecond edits remain selectable; only unchanged twins collapse")
     }
 
     /// The whole day of 2026-10-06 in one call: repo cloned, same branch, unpushed commit

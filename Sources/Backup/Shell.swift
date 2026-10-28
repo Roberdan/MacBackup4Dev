@@ -29,7 +29,9 @@ enum Shell {
 
     static func run(_ executable: String, _ arguments: [String], cwd: String? = nil,
                     timeout: TimeInterval = 300, environment: [String: String]? = nil,
-                    stdin: String? = nil, inheritEnvironment: Bool = true) -> Result {
+                    stdin: String? = nil, inheritEnvironment: Bool = true,
+                    cancelled: () -> Bool = { false }) -> Result {
+        if cancelled() { return Result(status: -3, stdout: "", stderr: "Operazione annullata.") }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -78,10 +80,11 @@ enum Shell {
             return Result(status: -1, stdout: "", stderr: "\(executable): \(error.localizedDescription)")
         }
         let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline { usleep(20_000) }
+        while process.isRunning && Date() < deadline && !cancelled() { usleep(20_000) }
         var timedOut = false
+        let wasCancelled = cancelled()
         if process.isRunning {
-            timedOut = true
+            timedOut = !wasCancelled
             process.terminate()
             let grace = Date().addingTimeInterval(5)
             while process.isRunning && Date() < grace { usleep(20_000) }
@@ -99,9 +102,10 @@ enum Shell {
         drainNonBlocking(outPipe.fileHandleForReading.fileDescriptor, into: out.append)
         drainNonBlocking(errPipe.fileHandleForReading.fileDescriptor, into: err.append)
         let stderr = String(decoding: err.snapshot().0, as: UTF8.self)
-        return Result(status: timedOut ? -2 : process.terminationStatus,
+        return Result(status: wasCancelled ? -3 : (timedOut ? -2 : process.terminationStatus),
                       stdout: String(decoding: out.snapshot().0, as: UTF8.self),
-                      stderr: timedOut ? "timeout dopo \(Int(timeout))s. \(stderr)" : stderr)
+                      stderr: wasCancelled ? "Operazione annullata. \(stderr)"
+                        : (timedOut ? "timeout dopo \(Int(timeout))s. \(stderr)" : stderr))
     }
 
     private static func drainNonBlocking(_ fd: Int32, into sink: (Data) -> Void) {

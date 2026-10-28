@@ -9,6 +9,7 @@ struct BackupRunOptions {
     var captureGit = true
     var captureDatabases = true
     var auditCoverage = true
+    var databaseEnvironment: [String: String]? = nil
     var now: () -> Date = { Date() }
     var environmentCapture: (URL) -> Void = EnvironmentSnapshot.capture
     var captureApplications = true
@@ -395,11 +396,18 @@ enum BackupEngine {
         reportFinalization("Preparo le copie dei database…")
         let dbRecords = options.captureDatabases
             ? DatabaseDumps.captureAll(config: config.databases, home: home, into: inProgressURL,
+                                     previousSnapshot: previousComplete?.url, now: options.now(),
+                                     postgresEnvironment: options.databaseEnvironment,
+                                     cancelled: { token.isCancelled || Task.isCancelled },
                                      onProgress: { index, total in
                                          reportFinalization("Salvo il database \(index) di \(total)")
                                      })
             : []
 
+        if token.isCancelled || Task.isCancelled {
+            abandonCancelledBackup()
+            return nil
+        }
         var applicationReport: AppCapture.Report?
         if options.captureApplications && config.applications.capture {
             var copyOptions = options.applicationCopyOptions
