@@ -1,7 +1,7 @@
 # MacBackup4Dev
 
-> Back up a developer's Mac — projects, dotfiles, editors, AI tools, databases and the list of
-> installed programs — to an external disk, and rebuild a new Mac from it, one safe phase at
+> Back up a developer's Mac — projects, dotfiles, editors, AI tools, databases, recoverable apps
+> and program inventories — to an external disk, and rebuild a new Mac from it, one safe phase at
 > a time. Native menu-bar app, no Full Disk Access. Formerly **RustyMacBackup**.
 
 Built for developers who live in the terminal. Not a replacement for Time Machine — a complement
@@ -32,9 +32,13 @@ The app finds your development environment by itself (under a second) and lets y
   tests are not proposed).
 - **Credentials** (SSH keys, tokens, `~/.config/gh`, anything named secret/token/credential)
   are listed apart and never selected for you: the backup disk may not be encrypted.
-- **Installed programs** (Homebrew formulae and apps, App Store apps, VS Code extensions,
-  global npm / uv / pipx / cargo packages) are not copied: their list is saved at every backup
-  so a new Mac can reinstall them.
+- **Applications:** each backup discovers apps in `/Applications` and `~/Applications`,
+  including one grouping folder, and saves portable bundles automatically. Ordinary local
+  app preferences and support folders are offered separately in **Dati delle applicazioni**,
+  off by default; confirm them in **Scegli dati**.
+- **Other installed programs** (Homebrew formulae, App Store apps, VS Code extensions,
+  global npm / uv / pipx / cargo packages) retain reinstall inventories. Apps requiring
+  their original installer are identified rather than presented as working copies.
 
 Then choose the disk and how often (every hour, every 6 hours, nightly, or by hand) and the
 first backup starts. On a new Mac with a backup disk attached, the first screen offers
@@ -60,12 +64,22 @@ External Disk
     │   ├── .gitconfig
     │   ├── .ssh/config
     │   ├── .config/nvim/
-    │   └── GitHub/MyProject/
+    │   ├── GitHub/MyProject/
+    │   └── _rustymacbackup/applications/
+    │       ├── catalog.json   ← app versions, copy state and local-data coverage
+    │       └── system/Shoji.app/
     ├── 2026-03-19T08:00:00/    ← yesterday (unchanged files = zero extra space)
     └── status.json             ← live progress / last result
 ```
 
 Each backup creates a timestamped snapshot. **Unchanged files are hard-linked** from the previous snapshot — so 100 snapshots of a 2 GB config tree might use only 2.1 GB total. Changed files are copied with full attribute preservation (`copyfile()` with DATA|XATTR|STAT|ACL flags).
+
+**Incremental file data does not mean a constant-time backup.** Each run still scans the
+configured sources and creates the new snapshot's hard links. Unchanged Git bundles are
+also reused. By default, databases still use **full copies on every run**: SQLite's
+online backup and PostgreSQL's `pg_dump`. PostgreSQL 17+ also supports the explicit
+[native incremental mode](#postgresql-native-incrementals) below. The file-copy byte counter
+does not include database archives, Git bundles or environment capture.
 
 > ⚠️ **`COPYFILE_CLONE` is intentionally disabled.** On macOS, APFS cloning silently becomes a destructive *move* when source and destination are on different filesystems (APFS → ExFAT/HFS+). We've seen this destroy entire home directories. We use `copyfile()` with `COPYFILE_ALL = 0x0F` only.
 
@@ -79,6 +93,10 @@ Hourly and other whole-minute intervals that divide a day use fixed calendar tim
 interval schedules are migrated when the app is idle; daily times and arbitrary
 custom intervals are preserved. Calendar jobs missed during sleep run on wake;
 scheduled backups still require AC power and never overlap another backup.
+On launch, the app refreshes an existing schedule's macOS registration so an app
+update cannot leave a listed job pointing at an obsolete code identity. The refresh
+waits for an idle, connected destination, preserves custom settings and never enables
+a schedule that was switched off in the app.
 
 To open the menu-bar app automatically when you sign in, choose **Avvia al login**
 in the app's panel, then press **Attiva avvio al login** in its dedicated window.
@@ -114,6 +132,9 @@ sources and unexpectedly large drops in file counts still make a snapshot incomp
 the large-drop protection also pauses snapshot cleanup.
 Regenerable local CI queues and GitHub Actions runner diagnostics, temporary files,
 downloaded tools and action copies are excluded before scanning their contents.
+This includes `.roberdan-os/locks/heavy-queue` tickets, which disappear as jobs finish.
+Scanner pacing reads the current power source for each walk, rather than retaining
+a battery delay for the menu-bar app's entire lifetime.
 Starting or retrying a backup reads the current saved configuration without rewriting
 the source list; only confirming the folder picker changes that selection.
 Every new file or subfolder inside a configured source is included automatically on
@@ -142,6 +163,41 @@ The app auto-discovers installed tools on first launch. You confirm what to incl
 | **Repos** | `~/GitHub`, `~/Developer`, `~/Projects` — or any custom path |
 | **Custom** | Any file or folder you add via the `+` button |
 
+### Applications: copies and coverage
+
+Every backup discovers newly installed apps without changing the configured folder list.
+Portable `.app` bundles are saved under `_rustymacbackup/applications/`, separately from
+ordinary files. Copies preserve executable permissions, internal framework links, signatures
+and macOS quarantine protection. Unchanged files are hard-linked only to older snapshots,
+never to the live app; same-size changes are checked by content.
+
+**Ripristina… → Nuovo Mac → Applicazioni dal backup** lists each app's saved version,
+copy state and recognized local-data coverage. Select the copies to restore; existing or
+running apps are left alone. Nothing is launched, no administrator permission is requested,
+and an unwritable destination is reported. **Annulla** moves unchanged restored apps into
+the preserved-copies folder, rather than deleting them; changed or running apps stay put.
+
+An app copy is **not a promise that all its data or dependencies were saved**:
+
+- Ordinary `~/Library/Preferences/<bundle-id>.plist` and matching
+  `~/Library/Application Support/` folders require explicit selection in **Scegli dati**.
+  Additional app-data choices start off; known-tool settings keep their existing picker
+  entries and choices. Configured exclusions still apply. Unknown locations are not guessed.
+- Protected containers, Keychain, login services, system components, accounts, licences and
+  macOS permissions are not transferred by copying an app. Sign-in, activation, a compatible
+  macOS version or the original installer may still be necessary.
+- App Store apps, system helpers and bundles linked to external dependencies need a reinstall;
+  the catalog explains why. **Programmi** retains known reinstall options. A copied Homebrew
+  cask is not downloaded twice, but copying its bundle does **not** recreate Homebrew's
+  registration or update management.
+- A failed promised copy makes the snapshot incomplete; an explicitly listed installer-only
+  app does not. A complete snapshot can therefore still require manual installers and
+  unselected data. This is not a clone of macOS.
+
+Set `[applications] capture = false` to keep inventories only, or use
+`exclude_bundle_ids` to exclude particular apps. The first backup with app capture enabled
+needs space for their full contents. Older snapshots keep their existing reinstall behavior.
+
 ### Configuration, Not Data
 
 Hidden folders in your home directory are picked up automatically, so a tool you install
@@ -168,7 +224,8 @@ somewhere else, or dangerous to put back on another Mac.
 | `~/Library/Mail`, `~/Library/Messages`, `~/Library/Safari` | Reading them needs Full Disk Access (often blocked on company Macs) and they live on a server anyway | Sign in: Exchange/IMAP, iCloud Messages, Safari sync |
 | `~/Library/Caches` | Rebuilt by each app | Nothing to do |
 | `/System`, `/Library`, `/etc`, `/usr`, `/private` | macOS itself: copied from another Mac or macOS version they can stop it from starting | Comes with macOS |
-| `/Applications`, `/opt` (Homebrew) | Programs, not your data; a copy would be old and tied to the old Mac | Their list is saved at every backup; *Nuovo Mac → Programmi* reinstalls them one by one, current versions |
+| `/Applications` as an ordinary source | Never copied wholesale or offered in the folder picker | The separate application pipeline saves portable bundles; installer-only apps remain explicit |
+| `/opt` (Homebrew) | Package-manager files and dependencies are not portable configuration | *Nuovo Mac → Programmi* reinstalls listed packages |
 | `~/Library/Containers` | Sandboxed apps' private data, protected by macOS; most of it syncs through iCloud | Signing in to the app (the only gap: apps keeping data only locally) |
 | `~/Library/CloudStorage` (OneDrive, Dropbox, …) | Already in the cloud; copying it can make the sync client re-upload, and company DLP may block it | Sign in to the provider. Config-only opt-in under `[protection]` |
 
@@ -270,6 +327,7 @@ mb4d list
 | `new-mac` | New Mac: checks, then the phases in order with what is done |
 | `new-mac --stage <id>[,id] [--yes]` | Run one phase (preview without `--yes`) |
 | `new-mac --stage programmi --packages brew:jq,cask:warp --yes` | Reinstall chosen programs (`--all-packages`: all missing ones) |
+| `new-mac --stage app --apps system:Shoji.app --yes` | Restore selected saved app copies (`--all-apps`: all missing saved apps); omit `--yes` for preview |
 | `scan` | What the first-launch setup finds on this Mac |
 | `new-mac --stage servizi --agents <label> --yes` | Turn on one service, watched; moved aside if it fails |
 | `new-mac --undo <id>` / `--undo servizio:<label>` | Undo a phase / turn a service off |
@@ -306,7 +364,8 @@ detected but left **off by default** — you opt into them explicitly, exactly a
 
 These paths are hardcoded as forbidden and enforced at both the UI and engine level —
 including the "Aggiungi percorso" picker, which now rejects them on add instead of
-listing them as if they were backupable:
+listing them as if they were backupable. The dedicated application pipeline reads portable
+bundles separately; it does not allow `/Applications` as an ordinary file source:
 
 ```
 ~/Library/Mail         ~/Library/Messages      ~/Library/Safari
@@ -424,7 +483,8 @@ These include `node_modules`, `.next`, `.nuxt`, `.svelte-kit`, `.cache`, `.parce
 `.turbo`, `.npm`, `.pnpm-store`, `.yarn/cache`, `.yarn/unplugged`, Python bytecode and
 test/type-checker caches, `.venv`, `.tox`, `.nox`, Swift `.build`/`DerivedData`,
 Rust `target/debug` and `target/release`, Android `build/intermediates`, Gradle runtime
-caches, macOS cache folders, `tmp`, `temp`, `*.tmp`, `*.temp`, editor swap/backup files.
+caches, macOS cache folders, `.roberdan-os/locks/heavy-queue`, `*.tmp`, `*.temp`,
+editor swap/backup files.
 Multi-component exclusions work inside nested repositories too.
 
 Your configured exclusions are added to this mandatory set. The mandatory rules do not
@@ -466,6 +526,10 @@ hourly  = 24    # keep last 24 hourly snapshots
 daily   = 30    # keep last 30 daily snapshots
 weekly  = 52    # keep last 52 weekly snapshots
 monthly = 0     # keep forever
+
+[applications]
+capture = true
+exclude_bundle_ids = []
 
 [protection]
 include_rights_managed_files = false
@@ -547,12 +611,14 @@ that specific file/folder if it doesn't need to be in the backup at all.
 - **Verified snapshots**: `_rustymacbackup/manifest.json` in every snapshot says whether it is
   complete. Incomplete ones are never the restore default and never count as "protected".
 - **Unpublished commits**: a `git bundle` per repository with only the commits not on a remote.
-- **Databases**: list them in config; they are copied consistently.
+- **Databases**: list them in config; each run saves a consistent full SQLite copy or
+  PostgreSQL logical archive, independently of file hard-link reuse.
 
 ```toml
 [databases]
 sqlite = ["~/GitHub/MyApp/runtime/history.db"]
 postgres = ["my_app_db"]
+postgres_cluster_incremental = false
 
 [coverage]
 ignore = ["~/Scratch"]          # never report this folder as "not backed up"
@@ -564,6 +630,46 @@ ignore = ["~/Scratch"]          # never report this folder as "not backed up"
 - **Coverage audit**: active folders and databases outside the backup are shown in the menu.
 - **Retention**: the 3 newest complete snapshots are never deleted; nothing is pruned while the
   Mac looks new or emptied.
+
+### PostgreSQL native incrementals
+
+This mode is **off by default**. It uses existing PostgreSQL 17+ tools to save changed blocks,
+not another full logical export every hour. It does not remove the ordinary file scan or
+promise a particular backup duration.
+
+```toml
+[databases]
+postgres = ["postgres", "my_app_db"] # exactly ALL non-template databases on this server
+postgres_cluster_incremental = true
+```
+
+A physical backup includes the **whole cluster**, including template databases and role
+password hashes. Use an encrypted backup disk. An unlisted database, unlogged table,
+custom tablespace, standby server, missing permissions or disabled `summarize_wal` makes
+the snapshot incomplete. The app checks before and after capture and **never changes
+server settings or installs PostgreSQL**. Enable WAL summaries separately only after
+approving that server change. Client tools must match the server's major version.
+
+Each snapshot contains its full input chain under `_rustymacbackup/databases/postgres-native/`.
+Older inputs are regular-file hard links, so pruning an older snapshot cannot remove an input
+needed by a retained one. A new full base and dated `pg_dump` archives are taken after 24 hours
+or 24 incrementals. An unusable parent or failed incremental triggers one verified fresh-full
+attempt, with the reason recorded in `chain.json` and the log. The dated logical archives are
+fallback material, **not automatically substituted for the current captured state**.
+
+Every input is checked with `pg_verifybackup`, including WAL, and the ordered chain is checked
+with `pg_combinebackup --dry-run`. WAL is fetched without a background receiver; the server must
+retain the WAL generated during capture, otherwise the backup fails explicitly.
+
+To recover one database, use `export-database <name> --to <new.dump> [--snapshot S] [--yes]`.
+Without `--yes` it only previews. Recovery verifies **every input before combining**, then
+combines by ordinary copy into private scratch and verifies the result. It starts only that
+private copy, with TCP, logical subscription workers and inherited server commands disabled,
+exports the chosen database, stops it and removes the scratch. The original server and saved
+inputs are not changed. Recovery holds the shared backup/retention lock. The output must be
+a new file outside the entire backup destination, including when a path uses a symbolic link.
+*Nuovo Mac → Database* uses the same path and still leaves existing destination databases alone.
+Recovery needs the matching PostgreSQL tools and enough temporary disk space for the full cluster.
 
 ## Menu Bar App
 
@@ -650,6 +756,11 @@ Sources/
 │   ├── GitSafety.swift         # git bundle of unpublished commits per repository
 │   ├── DatabaseDumps.swift     # SQLite online backup + pg_dump
 │   ├── CoverageAuditor.swift   # Active folders/databases not backed up (no noise)
+│   ├── AppInventory.swift      # Per-backup app discovery and explicit local-data coverage
+│   ├── AppBundleCopy.swift     # Verified bundle copy, safe internal links, content deduplication
+│   ├── AppCapture.swift        # Reserved app archive/catalog, completeness reporting
+│   ├── AppInstallers.swift     # Homebrew installer hints, without copying package receipts
+│   ├── AppRestore.swift        # Selected create-only app restore and move-aside undo
 │   ├── SelectiveRestore.swift  # Topics, file versions, preview, atomic apply, per-file undo
 │   ├── NewMacRestore.swift     # Checklist, repos, databases, Homebrew, LaunchAgents
 │   ├── NewMacStages.swift      # "Nuovo Mac" a tappe: phases, progress, undo, shell/service checks
@@ -696,7 +807,9 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 198 tests, including real engine runs in a sandbox
+./run-tests.sh                  # engine and recovery tests in isolated sandboxes
+./run-tests.sh Applications.    # focused application capture/restore regressions
+MACBACKUP_POSTGRES_TESTS=1 ./run-tests.sh --filter Postgres. # real, fresh PostgreSQL 17 clusters
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
@@ -706,8 +819,15 @@ Tests cover the engine end to end in a sandbox (no file dropped, incomplete snap
 bundles applied to a fresh clone, SQLite/WAL copies, coverage noise), retention protection,
 selective restore and per-file undo, a whole *Nuovo Mac* rebuild, the folder picker, config
 round-trips, login-item activation/approval/error handling through a fake macOS boundary,
-and the pre-3.0 suites. Releases: push a `v*` tag; the workflow runs the tests
+application bundle/data recovery through the real engine, native restore model and CLI,
+and the pre-3.0 suites. Application tests inject temporary app roots, homes and status
+directories; they never restore into the user's `/Applications` or home. Releases: push a `v*` tag; the workflow runs the tests
 and publishes the `.pkg` and `.app.zip`.
+
+Native PostgreSQL integration tests are opt-in and report an explicit skip otherwise.
+They require PostgreSQL 17 tools already installed, use only fresh Unix-socket clusters and
+temporary backup/config/status paths, and exercise incremental capture, pruning, selective
+export, missing-only recovery, corruption, full fallback and cancellation.
 
 ---
 
@@ -733,8 +853,10 @@ MacBackup4Dev topics                       # Warp, Terminale e shell, Claude Cod
 MacBackup4Dev restore-topic warp           # preview; add --yes to restore
 MacBackup4Dev versions ~/.zshrc            # every distinct version of one file
 MacBackup4Dev restore-file ~/.zshrc --snapshot 2026-10-04_190948 --yes
+MacBackup4Dev export-database my_app_db --snapshot 2026-10-04_190948 --to ~/Desktop/my_app_db.dump --yes
 MacBackup4Dev new-mac                      # checklist + preview of a whole new Mac
 MacBackup4Dev new-mac --steps config,repos,databases --yes
+MacBackup4Dev new-mac --stage app --apps system:Shoji.app  # preview saved app recovery
 ```
 
 **Nuovo Mac** restores configuration files that are missing (never overwriting), clones each
@@ -791,7 +913,8 @@ and installers left there by previous versions are removed.
 base tools (Apple's developer tools, Homebrew: one click starts each installer) → programs
 (every package of the old Mac with its own checkbox; already installed ones are marked; one
 failure never stops the others) → documents → repositories → databases → one per tool →
-other configurations → shell → services. Run one, check the Mac, go on; every phase only adds files and can be
+other configurations → applications from the backup → shell → services. Restore selected
+app data before opening the recovered apps. Run one, check the Mac, go on; every phase only adds files and can be
 undone alone. Nothing that starts at login is ever restored as a plain file: services
 (LaunchAgents) are all off, each has its own switch, and one that fails right after
 starting is stopped and moved to `~/MacBackup4Dev-copie-parziali/LaunchAgents/`. After the

@@ -237,6 +237,11 @@ struct PopoverView: View {
                 }
                 Spacer(minLength: 0)
             }
+            if !state.isRunning, let apps = state.status?.applications {
+                Text("\(apps.saved) app nel backup · \(apps.needsInstaller) richiedono un installer")
+                    .font(.system(size: 11)).foregroundColor(Look.secondaryText)
+                    .accessibilityLabel("Applicazioni: \(apps.saved) copie salvate, \(apps.needsInstaller) da reinstallare")
+            }
             if state.isRunning, let s = state.status {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -331,6 +336,12 @@ struct PopoverView: View {
                              title: "Backup non cifrati",
                              detail: "Chi ha il disco può leggerli. Cifrali: poi potrai salvare anche le credenziali.",
                              primary: ("Cifra", { state.onRequestEncryption?() }), secondary: nil))
+        }
+        if let apps = state.status?.applications, apps.unselectedDataPaths > 0, !state.isRunning {
+            out.append(Issue(id: "app-data", icon: "app.badge.checkmark", tint: Look.orange,
+                             title: "Dati delle applicazioni da scegliere",
+                             detail: "\(apps.unselectedDataPaths) percorsi non salvati. Scegli quali includere.",
+                             primary: ("Scegli dati", { state.onRequestChooseSources?() }), secondary: nil))
         }
         for gap in state.coverageGaps {
             out.append(Issue(id: "gap-\(gap.path)",

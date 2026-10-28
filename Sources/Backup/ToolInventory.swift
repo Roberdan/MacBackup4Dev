@@ -50,6 +50,11 @@ enum ToolInventory {
         out.append(contentsOf: lines("uv-tools.txt").map { Package(kind: .uv, name: $0) })
         out.append(contentsOf: lines("pipx.txt").map { Package(kind: .pipx, name: $0) })
         out.append(contentsOf: lines("cargo-install.txt").map { Package(kind: .cargo, name: $0) })
+        do {
+            let copied = Set((try AppCapture.read(from: snapshot))?.entries
+                .filter { $0.state == .saved }.compactMap(\.packageID) ?? [])
+            out.removeAll { copied.contains($0.id) }
+        } catch { Log.error("Application catalog not usable for package selection: \(error)") }
         var seen = Set<String>()
         return out.filter { seen.insert($0.id).inserted }
     }

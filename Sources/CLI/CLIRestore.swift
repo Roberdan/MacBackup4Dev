@@ -62,7 +62,7 @@ extension CLIHandler {
                 extra = "\(m.filesProcessed) file"
                 let unpushed = m.git.filter { $0.bundle != nil }.count
                 if unpushed > 0 { extra += " · \(unpushed) repo con commit non pubblicati salvati" }
-                if !m.databases.isEmpty { extra += " · \(m.databases.filter { $0.file != nil }.count) database" }
+                if !m.databases.isEmpty { extra += " · \(m.databases.reduce(0) { $0 + $1.savedDatabaseCount }) database" }
             }
             print("  \(s.name)  \(label)  \(extra)")
             if let m = s.manifest, !m.complete {
@@ -101,6 +101,30 @@ extension CLIHandler {
             print("  \(v.snapshot)  \(v.state.label.padding(toLength: 14, withPad: " ", startingAt: 0))  modificato \(df.string(from: v.modified))  \(BackupEngine.formatBytes(v.size))")
         }
         print("\nPer rimetterne una: restore-file ~/\(rel) --snapshot <nome> [--to <cartella>] --yes")
+    }
+
+    static func runExportDatabase(subArgs: [String], configPath: String?) throws {
+        let flags = Flags(subArgs, valued: ["--snapshot", "--to"])
+        guard let database = flags.positional.first, let output = flags.values["--to"] else {
+            throw err("Uso: export-database <nome> [--snapshot S] --to <nuovo.dump> [--yes]")
+        }
+        let (_, dest) = try destination(configPath)
+        let snapshot = try pickSnapshot(flags, at: dest)
+        guard snapshot.manifest?.databases.contains(where: {
+            $0.kind == PostgresBackup.kind && $0.file == PostgresBackup.relativeManifest && $0.error == nil
+        }) == true else {
+            throw err("Questo snapshot non contiene un backup incrementale PostgreSQL utilizzabile.")
+        }
+        let chain = try PostgresBackup.readChain(in: snapshot.url)
+        guard chain.server.databases.contains(database) else { throw err("Database non presente nello snapshot.") }
+        let target = URL(fileURLWithPath: expandPath(output))
+        guard !FileManager.default.fileExists(atPath: target.path) else {
+            throw err("Il file di destinazione esiste gia': non lo sovrascrivo.")
+        }
+        print("Esporto \(database) da \(snapshot.name) in \(target.path); il server originale non viene modificato.")
+        guard flags.switches.contains("--yes") else { print("Anteprima: aggiungi --yes per esportare."); return }
+        try PostgresBackup.exportDatabase(database, snapshot: snapshot.url, to: target)
+        print("Database esportato in un nuovo archivio.")
     }
 
     static func runFind(subArgs: [String], configPath: String?) throws {
@@ -195,11 +219,12 @@ extension CLIHandler {
         }
     }
 
-    static func runNewMac(subArgs: [String], configPath: String?) throws {
-        let flags = Flags(subArgs, valued: ["--snapshot", "--steps", "--agents", "--stage", "--undo", "--packages"])
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
+    static func runNewMac(subArgs: [String], configPath: String?,
+                          home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                          applicationRoots: [AppInventory.Root]? = nil) throws {
+        let flags = Flags(subArgs, valued: ["--snapshot", "--steps", "--agents", "--stage", "--undo", "--packages", "--apps"])
         if let id = flags.values["--undo"] {
-            print(NewMacRestore.undoStage(id, home: home))
+            print(NewMacRestore.undoStage(id, home: home, applicationRoots: applicationRoots))
             return
         }
         let (config, dest) = try destination(configPath)
@@ -214,7 +239,7 @@ extension CLIHandler {
                 return step
             })
             let agents = Set((flags.values["--agents"] ?? "").split(separator: ",").map(String.init))
-            let report = NewMacRestore.run(snapshot: snap.url, steps: steps, launchAgents: agents, dryRun: !yes) { print($0) }
+            let report = NewMacRestore.run(snapshot: snap.url, steps: steps, launchAgents: agents, home: home, dryRun: !yes) { print($0) }
             if !yes { print(yellow("\nAnteprima: niente è stato scritto. Aggiungi --yes per eseguire.")) }
             for f in report.failures { print(red("  - \(f)")) }
             return
@@ -223,7 +248,8 @@ extension CLIHandler {
         let stages = NewMacRestore.stages(snapshot: snap.url, config: config)
         guard let wanted = flags.values["--stage"] else {
             print(bold("Controlli"))
-            for item in NewMacRestore.checklist(snapshot: snap.url, ignoredApps: config.coverage.ignoreApps) {
+            for item in NewMacRestore.checklist(snapshot: snap.url, home: home,
+                ignoredApps: config.coverage.ignoreApps, applicationRoots: applicationRoots) {
                 print("  \(item.ok ? green("✓") : yellow("!")) \(item.title): \(item.hint)")
             }
             print(bold("\nFasi, nell'ordine consigliato") + " (una alla volta: new-mac --stage <id> [--yes])")
@@ -233,6 +259,12 @@ extension CLIHandler {
                 print("  \(mark) \(stage.id.padding(toLength: 22, withPad: " ", startingAt: 0)) \(stage.title)" + (stage.restartAfter ? yellow("  (poi riavvia)") : ""))
             }
             print("\nServizi automatici: nessuno viene acceso da solo. Uno alla volta: --stage servizi --agents <label> --yes")
+            if let catalog = try AppCapture.read(from: snap.url) {
+                print("\nApplicazioni: \(catalog.entries.filter { $0.state == .saved }.count) copie nel backup. --stage app per vederle e scegliere.")
+                for entry in catalog.entries where entry.state == .installer || entry.state == .failed {
+                    print(yellow("  \(entry.name): \(entry.reason)"))
+                }
+            }
             print("Annullare una fase: new-mac --undo <id>   ·   spegnere un servizio: new-mac --undo servizio:<label>")
             return
         }
@@ -244,6 +276,12 @@ extension CLIHandler {
             let installed = ToolInventory.installed(all)
             packages = Set(all.filter { !ToolInventory.isInstalled($0, in: installed) }.map(\.id))
         }
+        var applications = Set((flags.values["--apps"] ?? "").split(separator: ",").map(String.init))
+        if flags.switches.contains("--all-apps") {
+            let entries = try AppCapture.read(from: snap.url)?.entries ?? []
+            let installed = AppRestore.installedIDs(entries, roots: applicationRoots ?? AppInventory.Root.standard(home: home), home: home)
+            applications = Set(entries.filter { $0.state == .saved && !installed.contains($0.id) }.map(\.id))
+        }
         for id in wanted.split(separator: ",").map(String.init) {
             guard let stage = stages.first(where: { $0.id == id }) else { throw err("Fase sconosciuta: \(id)") }
             if stage.kind == .packages && packages.isEmpty {
@@ -251,10 +289,20 @@ extension CLIHandler {
                 print(yellow("Scegli con --packages <id>,<id> oppure --all-packages"))
                 continue
             }
+            if stage.kind == .applications && applications.isEmpty {
+                for entry in try AppCapture.read(from: snap.url)?.entries ?? [] {
+                    print("  \(entry.id) [\(entry.state.rawValue)] \(entry.reason)")
+                    print("    \(entry.dataDetail)")
+                }
+                print(yellow("Scegli con --apps <id>,<id> oppure --all-apps"))
+                continue
+            }
             let out = NewMacRestore.runStage(stage, snapshot: snap.url, home: home, dryRun: !yes,
-                                             services: agents, packages: packages, sink: { print($0) })
+                                             services: agents, packages: packages, applications: applications,
+                                             applicationRoots: applicationRoots, sink: { print($0) })
             if yes && stage.restartAfter && out.ok { print(yellow("Riavvia il Mac prima della fase successiva.")) }
             if !out.ok { print(red("Fase \(id) con problemi: leggi le righe sopra.")) }
+            if !out.ok && stage.kind == .applications { throw err("Ripristino delle applicazioni non completato.") }
         }
         if !yes { print(yellow("\nAnteprima: niente è stato scritto. Aggiungi --yes per eseguire.")) }
     }

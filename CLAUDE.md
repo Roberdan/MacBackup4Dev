@@ -4,7 +4,7 @@
 
 Native macOS backup app (Swift, AppKit/SwiftUI). Single `.app` binary that acts as both menu bar app and CLI tool. No external dependencies. Target: macOS 14+ arm64.
 
-**Product**: whitelist-only incremental backup with hard links. Time Machine alternative for MDM-restricted Macs. Dev-tool configs + arbitrary folders.
+**Product**: whitelist-only incremental backup with hard links. Time Machine alternative for MDM-restricted Macs. Dev-tool configs, arbitrary folders and recoverable application bundles.
 
 **Name (4.0):** MacBackup4Dev. All names live in `AppIdentity`. Kept on purpose from 3.x: the
 bundle identifier (update continuity, notification permission), everything on the backup disk
@@ -42,8 +42,10 @@ Sources/
   Backup/       BackupEngine(+Helpers), EncryptedStore, HomeRewrite, HardLinker, FileScanner, RestoreEngine,
                 RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
+                AppInventory, AppBundleCopy, AppCapture, AppInstallers, AppRestore,
                 SelectiveRestore (+Topics, FileVersions), NewMacRestore, NewMacStages, ToolInventory, ProtectionSummary, Shell
-  Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager
+  Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager,
+                ScheduleRegistrationRefresher
   CLI/          CLIHandler, CLIRestore (3.0 commands), PruneOptions
   Diagnostics/  Log, ErrorReporter, DiskDiagnostics, FDACheck
   UI/           PopoverView, OnboardingView, EncryptionSetupView, LoginItemView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
@@ -74,6 +76,17 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   `.notFound` is a failed service lookup, not a missing app or proof that startup is off:
   keep an explicit registration retry available and surface unchanged states/native errors.
 - **Hard links for deduplication**: `HardLinker.shouldHardLink()` checks POSIX size + mtime delta < 0.001s. Only regular previous files are reused (never symlinks).
+- **Application recovery:** `AppCapture` discovers `/Applications` and `~/Applications`
+  on each backup, one grouping level only. Portable bundles live under the reserved
+  `_rustymacbackup/applications/` namespace, not in ordinary file sources. Internal relative
+  framework links are preserved; escaping, dangling or circular links require an installer.
+  `AppBundleCopy` checks content, modes and signatures before reuse, never links live source
+  files, and never uses clone flags. Failed copies prevent `complete: true`.
+  `AppRestore` validates the catalog and copy, stages beside the target, and uses an exclusive
+  rename: existing/running apps are untouched, nothing is launched or home-rewritten.
+  Undo checks the recorded installation's device/inode and contents before moving it aside;
+  cleanup makes only staging directories writable,
+  never regular files that may be linked to older snapshots.
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
 - **4 parallel workers (4.1.4)**: backup entry points, scanner and copy tasks use background
   priority. Disk I/O uses the SDK constants, preserves an existing passive/throttled policy
@@ -87,6 +100,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   Existing interval schedules migrate only when idle; arbitrary intervals and daily
   times are preserved. Migration holds `DestinationLock` through install and rollback;
   a busy destination is retried later. Never bootout a running backup to migrate its schedule.
+  App startup also refreshes existing calendar/custom registrations after app replacement
+  (a listed launchd job can still fail its cached code requirement). Hold the same lock,
+  check for a scheduled process still opening the store, and retry busy/offline destinations.
+  Never recreate a schedule removed by the user.
 - **Config**: `~/.config/macbackup4dev/config.toml` (3.x paths are links to these, see `AppIdentity`)
 - **Lock file**: `<destination>/rustymacbackup.lock` (PID-based, stale detection via `kill(pid, 0)`).
   "Interrompi" sends SIGTERM to that PID when the backup runs in its own process (scheduled);
@@ -138,7 +155,11 @@ let flags = copyfile_flags_t(UInt32(0x0F))
 - **First launch never walks cloud folders** (links into ~/Library/CloudStorage, OneDrive,
   Dropbox, iCloud) and never proposes credentials (`DevEnvironment.looksSecret`, token-bearing
   `~/.config` tools). The scan does not measure sizes (0.4 s); `config(from:)` measures only
-  what was chosen. Installed programs are inventoried, not copied (`ToolInventory`).
+  what was chosen. First launch inventories installed programs (`ToolInventory`);
+  the separate `AppCapture` pipeline copies portable apps during backup, not first launch.
+  Additional application preferences/support paths are sensitive picker candidates, off
+  by default; never duplicate paths already represented by known tools with a different
+  sensitivity. No automatic container, Keychain, secret or login-service recovery.
 - **Never save the config loaded at launch:** re-read it (`freshConfig()`); never generate a
   default config over an existing file. The relaunch after an update goes through
   LaunchServices (a child process dies with the app). One copy at a time via a distributed
@@ -194,6 +215,10 @@ swapped in with renames (no rsync).
 
 Never allow backup of: `Library/Mail`, `Library/Messages`, `Library/Safari`, `Library/Containers`, `Library/Mobile Documents`, `Library/Caches`, `/Library`, `/System`, `/etc`, `/Applications`, `/usr`, `/opt`, `/private`
 
+These remain forbidden **ordinary file sources**, including in the picker. The separate
+application pipeline reads individual portable bundles; do not broaden the file whitelist
+to implement application capture or allow generic restores into `/Applications`.
+
 `Library/CloudStorage` (OneDrive/Dropbox/Google Drive) is forbidden the same way but lives in
 its own list (`ConfigDiscovery.cloudStoragePrefixes`), gated by `isForbidden(_:allowCloudStorage:)`
 and `ProtectionConfig.includeCloudStorage` (config.toml only, no UI checkbox — see README
@@ -213,9 +238,17 @@ of a real bug report ("why is OneDrive even in the list").
 
 ## Testing
 
-Tests live in `tests/`. Run via `./run-tests.sh` (198 tests). No SPM/Xcode project — raw `swiftc` compilation.
+Tests live in `tests/`. Run via `./run-tests.sh`. No SPM/Xcode project — raw `swiftc` compilation.
 Covers: ExcludeFilter, Retention, Config parsing, BackupEngine, HardLinker, legacy config migration,
 and (3.0) SafetyTests (real engine runs in a sandbox), RestoreTests, ProtectionSummaryTests.
 LoginItemTests use a fake macOS service boundary to cover registration, approval-only
 settings routing, failed-lookup recovery, cancellation, failures and status refresh without
 changing real login items.
+Application tests use `AppTestFixture` with temporary application roots, homes, status and
+undo directories, including real engine, CLI and native restore-model operations.
+Other engine fixtures disable app capture explicitly; never let a test scan real installed
+apps or restore into the real home. `./run-tests.sh Applications.` runs just these regressions.
+Native PostgreSQL integration tests are opt-in:
+`MACBACKUP_POSTGRES_TESTS=1 ./run-tests.sh --filter Postgres.`. They use fresh PostgreSQL 17
+Unix-socket clusters and explicit database environments, never the user's running server.
+Their engine runs also disable application capture.

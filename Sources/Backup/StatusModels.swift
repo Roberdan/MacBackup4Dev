@@ -21,6 +21,7 @@ struct BackupStatusFile: Codable {
     var lastSnapshot: String?
     var scanFinished: Bool?
     var finalizationStepStartedAt: String?
+    var applications: AppCapture.Summary?
 
     var finalizationStepDate: Date? {
         guard state == "running", phase == "finalizing",
@@ -84,6 +85,7 @@ struct BackupStatusFile: Codable {
         case lastSnapshot = "last_snapshot"
         case scanFinished = "scan_finished"
         case finalizationStepStartedAt = "finalization_step_started_at"
+        case applications
     }
 
     init(state: String = "idle", phase: String = "",

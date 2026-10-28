@@ -44,7 +44,7 @@ struct ProtectionSummary: Equatable {
                                   looksLikeNewMac: latest?.manifest?.shrinkWarning != nil,
                                   days: days,
                                   reposWithSavedCommits: complete?.manifest?.git.filter { $0.bundle != nil }.count ?? 0,
-                                  databasesSaved: complete?.manifest?.databases.filter { $0.file != nil }.count ?? 0,
+                                  databasesSaved: complete?.manifest?.databases.reduce(0) { $0 + $1.savedDatabaseCount } ?? 0,
                                   filesInLastComplete: complete?.manifest?.filesProcessed)
         if let finishedAt = complete?.manifest?.finishedAt {
             s.lastCompleteFinishedDate = ISO8601DateFormatter().date(from: finishedAt)

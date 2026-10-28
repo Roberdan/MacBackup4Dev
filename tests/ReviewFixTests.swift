@@ -224,7 +224,7 @@ final class ReviewRound2Tests {
         Task {
             out.value = try? await BackupEngine.run(config: cfg, statusWriter: writer,
                 options: BackupRunOptions(home: box.home, captureEnvironment: false, captureGit: false,
-                                          captureDatabases: false, auditCoverage: false))
+                                          captureDatabases: false, auditCoverage: false, captureApplications: false))
             done.signal()
         }
         usleep(150_000)

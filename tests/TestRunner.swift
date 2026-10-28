@@ -5,6 +5,11 @@ typealias TestClosure = () throws -> Void
 @main
 struct TestRunner {
     static func main() throws {
+        if CommandLine.arguments.count > 2, CommandLine.arguments[1] == "--postgres-cli-worker" {
+            Log.logURL = FileManager.default.temporaryDirectory.appendingPathComponent("mbpg-cli-test-\(UUID().uuidString).log")
+            CLIHandler.run(args: Array(CommandLine.arguments.dropFirst(2)))
+            return
+        }
         if CommandLine.arguments.count == 5, CommandLine.arguments[1] == "--environment-worker" {
             let args = CommandLine.arguments
             try RecoveryCopyTests.runWorker(configPath: args[2], home: args[3], state: args[4])
@@ -56,8 +61,24 @@ struct TestRunner {
         let ejection = EjectionTests()
         let recovery = RecoveryCopyTests()
         let loginItem = LoginItemTests()
+        let appBundles = AppBundleTests()
+        let appRecovery = AppRecoveryTests()
+        let postgres = PostgresBackupTests()
 
-        let suites: [(String, TestClosure)] = [
+        var suites: [(String, TestClosure)] = [
+            ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),
+            ("Applications.discoveryDedupAndSourceSafety", appBundles.test_newAppsAndDedupNeverChangeSources),
+            ("Applications.nonPortableAndLinks", appBundles.test_nonPortableAppsAreExplicitAndLinksAreNotFollowed),
+            ("Applications.failuresAndCancel", appBundles.test_copyMutationSpaceAndCancellationFailHonestly),
+            ("Applications.explicitDataChoice", appBundles.test_appDataIsAnExplicitChoiceAndConfigPersists),
+            ("Applications.fullRecoveryAndUndo", appRecovery.test_realEngineAndNewMacRecoverAppsAndSelectedSettings),
+            ("Applications.preserveExistingApps", appRecovery.test_existingRunningAndChangedAppsAreNeverOverwritten),
+            ("Applications.restoreSafety", appRecovery.test_restoreRefusesTamperingLinksAndDestinationRace),
+            ("Applications.cliAndLegacy", appRecovery.test_cliUsesSameArchiveAndLegacySnapshotsStillWork),
+            ("Applications.managerFallback", appRecovery.test_managerAppsAreNotInstalledTwiceAndInstallerAppsRemainListed),
+            ("Applications.nativeModel", appRecovery.test_nativeModelReflectsRestoreAndUndo),
+            ("Postgres.metadataAndCompatibility", postgres.test_metadataAndLegacyRecords),
+            ("Postgres.symlinksAndCancellation", postgres.test_symlinkMetadataAndCancellation),
             ("Progress.terminalIsIdle", backup.test_terminalStatusNeverClaimsWorkInProgress),
             ("Progress.activityAndFinish", backup.test_backupActivityAndFinishTimeAreExplicit),
             ("Actions.accessibleBackupDisk", backup.test_backupActionsRequireAccessibleDisk),
@@ -90,6 +111,7 @@ struct TestRunner {
             ("Optimization.removedDirectories", optimization.test_copyRecreatesRemovedCachedDirectory),
             ("Optimization.failedCopiesNotVanished", optimization.test_failedCopiesNeverTriggerPostSaveDisappearanceGuard),
             ("Optimization.previousMetadata", optimization.test_previousMetadataRejectsSymlinksAndKeepsTolerance),
+            ("Scanner.powerChanges", scanner.test_pacingFollowsPowerBetweenWalks),
             ("Safety.copyErrorMakesIncomplete", safety.test_copyErrorMakesSnapshotIncomplete),
             ("Safety.excludedSourceNotMissing", safety.test_excludedSourceDoesNotMakeSnapshotIncomplete),
             ("Safety.automaticFileChanges", safety.test_fileChangesInsideSourcesAreAutomatic),
@@ -143,6 +165,13 @@ struct TestRunner {
             ("Schedule.nextBackupInMenu", power.test_nextBackupIsExplainedInTheMenu),
             ("Schedule.customIntervalsPreserved", power.test_nonCalendarIntervalsArePreserved),
             ("Schedule.calendarMigration", power.test_calendarMigrationPreservesJob),
+            ("Schedule.refreshExistingRegistration", power.test_existingSchedulesRefreshRegistration),
+            ("Schedule.refreshDisabledAndOffline", power.test_scheduleRefreshKeepsDisabledAndDefersOffline),
+            ("Schedule.jobRunningFromLaunchctl", power.test_scheduleJobRunningStateComesFromLaunchctl),
+            ("Schedule.recheckBeforeBootout", power.test_installRechecksScheduledJobRightBeforeBootout),
+            ("Schedule.refreshWaitsAndRetries", power.test_registrationRefreshWaitsForIdleAppAndRetries),
+            ("Schedule.refreshOncePerLaunch", power.test_registrationRefreshRunsOncePerLaunch),
+            ("Schedule.refreshFailureReadable", power.test_registrationRefreshFailureIsReadable),
             ("Schedule.migrationLocksBackup", power.test_calendarMigrationSerializesWithBackup),
             ("Schedule.rollbackKeepsLock", power.test_calendarMigrationRollbackHoldsLock),
             ("LoginItem.liveStateWithoutOptIn", loginItem.test_statusComesFromMacOSWithoutOptingIn),
@@ -258,8 +287,28 @@ struct TestRunner {
             ("FileScanner.missingChildren", scanner.test_onlyMissingChildrenAreTolerated)
         ]
 
-        print("🧪 Running MacBackup4Dev tests (\(suites.count) total)...")
-        for (name, test) in suites {
+        if ProcessInfo.processInfo.environment["MACBACKUP_POSTGRES_TESTS"] == "1" {
+            suites += [
+                ("Postgres.integratedRoundtrip", postgres.test_integratedRoundtripRetentionAndCLI),
+                ("Postgres.preflightAndCancel", postgres.test_preflightAndCancellationAreSafe),
+                ("Postgres.corruptionAndFallback", postgres.test_corruptionRefusedAndFullFallback)
+            ]
+        } else {
+            print("  SKIP native PostgreSQL integration (set MACBACKUP_POSTGRES_TESTS=1; requires local PostgreSQL 17 tools)")
+        }
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        let filters: [String]
+        if arguments.first == "--filter" {
+            guard arguments.count == 2 else { throw TestFailure.failed("--filter needs test prefixes") }
+            filters = arguments[1].split(separator: ",").map(String.init)
+            guard !filters.isEmpty else { throw TestFailure.failed("--filter needs test prefixes") }
+        } else {
+            filters = arguments
+        }
+        let selected = suites.filter { name, _ in filters.isEmpty || filters.contains { name.hasPrefix($0) } }
+        guard !selected.isEmpty else { throw TestFailure.failed("No tests match: \(filters.joined(separator: ", "))") }
+        print("🧪 Running MacBackup4Dev tests (\(selected.count) selected, \(suites.count) total)...")
+        for (name, test) in selected {
             do {
                 try test()
                 passed += 1

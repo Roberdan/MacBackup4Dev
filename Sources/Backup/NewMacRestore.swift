@@ -44,7 +44,7 @@ enum NewMacRestore {
     // MARK: - Checklist (read-only)
 
     static func checklist(snapshot: URL, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-                          ignoredApps: [String] = []) -> [CheckItem] {
+                          ignoredApps: [String] = [], applicationRoots: [AppInventory.Root]? = nil) -> [CheckItem] {
         let fm = FileManager.default
         var items: [CheckItem] = []
 
@@ -76,6 +76,34 @@ enum NewMacRestore {
             items.append(CheckItem(title: "Azure CLI", ok: ok, hint: ok ? "collegato" : "Esegui: az login"))
         }
 
+        do {
+            if let catalog = try AppCapture.read(from: snapshot) {
+                let roots = applicationRoots ?? AppInventory.Root.standard(home: home)
+                let installed = AppRestore.installedIDs(catalog.entries, roots: roots, home: home)
+                let missing = catalog.entries.filter {
+                    $0.state != .excluded && !ignoredApps.contains($0.name) && !installed.contains($0.id)
+                }
+                items.append(CheckItem(title: "App del vecchio Mac", ok: missing.isEmpty,
+                    hint: missing.isEmpty ? "tutte presenti" : missing.map {
+                        $0.name + ($0.state == .saved ? " (nel backup)" : " (\($0.reason))")
+                    }.joined(separator: ", "), missingApps: missing.map(\.name)))
+                if !catalog.failures.isEmpty {
+                    items.append(CheckItem(title: "Salvataggio delle applicazioni", ok: false,
+                                           hint: catalog.failures.joined(separator: "; ")))
+                }
+                let uncovered = Set(catalog.entries.flatMap(\.data)
+                    .filter { $0.state != .selected }.map(\.relativePath))
+                if !uncovered.isEmpty {
+                    items.append(CheckItem(title: "Dati delle applicazioni", ok: false,
+                        hint: "\(uncovered.count) percorsi non salvati. Sul Mac originale scegli i dati in \"Dati delle applicazioni\" e fai un nuovo backup. Portachiavi e contenitori protetti non vengono copiati."))
+                }
+                return items
+            }
+        } catch {
+            items.append(CheckItem(title: "Archivio delle applicazioni", ok: false,
+                                   hint: "Catalogo non leggibile: \(error.localizedDescription)"))
+            return items
+        }
         let appsFile = snapshot.appendingPathComponent("_environment/installed-apps.txt").path
         if let apps = try? String(contentsOfFile: appsFile, encoding: .utf8) {
             // Apps are often grouped in folders (/Applications/Dev, /Applications/AI): look one level down too.
@@ -100,7 +128,8 @@ enum NewMacRestore {
 
     static func run(snapshot: URL, steps: Set<Step>, launchAgents: Set<String> = [],
                     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-                    dryRun: Bool = false, sink: ((String) -> Void)? = nil) -> Report {
+                    dryRun: Bool = false, databaseEnvironment: [String: String]? = nil,
+                    sink: ((String) -> Void)? = nil) -> Report {
         var report = Report()
         let manifest = SnapshotManifest.read(from: snapshot)
         let repos = repositories(in: snapshot, manifest: manifest)
@@ -145,7 +174,10 @@ enum NewMacRestore {
         if steps.contains(.databases), let manifest {
             report.log("== \(Step.databases.title)", sink)
             for db in manifest.databases {
-                report.log("  " + restoreDatabase(db, snapshot: snapshot, home: home, dryRun: dryRun), sink)
+                let result = restoreDatabase(db, snapshot: snapshot, home: home, dryRun: dryRun,
+                                             environment: databaseEnvironment)
+                report.log("  " + result.text, sink)
+                if result.failed { report.failures.append(result.text) }
             }
         }
 
@@ -337,31 +369,94 @@ enum NewMacRestore {
 
     // MARK: - Databases
 
-    static func restoreDatabase(_ db: DatabaseRecord, snapshot: URL, home: String, dryRun: Bool) -> String {
-        guard let file = db.file else { return "\(db.source): non era stato salvato (\(db.error ?? "assente"))" }
+    struct DatabaseRestoreResult {
+        var text: String
+        var failed = false
+    }
+
+    static func restoreDatabase(_ db: DatabaseRecord, snapshot: URL, home: String, dryRun: Bool,
+                                 environment: [String: String]? = nil) -> DatabaseRestoreResult {
+        guard let file = db.file else {
+            return DatabaseRestoreResult(text: "\(db.source): non era stato salvato (\(db.error ?? "assente"))",
+                                         failed: db.error != nil)
+        }
         let dump = snapshot.appendingPathComponent(file)
         switch db.kind {
         case "sqlite":
             let target = ConfigDiscovery.expand(db.source)
-            if FileManager.default.fileExists(atPath: target) { return "\(db.source): esiste già, non toccato" }
-            if dryRun { return "\(db.source): lo rimetterei al suo posto" }
+            if FileManager.default.fileExists(atPath: target) {
+                return DatabaseRestoreResult(text: "\(db.source): esiste già, non toccato")
+            }
+            if dryRun { return DatabaseRestoreResult(text: "\(db.source): lo rimetterei al suo posto") }
             do {
                 try FileManager.default.createDirectory(atPath: (target as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
                 try HardLinker.copyFile(from: dump.path, to: target)
-                return "\(db.source): ripristinato"
-            } catch { return "\(db.source): non ripristinato (\(error.localizedDescription))" }
+                return DatabaseRestoreResult(text: "\(db.source): ripristinato")
+            } catch {
+                return DatabaseRestoreResult(text: "\(db.source): non ripristinato (\(error.localizedDescription))",
+                                             failed: true)
+            }
         case "postgres":
-            guard let pgDump = DatabaseDumps.pgDump else { return "\(db.source): Postgres non installato" }
+            guard let pgDump = DatabaseDumps.pgDump else {
+                return DatabaseRestoreResult(text: "\(db.source): Postgres non installato", failed: true)
+            }
             let bin = (pgDump as NSString).deletingLastPathComponent
-            let list = Shell.run(bin + "/psql", ["-X", "-At", "-d", "postgres", "-c",
-                                                 "select 1 from pg_database where datname = '\(db.source.replacingOccurrences(of: "'", with: "''"))'"])
-            guard list.ok else { return "\(db.source): Postgres non risponde (avvialo e rilancia)" }
-            if list.stdout.contains("1") { return "\(db.source): esiste già, non toccato" }
-            if dryRun { return "\(db.source): lo ricreerei dal dump" }
-            let r = Shell.run(bin + "/pg_restore", ["--create", "--no-owner", "-d", "postgres", dump.path], timeout: 3600)
-            return r.ok ? "\(db.source): ricreato dal dump" : "\(db.source): ricreato con avvisi (\(r.stderr.prefix(160)))"
+            return restorePostgres(db.source, bin: bin, dryRun: dryRun, environment: environment) {
+                try $0(dump)
+            }
+        case PostgresBackup.kind:
+            guard file == PostgresBackup.relativeManifest else {
+                return DatabaseRestoreResult(text: "Percorso del backup PostgreSQL non valido.", failed: true)
+            }
+            do {
+                let chain = try PostgresBackup.readChain(in: snapshot)
+                let tools = try PostgresBackup.Tools.find(major: chain.server.major)
+                let results = chain.server.databases.map { name in
+                    restorePostgres(name, bin: tools.directory, dryRun: dryRun, environment: environment) { use in
+                        try PostgresBackup.withDatabaseExport(name, snapshot: snapshot, body: use)
+                    }
+                }
+                return DatabaseRestoreResult(text: results.map(\.text).joined(separator: " · "),
+                                             failed: results.contains(where: \.failed))
+            } catch {
+                return DatabaseRestoreResult(text: "PostgreSQL non ripristinato: \(error.localizedDescription)", failed: true)
+            }
         default:
-            return "\(db.source): tipo sconosciuto"
+            return DatabaseRestoreResult(text: "\(db.source): tipo sconosciuto", failed: true)
+        }
+    }
+
+    private static func restorePostgres(_ database: String, bin: String, dryRun: Bool,
+                                         environment: [String: String]?,
+                                         archive: (_ use: (URL) throws -> Void) throws -> Void) -> DatabaseRestoreResult {
+        guard PostgresBackup.validDatabaseName(database) else {
+            return DatabaseRestoreResult(text: "Nome di database non supportato.", failed: true)
+        }
+        let list = Shell.run(bin + "/psql", ["-X", "-At", "--no-password", "--set", "ON_ERROR_STOP=1",
+                                             "-d", "postgres", "-c",
+                                             "select 1 from pg_database where datname = '\(database.replacingOccurrences(of: "'", with: "''"))'"],
+                             environment: environment, inheritEnvironment: environment == nil)
+        guard list.ok else {
+            return DatabaseRestoreResult(text: "\(database): Postgres non risponde (\(list.failureReason))", failed: true)
+        }
+        if list.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "1" {
+            return DatabaseRestoreResult(text: "\(database): esiste gia', non toccato")
+        }
+        if dryRun { return DatabaseRestoreResult(text: "\(database): lo ricreerei dal backup") }
+        do {
+            try archive { file in
+                let result = Shell.run(bin + "/pg_restore",
+                                       ["--exit-on-error", "--create", "--no-owner", "--no-password",
+                                        "-d", "postgres", file.path],
+                                       timeout: 3600, environment: environment, inheritEnvironment: environment == nil)
+                guard result.ok else {
+                    throw PostgresBackup.failure(result.failureReason)
+                }
+            }
+            return DatabaseRestoreResult(text: "\(database): ricreato dal backup")
+        } catch {
+            return DatabaseRestoreResult(text: "\(database): ripristino fallito, eventuale nuova copia puo' essere parziale "
+                                         + "(\(error.localizedDescription))", failed: true)
         }
     }
 

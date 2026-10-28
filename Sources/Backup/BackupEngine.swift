@@ -9,8 +9,13 @@ struct BackupRunOptions {
     var captureGit = true
     var captureDatabases = true
     var auditCoverage = true
+    var databaseEnvironment: [String: String]? = nil
     var now: () -> Date = { Date() }
     var environmentCapture: (URL) -> Void = EnvironmentSnapshot.capture
+    var captureApplications = true
+    var applicationRoots: [AppInventory.Root]? = nil
+    var applicationCopyOptions = AppBundleCopy.Options()
+    var applicationInstallers: [String: AppInstallers.Hint]? = nil
 }
 
 /// Bounded hand-off between the scanner and the copy workers. Unlike a DispatchSemaphore it
@@ -359,15 +364,16 @@ enum BackupEngine {
         let counts = counters.snapshot
         errorList.append(contentsOf: counts.traversalErrors)
 
-        // F-02: Do NOT rename to final snapshot if cancelled — partial backup must not look valid.
-        if token.isCancelled {
-            try? FileManager.default.removeItem(at: inProgressURL)
+        func abandonCancelledBackup() {
+            do { try FileManager.default.removeItem(at: inProgressURL) }
+            catch { Log.error("Cannot remove cancelled snapshot: \(error)") }
             status.state = "cancelled"
             status.phase = "cancelled"
             status.currentFile = "Backup annullato"
             do { try statusWriter.write(status: status) } catch { Log.error("Status write failed on cancel: \(error)") }
-            return nil
         }
+        // F-02: Do NOT rename to final snapshot if cancelled — partial backup must not look valid.
+        if token.isCancelled { abandonCancelledBackup(); return nil }
 
         // Git and database safety: written into the snapshot before it gets its final name.
         status.filesDone = completedCount
@@ -390,11 +396,35 @@ enum BackupEngine {
         reportFinalization("Preparo le copie dei database…")
         let dbRecords = options.captureDatabases
             ? DatabaseDumps.captureAll(config: config.databases, home: home, into: inProgressURL,
+                                     previousSnapshot: previousComplete?.url, now: options.now(),
+                                     postgresEnvironment: options.databaseEnvironment,
+                                     cancelled: { token.isCancelled || Task.isCancelled },
                                      onProgress: { index, total in
                                          reportFinalization("Salvo il database \(index) di \(total)")
                                      })
             : []
 
+        if token.isCancelled || Task.isCancelled {
+            abandonCancelledBackup()
+            return nil
+        }
+        var applicationReport: AppCapture.Report?
+        if options.captureApplications && config.applications.capture {
+            var copyOptions = options.applicationCopyOptions
+            let externallyCancelled = copyOptions.isCancelled
+            copyOptions.isCancelled = { token.isCancelled || Task.isCancelled || externallyCancelled() }
+            reportFinalization("Cerco le applicazioni da salvare…")
+            applicationReport = AppCapture.capture(config: config, home: home,
+                roots: options.applicationRoots ?? AppInventory.Root.standard(home: home),
+                into: inProgressURL, previous: latestBackup, options: copyOptions,
+                installers: options.applicationInstallers ?? AppInstallers.hints(),
+                onProgress: { index, total in reportFinalization("Salvo l'applicazione \(index) di \(total)…") })
+            sourceReasons.append(contentsOf: (applicationReport?.catalog.failures ?? []).map { "App non salvata: \($0)" })
+        }
+        if token.isCancelled || Task.isCancelled || applicationReport?.cancelled == true {
+            abandonCancelledBackup()
+            return nil
+        }
         reportFinalization("Verifico e completo lo snapshot…")
         let traversalCount = counts.traversalErrors.count
         let copyErrors = errorList.count - traversalCount
@@ -421,7 +451,7 @@ enum BackupEngine {
             filesSkipped: Int64(stats.filesSkipped), bytesCopied: stats.bytesCopied,
             errorCount: copyErrors, traversalErrorCount: traversalCount,
             git: gitRecords, databases: dbRecords, shrinkWarning: shrink,
-            complete: complete, incompleteReasons: reasons)
+            complete: complete, incompleteReasons: reasons, applications: applicationReport?.summary)
         try manifest.write(to: inProgressURL)
 
         let finalURL = destURL.appendingPathComponent(timestamp)
@@ -474,6 +504,7 @@ enum BackupEngine {
         status.lastResult = complete ? "complete" : "incomplete"
         status.incompleteReasons = reasons
         status.lastSnapshot = timestamp
+        status.applications = applicationReport?.summary
         if complete { status.lastCompleteAt = status.lastCompleted }
         else if status.lastCompleteAt == nil, let prev = previousComplete {
             status.lastCompleteAt = ISO8601DateFormatter().string(from: prev.timestamp)
