@@ -47,4 +47,4 @@ swiftc \
 echo "  ✅ Compilation successful"
 echo ""
 echo "  Running tests..."
-./build/MacBackup4DevTests
+./build/MacBackup4DevTests "$@"

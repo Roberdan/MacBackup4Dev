@@ -30,6 +30,7 @@ struct SnapshotManifest: Codable, Equatable {
     var shrinkWarning: String?
     var complete: Bool
     var incompleteReasons: [String]
+    var applications: AppCapture.Summary? = nil
 
     static let directoryName = "_rustymacbackup"
     static let fileName = "manifest.json"

@@ -16,7 +16,7 @@ import Foundation
 ///   stopped and its file moved aside, never deleted.
 extension NewMacRestore {
     struct Stage: Identifiable, Equatable {
-        enum Kind: Equatable { case prerequisites, packages, files, repos, databases, homebrew, services }
+        enum Kind: Equatable { case prerequisites, packages, applications, files, repos, databases, homebrew, services }
         let id: String
         let title: String
         let detail: String
@@ -107,6 +107,11 @@ extension NewMacRestore {
                              detail: "File di strumenti senza un argomento proprio.", kind: .files, paths: rest))
         }
 
+        if AppInventory.exists(AppCapture.catalogURL(in: snapshot)) {
+            out.append(Stage(id: "app", title: "Applicazioni dal backup",
+                             detail: "Copie verificate, senza scaricarle né avviarle. Le app esistenti restano intatte.",
+                             kind: .applications))
+        }
         // 4. The shell runs at every terminal start: checked after restoring, undone if it breaks.
         let shell = shellFiles.filter { !insideRepo($0) && !isLoginSensitive($0) }.sorted()
         if !shell.isEmpty {
@@ -177,6 +182,8 @@ extension NewMacRestore {
     /// Applies one phase. `dryRun` only counts. `shellCheck` is injectable for tests.
     static func runStage(_ stage: Stage, snapshot: URL, home: String, dryRun: Bool,
                          services: Set<String> = [], packages: Set<String> = [],
+                         applications: Set<String> = [], applicationRoots: [AppInventory.Root]? = nil,
+                         applicationRunning: (String) -> Bool = AppRestore.isRunning,
                          shellCheck: (String) -> String? = NewMacRestore.shellProblem,
                          serviceSettle: TimeInterval = 8,
                          sink: ((String) -> Void)? = nil) -> StageOutcome {
@@ -201,6 +208,22 @@ extension NewMacRestore {
             let r = ToolInventory.install(chosen) { log($0) }
             log("  installati \(r.ok), non riusciti \(r.failed)")
             if r.failed > 0 { out.ok = false }
+        case .applications:
+            do {
+                if applications.isEmpty {
+                    let entries = try AppCapture.read(from: snapshot)?.entries ?? []
+                    log("  \(entries.filter { $0.state == .saved }.count) app salvate: scegli quali ripristinare")
+                    break
+                }
+                let report = try AppRestore.run(snapshot: snapshot, selected: applications, home: home,
+                    roots: applicationRoots, dryRun: dryRun, running: applicationRunning, sink: log)
+                out.undoDir = report.undoDirectory
+                out.ok = report.failures.isEmpty
+                if !dryRun { log("  \(report.installed) app ripristinate, \(report.skipped) lasciate intatte, \(report.failures.count) errori") }
+            } catch {
+                out.ok = false
+                log("  Applicazioni NON ripristinate: \(error.localizedDescription)")
+            }
         case .files:
             let plan = SelectiveRestore.plan(snapshot: snapshot, paths: stage.paths, destinationRoot: home)
             let onlyNew = RestorePlan(snapshot: snapshot, destinationRoot: home,
@@ -260,7 +283,8 @@ extension NewMacRestore {
             }
         }
         if !dryRun && stage.kind != .services && stage.kind != .prerequisites
-            && !(stage.kind == .packages && packages.isEmpty) {
+            && !(stage.kind == .packages && packages.isEmpty)
+            && !(stage.kind == .applications && applications.isEmpty) {
             record(ProgressEntry(stageID: stage.id, title: stage.title, date: Date(),
                                  outcome: out.lines.dropFirst().joined(separator: " · "), ok: out.ok,
                                  undoDir: out.undoDir?.path), home: home)
@@ -270,9 +294,11 @@ extension NewMacRestore {
 
     /// Undo a phase (files) or a service. Repositories, databases and Homebrew only ever add
     /// things, so they have nothing to undo.
-    static func undoStage(_ id: String, home: String) -> String {
+    static func undoStage(_ id: String, home: String, applicationRoots: [AppInventory.Root]? = nil) -> String {
         var list = progress(home: home)
-        guard let index = list.lastIndex(where: { $0.stageID == id && $0.ok && !$0.undone }) else {
+        guard let index = list.lastIndex(where: {
+            $0.stageID == id && ($0.ok || (id == "app" && $0.undoDir != nil)) && !$0.undone
+        }) else {
             return "Niente da annullare per questa fase"
         }
         let entry = list[index]
@@ -280,11 +306,16 @@ extension NewMacRestore {
         if id.hasPrefix("servizio:") {
             text = removeService(label: String(id.dropFirst("servizio:".count)), home: home)
         } else if let dir = entry.undoDir {
-            guard let u = try? SelectiveRestore.undoDetailed(URL(fileURLWithPath: dir)) else {
-                return "Annullamento non riuscito: \(dir)"
+            if id == "app" {
+                do { text = try AppRestore.undo(URL(fileURLWithPath: dir), home: home, roots: applicationRoots) }
+                catch { return "Annullamento app non riuscito: \(error.localizedDescription)" }
+            } else {
+                guard let u = try? SelectiveRestore.undoDetailed(URL(fileURLWithPath: dir)) else {
+                    return "Annullamento non riuscito: \(dir)"
+                }
+                text = "\(u.restored) file rimessi com'erano"
+                if !u.keptBecauseChanged.isEmpty { text += ", \(u.keptBecauseChanged.count) lasciati perché modificati dopo" }
             }
-            text = "\(u.restored) file rimessi com'erano"
-            if !u.keptBecauseChanged.isEmpty { text += ", \(u.keptBecauseChanged.count) lasciati perché modificati dopo" }
         } else {
             return "Questa fase aggiunge soltanto: non c'è niente da annullare"
         }

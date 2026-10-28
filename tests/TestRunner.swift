@@ -56,8 +56,20 @@ struct TestRunner {
         let ejection = EjectionTests()
         let recovery = RecoveryCopyTests()
         let loginItem = LoginItemTests()
+        let appBundles = AppBundleTests()
+        let appRecovery = AppRecoveryTests()
 
         let suites: [(String, TestClosure)] = [
+            ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),
+            ("Applications.discoveryDedupAndSourceSafety", appBundles.test_newAppsAndDedupNeverChangeSources),
+            ("Applications.nonPortableAndLinks", appBundles.test_nonPortableAppsAreExplicitAndLinksAreNotFollowed),
+            ("Applications.failuresAndCancel", appBundles.test_copyMutationSpaceAndCancellationFailHonestly),
+            ("Applications.explicitDataChoice", appBundles.test_appDataIsAnExplicitChoiceAndConfigPersists),
+            ("Applications.fullRecoveryAndUndo", appRecovery.test_realEngineAndNewMacRecoverAppsAndSelectedSettings),
+            ("Applications.preserveExistingApps", appRecovery.test_existingRunningAndChangedAppsAreNeverOverwritten),
+            ("Applications.restoreSafety", appRecovery.test_restoreRefusesTamperingLinksAndDestinationRace),
+            ("Applications.cliAndLegacy", appRecovery.test_cliUsesSameArchiveAndLegacySnapshotsStillWork),
+            ("Applications.managerFallback", appRecovery.test_managerAppsAreNotInstalledTwiceAndInstallerAppsRemainListed),
             ("Progress.terminalIsIdle", backup.test_terminalStatusNeverClaimsWorkInProgress),
             ("Progress.activityAndFinish", backup.test_backupActivityAndFinishTimeAreExplicit),
             ("Actions.accessibleBackupDisk", backup.test_backupActionsRequireAccessibleDisk),
@@ -258,8 +270,11 @@ struct TestRunner {
             ("FileScanner.missingChildren", scanner.test_onlyMissingChildrenAreTolerated)
         ]
 
-        print("🧪 Running MacBackup4Dev tests (\(suites.count) total)...")
-        for (name, test) in suites {
+        let filters = Array(CommandLine.arguments.dropFirst())
+        let selected = suites.filter { name, _ in filters.isEmpty || filters.contains { name.hasPrefix($0) } }
+        guard !selected.isEmpty else { print("No tests match: \(filters.joined(separator: ", "))"); exit(1) }
+        print("🧪 Running MacBackup4Dev tests (\(selected.count) selected, \(suites.count) total)...")
+        for (name, test) in selected {
             do {
                 try test()
                 passed += 1

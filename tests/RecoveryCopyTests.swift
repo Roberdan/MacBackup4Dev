@@ -12,7 +12,8 @@ struct RecoveryCopyTests {
         try expect(!EnvironmentSnapshot.refreshRecoveryApp(onDisk: config.diskURL, isMounted: { _ in false }),
                    "A writable but unmounted directory must not receive a physical recovery copy")
         let options = BackupRunOptions(home: home, captureEnvironment: true, captureGit: false,
-                                       captureDatabases: false, auditCoverage: false, environmentCapture: { _ in })
+                                       captureDatabases: false, auditCoverage: false, environmentCapture: { _ in },
+                                       captureApplications: false)
         let outcome = ResultBox<Result<BackupRunResult?, Error>>()
         let done = DispatchSemaphore(value: 0)
         Task {

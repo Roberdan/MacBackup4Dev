@@ -114,7 +114,8 @@ enum FileVersions {
                 throw CocoaError(.fileReadUnknown, userInfo: [NSFilePathErrorKey: snapshot.path])
             }
             while let rel = e.nextObject() as? String {
-                if rel.hasPrefix(SnapshotManifest.directoryName) || rel.hasPrefix("_environment") {
+                if rel.hasPrefix(SnapshotManifest.directoryName) || rel.hasPrefix("_environment")
+                    || rel == AppCapture.directoryName || rel.hasPrefix(AppCapture.directoryName + "/") {
                     e.skipDescendants(); continue
                 }
                 if rel.lowercased().contains(q), !seen.contains(rel) {
@@ -190,7 +191,7 @@ struct UndoOutcome {
 }
 
 enum SelectiveRestore {
-    static let internalDirectories: Set<String> = [SnapshotManifest.directoryName, "_environment"]
+    static let internalDirectories: Set<String> = [SnapshotManifest.directoryName, "_environment", AppCapture.directoryName]
     /// Finder litter: never worth restoring, never worth replacing a local one.
     static let junkNames: Set<String> = [".DS_Store", ".localized"]
 

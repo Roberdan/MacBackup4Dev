@@ -116,6 +116,8 @@ enum CLIHandler {
           new-mac [--snapshot S] [--steps config,repos,databases,homebrew,launch-agents]
                   [--agents label1,label2] [--yes]
                                         Ripristino guidato di un Mac nuovo
+          new-mac --stage app [--apps <id>,<id> | --all-apps] [--yes]
+                                        Ripristina le app salvate, senza sovrascrivere o avviarle
           version         Show version
           help            Show this help
         """)

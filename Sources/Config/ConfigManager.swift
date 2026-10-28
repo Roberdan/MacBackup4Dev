@@ -8,6 +8,7 @@ struct Config {
     var protection: ProtectionConfig = ProtectionConfig()
     var databases: DatabaseConfig = DatabaseConfig()
     var coverage: CoverageConfig = CoverageConfig()
+    var applications: ApplicationsConfig = ApplicationsConfig()
     /// Encrypted store on the backup disk (4.1). Empty = plain folder (3.x setups).
     var encryption: EncryptionConfig = EncryptionConfig()
     /// User-defined restore topics; they extend (and can override) the built-in ones.
@@ -70,6 +71,12 @@ struct Config {
         out.append("[protection]")
         out.append("include_rights_managed_files = \(protection.includeRightsManagedFiles)")
         out.append("include_cloud_storage = \(protection.includeCloudStorage)")
+        out.append("")
+        out.append("[applications]")
+        out.append("capture = \(applications.capture)")
+        out.append("exclude_bundle_ids = [")
+        for identifier in applications.excludeBundleIDs { out.append("    \"\(Self.escape(identifier))\",") }
+        out.append("]")
         out.append("")
         out.append("[databases]")
         out.append("sqlite = [")
@@ -207,6 +214,7 @@ struct Config {
         case "databases.postgres": config.databases.postgres = values
         case "coverage.ignore": config.coverage.ignore = values
         case "coverage.ignore_apps": config.coverage.ignoreApps = values
+        case "applications.exclude_bundle_ids": config.applications.excludeBundleIDs = values
         default: break
         }
     }
@@ -215,6 +223,7 @@ struct Config {
         switch "\(section).\(key)" {
         case "protection.include_rights_managed_files": config.protection.includeRightsManagedFiles = boolValue
         case "protection.include_cloud_storage": config.protection.includeCloudStorage = boolValue
+        case "applications.capture": config.applications.capture = boolValue
         default: break
         }
     }
@@ -312,6 +321,11 @@ struct CoverageConfig: Equatable {
     var ignore: [String] = []
     /// Apps of the old Mac the user does not want back: never listed as missing.
     var ignoreApps: [String] = []
+}
+
+struct ApplicationsConfig: Equatable {
+    var capture = true
+    var excludeBundleIDs: [String] = []
 }
 
 struct DestinationConfig {

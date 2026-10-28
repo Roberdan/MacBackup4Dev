@@ -52,15 +52,22 @@ final class RestoreCenterModel: ObservableObject {
     @Published var packageFilter: String = ""
     @Published var showPackages = false
     @Published var prerequisites: [ToolInventory.Prerequisite] = []
+    @Published var applications: [AppInventory.Entry] = []
+    @Published var installedApplications: Set<String> = []
+    @Published var chosenApplications: Set<String> = []
+    @Published var showApplications = false
+    let applicationRoots: [AppInventory.Root]
 
     var onAdvanced: (() -> Void)?
     var onDone: ((RestoreResult) -> Void)?
 
     init(destination: URL, config: Config?,
-         home: String = FileManager.default.homeDirectoryForCurrentUser.path) {
+         home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+         applicationRoots: [AppInventory.Root]? = nil) {
         self.destination = destination
         self.config = config
         self.restorationHome = home
+        self.applicationRoots = applicationRoots ?? AppInventory.Root.standard(home: home)
         self.topics = Topics.all(config: config)
     }
 
@@ -201,22 +208,35 @@ final class RestoreCenterModel: ObservableObject {
     func loadStages() {
         guard let snap = snapshotURL else { return }
         busy = true
-        let config = self.config, home = self.home
-        DispatchQueue.global(qos: .userInitiated).async {
+        let config = self.config, home = self.home, applicationRoots = self.applicationRoots
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let stages = NewMacRestore.stages(snapshot: snap, config: config)
             let services = NewMacRestore.availableLaunchAgents(snapshot: snap)
             let progress = NewMacRestore.progress(home: home)
             let prerequisites = ToolInventory.prerequisites()
             let packages = ToolInventory.packages(snapshot: snap)
-            DispatchQueue.main.async {
+            let applications: [AppInventory.Entry]
+            let applicationError: String?
+            do { applications = try AppCapture.read(from: snap)?.entries ?? []; applicationError = nil }
+            catch { applications = []; applicationError = "Catalogo app non leggibile: \(error.localizedDescription)" }
+            let installedApplications = AppRestore.installedIDs(applications, roots: applicationRoots, home: home)
+            DispatchQueue.main.async { [weak self, stages, services, progress, prerequisites, packages, applications, installedApplications, applicationError] in
+                guard let self else { return }
                 self.stages = stages; self.services = services; self.progress = progress
                 self.chosenServices = []
                 self.prerequisites = prerequisites
                 self.packages = packages
+                self.applications = applications
+                self.installedApplications = installedApplications
+                self.chosenApplications = Set(applications.filter {
+                    $0.state == .saved && !installedApplications.contains($0.id)
+                }.map(\.id))
+                if let applicationError { self.message = applicationError }
                 self.busy = false
             }
             let installed = ToolInventory.installed(packages)
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self, installed, packages] in
+                guard let self else { return }
                 self.installedPackages = installed
                 self.chosenPackages = Set(packages.filter { !ToolInventory.isInstalled($0, in: installed) }.map(\.id))
             }
@@ -225,7 +245,7 @@ final class RestoreCenterModel: ObservableObject {
                 let plan = SelectiveRestore.plan(snapshot: snap, paths: stage.paths, destinationRoot: home)
                 counts[stage.id] = "\(plan.toCreate) file da aggiungere" + (plan.toReplace > 0 ? " · \(plan.toReplace) già presenti" : "")
             }
-            DispatchQueue.main.async { self.stageCounts = counts }
+            DispatchQueue.main.async { [weak self, counts] in self?.stageCounts = counts }
         }
     }
 
@@ -254,16 +274,23 @@ final class RestoreCenterModel: ObservableObject {
     func runStage(_ stage: NewMacRestore.Stage, dryRun: Bool) {
         guard let snap = snapshotURL else { return }
         let home = self.home, services = chosenServices, packages = chosenPackages
+        let applications = chosenApplications, archivedApplications = self.applications
+        let applicationRoots = self.applicationRoots
         log = [dryRun ? "Anteprima di \"\(stage.title)\" (niente viene scritto)…" : "Ripristino di \"\(stage.title)\"…"]
         busy = true
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let out = NewMacRestore.runStage(stage, snapshot: snap, home: home, dryRun: dryRun,
-                                             services: services, packages: stage.kind == .packages ? packages : [], sink: { line in
-                DispatchQueue.main.async { self.log.append(line) }
+                                             services: services, packages: stage.kind == .packages ? packages : [],
+                                             applications: stage.kind == .applications ? applications : [],
+                                             applicationRoots: applicationRoots, sink: { [weak self] line in
+                DispatchQueue.main.async { [weak self, line] in self?.log.append(line) }
             })
             let progress = NewMacRestore.progress(home: home)
             let installed = stage.kind == .packages && !dryRun ? ToolInventory.installed(ToolInventory.packages(snapshot: snap)) : nil
-            DispatchQueue.main.async {
+            let installedApplications = stage.kind == .applications && !dryRun
+                ? AppRestore.installedIDs(archivedApplications, roots: applicationRoots, home: home) : nil
+            DispatchQueue.main.async { [weak self, out, progress, installed, installedApplications] in
+                guard let self else { return }
                 self.busy = false
                 self.progress = progress
                 if !dryRun && stage.kind == .services { self.chosenServices = [] }
@@ -272,6 +299,11 @@ final class RestoreCenterModel: ObservableObject {
                     let byID = Dictionary(uniqueKeysWithValues: self.packages.map { ($0.id, $0) })
                     self.chosenPackages = self.chosenPackages.filter { id in
                         byID[id].map { !ToolInventory.isInstalled($0, in: installed) } ?? false
+                    }
+                    if let installedApplications {
+                        self.installedApplications = installedApplications
+                        self.chosenApplications.subtract(installedApplications)
+                        self.loadChecklist()
                     }
                 }
                 if !dryRun {
@@ -283,10 +315,10 @@ final class RestoreCenterModel: ObservableObject {
     }
 
     func undo(_ id: String) {
-        let home = self.home
+        let home = self.home, applicationRoots = self.applicationRoots
         busy = true
         DispatchQueue.global(qos: .userInitiated).async {
-            let text = NewMacRestore.undoStage(id, home: home)
+            let text = NewMacRestore.undoStage(id, home: home, applicationRoots: applicationRoots)
             let progress = NewMacRestore.progress(home: home)
             DispatchQueue.main.async {
                 self.busy = false; self.progress = progress
@@ -603,6 +635,62 @@ struct RestoreCenterView: View {
         }
     }
 
+    private func applicationsRow(_ stage: NewMacRestore.Stage) -> some View {
+        let saved = model.applications.filter { $0.state == .saved }
+        let entry = model.done(stage.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: entry?.ok == true ? "checkmark.circle.fill" : "app.badge.checkmark")
+                    .foregroundColor(entry?.ok == true ? .mlVerde : .accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stage.title).font(.callout.weight(.semibold))
+                    Text("\(saved.count) copie salvate · \(model.chosenApplications.count) scelte")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                if entry?.undoDir != nil {
+                    Button("Annulla") { model.undo(stage.id) }.disabled(model.busy)
+                }
+                Button(model.showApplications ? "Nascondi" : "Scegli…") { model.showApplications.toggle() }
+            }
+            Text("Non apre le app. Prima di avviarle, ripristina i dati selezionati; accessi, licenze e permessi possono richiedere conferma.")
+                .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            if model.showApplications {
+                HStack {
+                    Button("Tutte le mancanti") {
+                        model.chosenApplications = Set(saved.filter { !model.installedApplications.contains($0.id) }.map(\.id))
+                    }
+                    Button("Nessuna") { model.chosenApplications = [] }
+                }
+                .buttonStyle(.link).font(.caption).padding(.leading, 24)
+                ForEach(model.applications) { app in
+                    let installed = model.installedApplications.contains(app.id)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Toggle(isOn: Binding(get: { model.chosenApplications.contains(app.id) },
+                                             set: { on in
+                            if on { model.chosenApplications.insert(app.id) } else { model.chosenApplications.remove(app.id) }
+                        })) {
+                            Text(app.name + (app.version.isEmpty ? "" : " " + app.version) + (installed ? " · già presente" : ""))
+                                .font(.caption.weight(.medium))
+                        }
+                        .toggleStyle(.checkbox).disabled(app.state != .saved || installed || model.busy)
+                        Text(app.reason).font(.caption2).foregroundColor(app.state == .failed ? .orange : .secondary)
+                        Text(app.dataDetail).font(.caption2).foregroundColor(.secondary)
+                    }
+                    .fixedSize(horizontal: false, vertical: true).padding(.leading, 24)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Anteprima") { model.runStage(stage, dryRun: true) }
+                    .disabled(model.busy || model.chosenApplications.isEmpty)
+                Button("Ripristina le selezionate (\(model.chosenApplications.count))") { model.runStage(stage, dryRun: false) }
+                    .buttonStyle(.borderedProminent).tint(.mlGold)
+                    .disabled(model.busy || model.chosenApplications.isEmpty)
+            }
+        }
+    }
+
     static func when(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "dd/MM 'alle' HH:mm"; return f.string(from: date)
     }
@@ -646,6 +734,7 @@ struct RestoreCenterView: View {
                         case .services: servicesRow(stage)
                         case .prerequisites: prerequisitesRow(stage)
                         case .packages: packagesRow(stage)
+                        case .applications: applicationsRow(stage)
                         default: stageRow(stage)
                         }
                     }

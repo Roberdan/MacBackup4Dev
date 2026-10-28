@@ -195,11 +195,12 @@ extension CLIHandler {
         }
     }
 
-    static func runNewMac(subArgs: [String], configPath: String?) throws {
-        let flags = Flags(subArgs, valued: ["--snapshot", "--steps", "--agents", "--stage", "--undo", "--packages"])
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
+    static func runNewMac(subArgs: [String], configPath: String?,
+                          home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                          applicationRoots: [AppInventory.Root]? = nil) throws {
+        let flags = Flags(subArgs, valued: ["--snapshot", "--steps", "--agents", "--stage", "--undo", "--packages", "--apps"])
         if let id = flags.values["--undo"] {
-            print(NewMacRestore.undoStage(id, home: home))
+            print(NewMacRestore.undoStage(id, home: home, applicationRoots: applicationRoots))
             return
         }
         let (config, dest) = try destination(configPath)
@@ -233,6 +234,12 @@ extension CLIHandler {
                 print("  \(mark) \(stage.id.padding(toLength: 22, withPad: " ", startingAt: 0)) \(stage.title)" + (stage.restartAfter ? yellow("  (poi riavvia)") : ""))
             }
             print("\nServizi automatici: nessuno viene acceso da solo. Uno alla volta: --stage servizi --agents <label> --yes")
+            if let catalog = try AppCapture.read(from: snap.url) {
+                print("\nApplicazioni: \(catalog.entries.filter { $0.state == .saved }.count) copie nel backup. --stage app per vederle e scegliere.")
+                for entry in catalog.entries where entry.state == .installer || entry.state == .failed {
+                    print(yellow("  \(entry.name): \(entry.reason)"))
+                }
+            }
             print("Annullare una fase: new-mac --undo <id>   ·   spegnere un servizio: new-mac --undo servizio:<label>")
             return
         }
@@ -244,6 +251,12 @@ extension CLIHandler {
             let installed = ToolInventory.installed(all)
             packages = Set(all.filter { !ToolInventory.isInstalled($0, in: installed) }.map(\.id))
         }
+        var applications = Set((flags.values["--apps"] ?? "").split(separator: ",").map(String.init))
+        if flags.switches.contains("--all-apps") {
+            let entries = try AppCapture.read(from: snap.url)?.entries ?? []
+            let installed = AppRestore.installedIDs(entries, roots: applicationRoots ?? AppInventory.Root.standard(home: home), home: home)
+            applications = Set(entries.filter { $0.state == .saved && !installed.contains($0.id) }.map(\.id))
+        }
         for id in wanted.split(separator: ",").map(String.init) {
             guard let stage = stages.first(where: { $0.id == id }) else { throw err("Fase sconosciuta: \(id)") }
             if stage.kind == .packages && packages.isEmpty {
@@ -251,10 +264,20 @@ extension CLIHandler {
                 print(yellow("Scegli con --packages <id>,<id> oppure --all-packages"))
                 continue
             }
+            if stage.kind == .applications && applications.isEmpty {
+                for entry in try AppCapture.read(from: snap.url)?.entries ?? [] {
+                    print("  \(entry.id) [\(entry.state.rawValue)] \(entry.reason)")
+                    print("    \(entry.dataDetail)")
+                }
+                print(yellow("Scegli con --apps <id>,<id> oppure --all-apps"))
+                continue
+            }
             let out = NewMacRestore.runStage(stage, snapshot: snap.url, home: home, dryRun: !yes,
-                                             services: agents, packages: packages, sink: { print($0) })
+                                             services: agents, packages: packages, applications: applications,
+                                             applicationRoots: applicationRoots, sink: { print($0) })
             if yes && stage.restartAfter && out.ok { print(yellow("Riavvia il Mac prima della fase successiva.")) }
             if !out.ok { print(red("Fase \(id) con problemi: leggi le righe sopra.")) }
+            if !out.ok && stage.kind == .applications { throw err("Ripristino delle applicazioni non completato.") }
         }
         if !yes { print(yellow("\nAnteprima: niente è stato scritto. Aggiungi --yes per eseguire.")) }
     }

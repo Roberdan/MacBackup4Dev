@@ -41,7 +41,8 @@ final class SafetyTests {
 
     func runEngine(_ cfg: Config, _ box: Sandbox, git: Bool = false) throws -> BackupRunResult {
         let options = BackupRunOptions(home: box.home, captureEnvironment: false, captureGit: git,
-                                       captureDatabases: !cfg.databases.sqlite.isEmpty, auditCoverage: false)
+                                       captureDatabases: !cfg.databases.sqlite.isEmpty, auditCoverage: false,
+                                       captureApplications: false)
         let writer = StatusWriter(directory: box.state)
         let box2 = ResultBox<Result<BackupRunResult?, Error>>()
         let done = DispatchSemaphore(value: 0)
