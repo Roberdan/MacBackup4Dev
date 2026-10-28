@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Every backup discovers installed applications and saves portable bundles with their
+  versions, internal framework links, signatures and explicit local-data coverage.
+  App Store, system-dependent and external-link apps retain clear reinstall instructions.
+- "Applicazioni dal backup" in Nuovo Mac and `new-mac --stage app` recover selected copies
+  without overwriting existing apps or launching them. Independent undo preserves changed
+  apps and moves unchanged restored copies aside.
+- "Dati delle applicazioni" offers recognized preferences/support paths as explicit,
+  off-by-default choices. Protected containers, Keychain and login exclusions stay intact.
+
+### Changed
+- Failed application copies prevent a snapshot from being marked complete. Unchanged app
+  files deduplicate against older snapshots after a content check, never against live apps.
+- App archives use the existing reserved `_rustymacbackup` namespace, leaving ordinary
+  folders such as `_apps` available to normal file recovery.
+
 ## [4.1.22] - 2026-10-21
 
 ### Added

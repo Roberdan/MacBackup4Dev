@@ -13,7 +13,9 @@ enum ConfigDiscovery {
     /// Discover all installed dev tools by merging built-in + custom candidates.
     /// Cheap: lists candidates without measuring anything.
     static func discover() -> [DiscoveredConfig] {
-        discoverAll(measuringData: false).configs + AppInventory.dataCandidates()
+        let known = discoverAll(measuringData: false).configs
+        let represented = Set(known.flatMap(\.paths).map(contract))
+        return known + AppInventory.dataCandidates(excluding: represented)
     }
 
     /// Full discovery: the sources to back up, plus the data directories found inside

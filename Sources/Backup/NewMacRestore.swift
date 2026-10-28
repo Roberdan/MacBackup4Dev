@@ -44,7 +44,7 @@ enum NewMacRestore {
     // MARK: - Checklist (read-only)
 
     static func checklist(snapshot: URL, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-                          ignoredApps: [String] = []) -> [CheckItem] {
+                          ignoredApps: [String] = [], applicationRoots: [AppInventory.Root]? = nil) -> [CheckItem] {
         let fm = FileManager.default
         var items: [CheckItem] = []
 
@@ -76,6 +76,34 @@ enum NewMacRestore {
             items.append(CheckItem(title: "Azure CLI", ok: ok, hint: ok ? "collegato" : "Esegui: az login"))
         }
 
+        do {
+            if let catalog = try AppCapture.read(from: snapshot) {
+                let roots = applicationRoots ?? AppInventory.Root.standard(home: home)
+                let installed = AppRestore.installedIDs(catalog.entries, roots: roots, home: home)
+                let missing = catalog.entries.filter {
+                    $0.state != .excluded && !ignoredApps.contains($0.name) && !installed.contains($0.id)
+                }
+                items.append(CheckItem(title: "App del vecchio Mac", ok: missing.isEmpty,
+                    hint: missing.isEmpty ? "tutte presenti" : missing.map {
+                        $0.name + ($0.state == .saved ? " (nel backup)" : " (\($0.reason))")
+                    }.joined(separator: ", "), missingApps: missing.map(\.name)))
+                if !catalog.failures.isEmpty {
+                    items.append(CheckItem(title: "Salvataggio delle applicazioni", ok: false,
+                                           hint: catalog.failures.joined(separator: "; ")))
+                }
+                let uncovered = Set(catalog.entries.flatMap(\.data)
+                    .filter { $0.state != .selected }.map(\.relativePath))
+                if !uncovered.isEmpty {
+                    items.append(CheckItem(title: "Dati delle applicazioni", ok: false,
+                        hint: "\(uncovered.count) percorsi non salvati. Sul Mac originale scegli i dati in \"Dati delle applicazioni\" e fai un nuovo backup. Portachiavi e contenitori protetti non vengono copiati."))
+                }
+                return items
+            }
+        } catch {
+            items.append(CheckItem(title: "Archivio delle applicazioni", ok: false,
+                                   hint: "Catalogo non leggibile: \(error.localizedDescription)"))
+            return items
+        }
         let appsFile = snapshot.appendingPathComponent("_environment/installed-apps.txt").path
         if let apps = try? String(contentsOfFile: appsFile, encoding: .utf8) {
             // Apps are often grouped in folders (/Applications/Dev, /Applications/AI): look one level down too.

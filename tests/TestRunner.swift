@@ -70,6 +70,7 @@ struct TestRunner {
             ("Applications.restoreSafety", appRecovery.test_restoreRefusesTamperingLinksAndDestinationRace),
             ("Applications.cliAndLegacy", appRecovery.test_cliUsesSameArchiveAndLegacySnapshotsStillWork),
             ("Applications.managerFallback", appRecovery.test_managerAppsAreNotInstalledTwiceAndInstallerAppsRemainListed),
+            ("Applications.nativeModel", appRecovery.test_nativeModelReflectsRestoreAndUndo),
             ("Progress.terminalIsIdle", backup.test_terminalStatusNeverClaimsWorkInProgress),
             ("Progress.activityAndFinish", backup.test_backupActivityAndFinishTimeAreExplicit),
             ("Actions.accessibleBackupDisk", backup.test_backupActionsRequireAccessibleDisk),

@@ -89,6 +89,9 @@ extension CLIHandler {
         st.lastCompleteAt = ISO8601DateFormatter().string(from: finish)
         state.status = st
         report("backup terminato (non in corso)")
+        st.applications = AppCapture.Summary(saved: 42, needsInstaller: 8, failed: 0, unselectedDataPaths: 12)
+        state.status = st
+        report("applicazioni salvate (dati da scegliere)")
         state.protection?.lastCompleteFinishedDate = nil
         state.status = nil
         report("backup vecchio (ora finale sconosciuta)")

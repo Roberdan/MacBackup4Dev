@@ -340,7 +340,7 @@ struct PopoverView: View {
         if let apps = state.status?.applications, apps.unselectedDataPaths > 0, !state.isRunning {
             out.append(Issue(id: "app-data", icon: "app.badge.checkmark", tint: Look.orange,
                              title: "Dati delle applicazioni da scegliere",
-                             detail: "\(apps.unselectedDataPaths) percorsi riconosciuti non sono salvati. Le app e i loro dati sono scelte separate.",
+                             detail: "\(apps.unselectedDataPaths) percorsi non salvati. Scegli quali includere.",
                              primary: ("Scegli dati", { state.onRequestChooseSources?() }), secondary: nil))
         }
         for gap in state.coverageGaps {

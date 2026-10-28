@@ -215,7 +215,7 @@ extension CLIHandler {
                 return step
             })
             let agents = Set((flags.values["--agents"] ?? "").split(separator: ",").map(String.init))
-            let report = NewMacRestore.run(snapshot: snap.url, steps: steps, launchAgents: agents, dryRun: !yes) { print($0) }
+            let report = NewMacRestore.run(snapshot: snap.url, steps: steps, launchAgents: agents, home: home, dryRun: !yes) { print($0) }
             if !yes { print(yellow("\nAnteprima: niente è stato scritto. Aggiungi --yes per eseguire.")) }
             for f in report.failures { print(red("  - \(f)")) }
             return
@@ -224,7 +224,8 @@ extension CLIHandler {
         let stages = NewMacRestore.stages(snapshot: snap.url, config: config)
         guard let wanted = flags.values["--stage"] else {
             print(bold("Controlli"))
-            for item in NewMacRestore.checklist(snapshot: snap.url, ignoredApps: config.coverage.ignoreApps) {
+            for item in NewMacRestore.checklist(snapshot: snap.url, home: home,
+                ignoredApps: config.coverage.ignoreApps, applicationRoots: applicationRoots) {
                 print("  \(item.ok ? green("✓") : yellow("!")) \(item.title): \(item.hint)")
             }
             print(bold("\nFasi, nell'ordine consigliato") + " (una alla volta: new-mac --stage <id> [--yes])")

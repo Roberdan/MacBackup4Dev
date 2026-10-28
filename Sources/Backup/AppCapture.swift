@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 
 enum AppCapture {
-    static let directoryName = "_apps"
+    static let directoryName = SnapshotManifest.directoryName + "/applications"
 
     struct Catalog: Codable {
         var formatVersion = 1
@@ -35,7 +35,8 @@ enum AppCapture {
 
     static func read(from snapshot: URL) throws -> Catalog? {
         let url = catalogURL(in: snapshot)
-        guard AppInventory.exists(url) else { return nil }
+        do { _ = try AppInventory.metadata(url) }
+        catch let error as NSError where error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT) { return nil }
         guard !SelectiveRestore.crossesLink(directoryName + "/catalog.json", root: snapshot.path),
               try AppInventory.metadata(url).st_mode & S_IFMT == S_IFREG else {
             throw AppInventory.failure("Il catalogo delle applicazioni non è un file regolare.")
@@ -56,7 +57,7 @@ enum AppCapture {
         var report = Report(catalog: Catalog(entries: discovery.entries, failures: discovery.failures))
         let directory = snapshot.appendingPathComponent(directoryName)
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let total = report.catalog.entries.count
             for index in report.catalog.entries.indices {
                 if options.isCancelled() { report.cancelled = true; return report }

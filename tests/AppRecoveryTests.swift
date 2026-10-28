@@ -1,7 +1,62 @@
 import Foundation
 import Darwin
+import AppKit
+import SwiftUI
 
 struct AppRecoveryTests {
+    func test_nativeModelReflectsRestoreAndUndo() throws {
+        let f = try AppTestFixture(); defer { f.cleanup() }
+        try f.app()
+        let result = try f.backup()
+        let entry = try AppCapture.read(from: result.snapshot)!.entries[0]
+        try MainActor.assumeIsolated {
+            let model = RestoreCenterModel(destination: URL(fileURLWithPath: f.box.dest), config: f.config,
+                                           home: f.restoreHome, applicationRoots: f.restoreRoots)
+            model.snapshots = [SnapshotInfo(name: result.snapshot.lastPathComponent, url: result.snapshot,
+                                            timestamp: Date(), manifest: result.manifest)]
+            model.selectedSnapshot = result.snapshot.lastPathComponent
+            model.stages = NewMacRestore.stages(snapshot: result.snapshot, config: f.config)
+            model.applications = [entry]
+            model.chosenApplications = [entry.id]
+            let stage = model.stages.first { $0.kind == .applications }!
+            func waitForModel() throws {
+                let deadline = Date().addingTimeInterval(30)
+                while model.busy && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+                try expect(!model.busy, "native model operation completed")
+            }
+            model.runStage(stage, dryRun: false)
+            try waitForModel()
+            try expect(model.installedApplications.contains(entry.id), "UI reads real installed state after restore")
+            try expect(!model.chosenApplications.contains(entry.id), "UI no longer proposes an installed app")
+            model.undo(stage.id)
+            try waitForModel()
+            try expect(!model.installedApplications.contains(entry.id), "UI refreshes actual state after undo")
+            try expect(model.chosenApplications.contains(entry.id), "undone app is available to restore again")
+            if let artifacts = ProcessInfo.processInfo.environment["MB4D_TEST_ARTIFACTS"] {
+                model.tab = .newMac
+                model.showApplications = true
+                let view = NSHostingView(rootView: RestoreCenterView(model: model)
+                    .environment(\.colorScheme, .light)
+                    .background(Color(nsColor: .windowBackgroundColor)))
+                view.appearance = NSAppearance(named: .aqua)
+                view.frame = NSRect(x: 0, y: 0, width: 780, height: 1100)
+                view.layoutSubtreeIfNeeded()
+                try waitForModel()
+                view.layoutSubtreeIfNeeded()
+                guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                    throw TestFailure.failed("native recovery view could not render")
+                }
+                view.cacheDisplay(in: view.bounds, to: image)
+                let directory = URL(fileURLWithPath: artifacts)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                guard let png = image.representation(using: .png, properties: [:]) else {
+                    throw TestFailure.failed("native recovery view PNG unavailable")
+                }
+                try png.write(to: directory.appendingPathComponent("application-recovery.png"))
+            }
+        }
+    }
+
     func test_realEngineAndNewMacRecoverAppsAndSelectedSettings() throws {
         let f = try AppTestFixture(); defer { f.cleanup() }
         let source = try f.app()
@@ -26,14 +81,14 @@ struct AppRecoveryTests {
         let installed = f.restoreRoots[0].url.appendingPathComponent("Shoji.app")
         try expectEqual(try AppBundleCopy.fingerprint(installed), try AppBundleCopy.fingerprint(source), "full app restored")
         try expectEqual(try String(contentsOfFile: f.restoreHome + "/" + preference, encoding: .utf8), "chosen settings", "app and chosen settings recovered")
-        try expect(!FileManager.default.fileExists(atPath: f.restoreHome + "/_apps"), "internal app archive never copied into home")
-        let archived = result.snapshot.appendingPathComponent("_apps/system/Shoji.app/Contents/MacOS/Shoji")
+        try expect(!FileManager.default.fileExists(atPath: f.restoreHome + "/_rustymacbackup"), "internal app archive never copied into home")
+        let archived = result.snapshot.appendingPathComponent("_rustymacbackup/applications/system/Shoji.app/Contents/MacOS/Shoji")
         try expect(try AppInventory.metadata(archived).st_ino != AppInventory.metadata(installed.appendingPathComponent("Contents/MacOS/Shoji")).st_ino,
                    "restored apps never hardlink to backup data")
         let matches = try FileVersions.search("Shoji", in: result.snapshot)
-        try expect(matches.contains(preference) && !matches.contains { $0.hasPrefix("_apps/") },
+        try expect(matches.contains(preference) && !matches.contains { $0.hasPrefix("_rustymacbackup/") },
                    "plain file search finds selected preferences, never internal app bundles")
-        try expectNil(SelectiveRestore.safeRelative("_apps/system/Shoji.app"), "plain restore cannot access bundle archive")
+        try expectNil(SelectiveRestore.safeRelative("_rustymacbackup/applications/system/Shoji.app"), "plain restore cannot access bundle archive")
         let undo = NewMacRestore.undoStage("app", home: f.restoreHome, applicationRoots: f.restoreRoots)
         try expect(undo.contains("1 app"), "app phase has independent move-aside undo: \(undo)")
         try expect(!FileManager.default.fileExists(atPath: installed.path), "undo removes installed app from app root")
@@ -63,14 +118,18 @@ struct AppRecoveryTests {
     }
 
     func test_restoreRefusesTamperingLinksAndDestinationRace() throws {
-        for scenario in ["path", "tamper", "parentLink", "race"] {
+        for scenario in ["path", "tamper", "parentLink", "race", "readOnlyRace"] {
             let f = try AppTestFixture(); defer { f.cleanup() }
-            try f.app("Dev/Shoji.app")
+            let app = try f.app("Dev/Shoji.app")
+            if scenario == "readOnlyRace" {
+                try FileManager.default.setAttributes([.posixPermissions: 0o555],
+                                                      ofItemAtPath: app.path + "/Contents/MacOS")
+            }
             let result = try f.backup()
             var entry = try AppCapture.read(from: result.snapshot)!.entries[0]
             if scenario == "path" { entry.relativePath = "../Escape.app" }
             if scenario == "tamper" {
-                try f.write("bad", result.snapshot.path + "/_apps/system/Dev/Shoji.app/Contents/MacOS/Shoji")
+                try f.write("bad", result.snapshot.path + "/_rustymacbackup/applications/system/Dev/Shoji.app/Contents/MacOS/Shoji")
             }
             if scenario == "parentLink" {
                 try FileManager.default.createDirectory(at: f.restoreRoots[0].url, withIntermediateDirectories: true)
@@ -80,17 +139,24 @@ struct AppRecoveryTests {
             do {
                 _ = try AppRestore.restore(entry, snapshot: result.snapshot, roots: f.restoreRoots,
                     home: f.restoreHome, running: { _ in false }, beforeInstall: {
-                        if scenario == "race" {
+                        if scenario == "race" || scenario == "readOnlyRace" {
                             try f.write("keep", f.restoreRoots[0].url.path + "/Dev/Shoji.app/keep")
                         }
                     })
             } catch { failed = true }
             try expect(failed, "unsafe restore must fail: \(scenario)")
-            if scenario == "race" {
+            if scenario == "race" || scenario == "readOnlyRace" {
                 try expectEqual(try String(contentsOfFile: f.restoreRoots[0].url.path + "/Dev/Shoji.app/keep",
                                           encoding: .utf8), "keep", "atomic rename cannot replace a raced destination")
                 let entries = try FileManager.default.contentsOfDirectory(atPath: f.restoreRoots[0].url.path + "/Dev")
                 try expect(!entries.contains { $0.hasPrefix(".mb4d-app-") }, "failed staging cleaned")
+                if scenario == "readOnlyRace" {
+                    for directory in [app.appendingPathComponent("Contents/MacOS"),
+                                      result.snapshot.appendingPathComponent("_rustymacbackup/applications/system/Dev/Shoji.app/Contents/MacOS")] {
+                        try expectEqual(try AppInventory.metadata(directory).st_mode & 0o777, 0o555,
+                                        "staging cleanup never changes source or archived directory permissions")
+                    }
+                }
             }
             try expect(!FileManager.default.fileExists(atPath: f.restoreHome + "/Shoji.app"), "never follows a grouping symlink")
         }
@@ -111,9 +177,12 @@ struct AppRecoveryTests {
 
         let legacy = f.box.root.appendingPathComponent("legacy-snapshot")
         try f.write("cask \"warp\"\n", legacy.path + "/_environment/Brewfile")
+        try f.write("personal folder", legacy.path + "/_apps/notes.txt")
         try expect(try AppCapture.read(from: legacy) == nil, "old snapshots have no app catalog")
         try expect(!NewMacRestore.stages(snapshot: legacy, config: nil).contains { $0.kind == .applications }, "old phases unchanged")
         try expectEqual(ToolInventory.packages(snapshot: legacy).map(\.id), ["cask:warp"], "old reinstall list preserved")
+        try expect(NewMacRestore.stages(snapshot: legacy, config: nil).flatMap(\.paths).contains("_apps/notes.txt"),
+                   "app metadata does not reserve or hide an existing user folder")
         try expectNotNil(SnapshotManifest.read(from: result.snapshot)?.applications, "new summary persisted")
     }
 

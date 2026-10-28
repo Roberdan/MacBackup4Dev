@@ -511,8 +511,7 @@ enum BackupEngine {
                                                      options: []) else { return 0 }
         var n: Int64 = 0
         for case let url as URL in e {
-            if url.lastPathComponent == "_environment" || url.lastPathComponent == SnapshotManifest.directoryName
-                || url.lastPathComponent == AppCapture.directoryName {
+            if url.lastPathComponent == "_environment" || url.lastPathComponent == SnapshotManifest.directoryName {
                 e.skipDescendants(); continue
             }
             if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true { n += 1 }

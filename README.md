@@ -1,7 +1,7 @@
 # MacBackup4Dev
 
-> Back up a developer's Mac — projects, dotfiles, editors, AI tools, databases and the list of
-> installed programs — to an external disk, and rebuild a new Mac from it, one safe phase at
+> Back up a developer's Mac — projects, dotfiles, editors, AI tools, databases, recoverable apps
+> and program inventories — to an external disk, and rebuild a new Mac from it, one safe phase at
 > a time. Native menu-bar app, no Full Disk Access. Formerly **RustyMacBackup**.
 
 Built for developers who live in the terminal. Not a replacement for Time Machine — a complement
@@ -32,9 +32,13 @@ The app finds your development environment by itself (under a second) and lets y
   tests are not proposed).
 - **Credentials** (SSH keys, tokens, `~/.config/gh`, anything named secret/token/credential)
   are listed apart and never selected for you: the backup disk may not be encrypted.
-- **Installed programs** (Homebrew formulae and apps, App Store apps, VS Code extensions,
-  global npm / uv / pipx / cargo packages) are not copied: their list is saved at every backup
-  so a new Mac can reinstall them.
+- **Applications:** each backup discovers apps in `/Applications` and `~/Applications`,
+  including one grouping folder, and saves portable bundles automatically. Ordinary local
+  app preferences and support folders are offered separately in **Dati delle applicazioni**,
+  off by default; confirm them in **Scegli dati**.
+- **Other installed programs** (Homebrew formulae, App Store apps, VS Code extensions,
+  global npm / uv / pipx / cargo packages) retain reinstall inventories. Apps requiring
+  their original installer are identified rather than presented as working copies.
 
 Then choose the disk and how often (every hour, every 6 hours, nightly, or by hand) and the
 first backup starts. On a new Mac with a backup disk attached, the first screen offers
@@ -60,7 +64,10 @@ External Disk
     │   ├── .gitconfig
     │   ├── .ssh/config
     │   ├── .config/nvim/
-    │   └── GitHub/MyProject/
+    │   ├── GitHub/MyProject/
+    │   └── _rustymacbackup/applications/
+    │       ├── catalog.json   ← app versions, copy state and local-data coverage
+    │       └── system/Shoji.app/
     ├── 2026-03-19T08:00:00/    ← yesterday (unchanged files = zero extra space)
     └── status.json             ← live progress / last result
 ```
@@ -142,6 +149,41 @@ The app auto-discovers installed tools on first launch. You confirm what to incl
 | **Repos** | `~/GitHub`, `~/Developer`, `~/Projects` — or any custom path |
 | **Custom** | Any file or folder you add via the `+` button |
 
+### Applications: copies and coverage
+
+Every backup discovers newly installed apps without changing the configured folder list.
+Portable `.app` bundles are saved under `_rustymacbackup/applications/`, separately from
+ordinary files. Copies preserve executable permissions, internal framework links, signatures
+and macOS quarantine protection. Unchanged files are hard-linked only to older snapshots,
+never to the live app; same-size changes are checked by content.
+
+**Ripristina… → Nuovo Mac → Applicazioni dal backup** lists each app's saved version,
+copy state and recognized local-data coverage. Select the copies to restore; existing or
+running apps are left alone. Nothing is launched, no administrator permission is requested,
+and an unwritable destination is reported. **Annulla** moves unchanged restored apps into
+the preserved-copies folder, rather than deleting them; changed or running apps stay put.
+
+An app copy is **not a promise that all its data or dependencies were saved**:
+
+- Ordinary `~/Library/Preferences/<bundle-id>.plist` and matching
+  `~/Library/Application Support/` folders require explicit selection in **Scegli dati**.
+  Additional app-data choices start off; known-tool settings keep their existing picker
+  entries and choices. Configured exclusions still apply. Unknown locations are not guessed.
+- Protected containers, Keychain, login services, system components, accounts, licences and
+  macOS permissions are not transferred by copying an app. Sign-in, activation, a compatible
+  macOS version or the original installer may still be necessary.
+- App Store apps, system helpers and bundles linked to external dependencies need a reinstall;
+  the catalog explains why. **Programmi** retains known reinstall options. A copied Homebrew
+  cask is not downloaded twice, but copying its bundle does **not** recreate Homebrew's
+  registration or update management.
+- A failed promised copy makes the snapshot incomplete; an explicitly listed installer-only
+  app does not. A complete snapshot can therefore still require manual installers and
+  unselected data. This is not a clone of macOS.
+
+Set `[applications] capture = false` to keep inventories only, or use
+`exclude_bundle_ids` to exclude particular apps. The first backup with app capture enabled
+needs space for their full contents. Older snapshots keep their existing reinstall behavior.
+
 ### Configuration, Not Data
 
 Hidden folders in your home directory are picked up automatically, so a tool you install
@@ -168,7 +210,8 @@ somewhere else, or dangerous to put back on another Mac.
 | `~/Library/Mail`, `~/Library/Messages`, `~/Library/Safari` | Reading them needs Full Disk Access (often blocked on company Macs) and they live on a server anyway | Sign in: Exchange/IMAP, iCloud Messages, Safari sync |
 | `~/Library/Caches` | Rebuilt by each app | Nothing to do |
 | `/System`, `/Library`, `/etc`, `/usr`, `/private` | macOS itself: copied from another Mac or macOS version they can stop it from starting | Comes with macOS |
-| `/Applications`, `/opt` (Homebrew) | Programs, not your data; a copy would be old and tied to the old Mac | Their list is saved at every backup; *Nuovo Mac → Programmi* reinstalls them one by one, current versions |
+| `/Applications` as an ordinary source | Never copied wholesale or offered in the folder picker | The separate application pipeline saves portable bundles; installer-only apps remain explicit |
+| `/opt` (Homebrew) | Package-manager files and dependencies are not portable configuration | *Nuovo Mac → Programmi* reinstalls listed packages |
 | `~/Library/Containers` | Sandboxed apps' private data, protected by macOS; most of it syncs through iCloud | Signing in to the app (the only gap: apps keeping data only locally) |
 | `~/Library/CloudStorage` (OneDrive, Dropbox, …) | Already in the cloud; copying it can make the sync client re-upload, and company DLP may block it | Sign in to the provider. Config-only opt-in under `[protection]` |
 
@@ -270,6 +313,7 @@ mb4d list
 | `new-mac` | New Mac: checks, then the phases in order with what is done |
 | `new-mac --stage <id>[,id] [--yes]` | Run one phase (preview without `--yes`) |
 | `new-mac --stage programmi --packages brew:jq,cask:warp --yes` | Reinstall chosen programs (`--all-packages`: all missing ones) |
+| `new-mac --stage app --apps system:Shoji.app --yes` | Restore selected saved app copies (`--all-apps`: all missing saved apps); omit `--yes` for preview |
 | `scan` | What the first-launch setup finds on this Mac |
 | `new-mac --stage servizi --agents <label> --yes` | Turn on one service, watched; moved aside if it fails |
 | `new-mac --undo <id>` / `--undo servizio:<label>` | Undo a phase / turn a service off |
@@ -306,7 +350,8 @@ detected but left **off by default** — you opt into them explicitly, exactly a
 
 These paths are hardcoded as forbidden and enforced at both the UI and engine level —
 including the "Aggiungi percorso" picker, which now rejects them on add instead of
-listing them as if they were backupable:
+listing them as if they were backupable. The dedicated application pipeline reads portable
+bundles separately; it does not allow `/Applications` as an ordinary file source:
 
 ```
 ~/Library/Mail         ~/Library/Messages      ~/Library/Safari
@@ -466,6 +511,10 @@ hourly  = 24    # keep last 24 hourly snapshots
 daily   = 30    # keep last 30 daily snapshots
 weekly  = 52    # keep last 52 weekly snapshots
 monthly = 0     # keep forever
+
+[applications]
+capture = true
+exclude_bundle_ids = []
 
 [protection]
 include_rights_managed_files = false
@@ -650,6 +699,11 @@ Sources/
 │   ├── GitSafety.swift         # git bundle of unpublished commits per repository
 │   ├── DatabaseDumps.swift     # SQLite online backup + pg_dump
 │   ├── CoverageAuditor.swift   # Active folders/databases not backed up (no noise)
+│   ├── AppInventory.swift      # Per-backup app discovery and explicit local-data coverage
+│   ├── AppBundleCopy.swift     # Verified bundle copy, safe internal links, content deduplication
+│   ├── AppCapture.swift        # Reserved app archive/catalog, completeness reporting
+│   ├── AppInstallers.swift     # Homebrew installer hints, without copying package receipts
+│   ├── AppRestore.swift        # Selected create-only app restore and move-aside undo
 │   ├── SelectiveRestore.swift  # Topics, file versions, preview, atomic apply, per-file undo
 │   ├── NewMacRestore.swift     # Checklist, repos, databases, Homebrew, LaunchAgents
 │   ├── NewMacStages.swift      # "Nuovo Mac" a tappe: phases, progress, undo, shell/service checks
@@ -696,7 +750,8 @@ Sources/
 
 ```bash
 ./build.sh                      # build (finds Xcode automatically)
-./run-tests.sh                  # 198 tests, including real engine runs in a sandbox
+./run-tests.sh                  # all tests, including real engine runs in a sandbox
+./run-tests.sh Applications.    # focused application capture/restore regressions
 ./build-pkg.sh                  # distributable .pkg + .app.zip
 VERSION=4.0.0 ./build-pkg.sh    # specific version
 build/MacBackup4Dev.app/Contents/MacOS/MacBackup4Dev measure-menu   # real popover fits?
@@ -706,7 +761,9 @@ Tests cover the engine end to end in a sandbox (no file dropped, incomplete snap
 bundles applied to a fresh clone, SQLite/WAL copies, coverage noise), retention protection,
 selective restore and per-file undo, a whole *Nuovo Mac* rebuild, the folder picker, config
 round-trips, login-item activation/approval/error handling through a fake macOS boundary,
-and the pre-3.0 suites. Releases: push a `v*` tag; the workflow runs the tests
+application bundle/data recovery through the real engine, native restore model and CLI,
+and the pre-3.0 suites. Application tests inject temporary app roots, homes and status
+directories; they never restore into the user's `/Applications` or home. Releases: push a `v*` tag; the workflow runs the tests
 and publishes the `.pkg` and `.app.zip`.
 
 ---
@@ -735,6 +792,7 @@ MacBackup4Dev versions ~/.zshrc            # every distinct version of one file
 MacBackup4Dev restore-file ~/.zshrc --snapshot 2026-10-04_190948 --yes
 MacBackup4Dev new-mac                      # checklist + preview of a whole new Mac
 MacBackup4Dev new-mac --steps config,repos,databases --yes
+MacBackup4Dev new-mac --stage app --apps system:Shoji.app  # preview saved app recovery
 ```
 
 **Nuovo Mac** restores configuration files that are missing (never overwriting), clones each
@@ -791,7 +849,8 @@ and installers left there by previous versions are removed.
 base tools (Apple's developer tools, Homebrew: one click starts each installer) → programs
 (every package of the old Mac with its own checkbox; already installed ones are marked; one
 failure never stops the others) → documents → repositories → databases → one per tool →
-other configurations → shell → services. Run one, check the Mac, go on; every phase only adds files and can be
+other configurations → applications from the backup → shell → services. Restore selected
+app data before opening the recovered apps. Run one, check the Mac, go on; every phase only adds files and can be
 undone alone. Nothing that starts at login is ever restored as a plain file: services
 (LaunchAgents) are all off, each has its own switch, and one that fails right after
 starting is stopped and moved to `~/MacBackup4Dev-copie-parziali/LaunchAgents/`. After the

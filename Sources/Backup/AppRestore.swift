@@ -118,7 +118,7 @@ enum AppRestore {
         let staging = target.deletingLastPathComponent().appendingPathComponent(".mb4d-app-" + UUID().uuidString + ".app")
         defer {
             if AppInventory.exists(staging) {
-                do { try FileManager.default.removeItem(at: staging) }
+                do { try AppBundleCopy.removePartial(at: staging) }
                 catch { Log.error("Cannot remove app staging \(staging.path): \(error)") }
             }
         }

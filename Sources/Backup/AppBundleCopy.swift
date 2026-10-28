@@ -136,10 +136,35 @@ enum AppBundleCopy {
             }
             return expected
         } catch {
-            do { try FileManager.default.removeItem(at: destination) }
+            do { try removePartial(at: destination) }
             catch { Log.error("Cannot remove partial app \(destination.path): \(error)") }
             throw error
         }
+    }
+
+    static func removePartial(at root: URL) throws {
+        func prepare(_ descriptor: Int32, _ directory: URL) throws {
+            var metadata = stat()
+            // Files may be linked to older snapshots; only change the new directories.
+            guard fstat(descriptor, &metadata) == 0,
+                  fchmod(descriptor, metadata.st_mode | 0o700) == 0 else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) {
+                let child = openat(descriptor, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+                if child < 0 {
+                    if errno == ENOTDIR || errno == ELOOP { continue }
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                }
+                defer { close(child) }
+                try prepare(child, directory.appendingPathComponent(name))
+            }
+        }
+        let descriptor = open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        defer { close(descriptor) }
+        try prepare(descriptor, root)
+        try FileManager.default.removeItem(at: root)
     }
 
     static func copyRegularFile(from source: String, to destination: String) throws {

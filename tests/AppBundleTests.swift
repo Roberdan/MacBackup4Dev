@@ -9,9 +9,12 @@ struct AppBundleTests {
         try f.write("framework resource", framework.path + "/Versions/A/Resources/data")
         try FileManager.default.createSymbolicLink(atPath: framework.path + "/Versions/Current", withDestinationPath: "A")
         try FileManager.default.createSymbolicLink(atPath: framework.path + "/Resources", withDestinationPath: "Versions/Current/Resources")
+        let quarantine = "0081;00000000;MacBackup4DevTests;"
+        try expect(Shell.run("/usr/bin/xattr", ["-w", "com.apple.quarantine", quarantine, source.path]).ok,
+                   "synthetic app has quarantine metadata")
         let result = try f.backup()
         try expect(result.manifest.complete, "portable Shoji-shaped app captured: \(result.manifest.incompleteReasons)")
-        let saved = result.snapshot.appendingPathComponent("_apps/system/Shoji.app")
+        let saved = result.snapshot.appendingPathComponent("_rustymacbackup/applications/system/Shoji.app")
         try expectEqual(try AppBundleCopy.fingerprint(saved), try AppBundleCopy.fingerprint(source), "entire app, not just its name")
         try expectEqual(try FileManager.default.destinationOfSymbolicLink(atPath: saved.path + "/Contents/Frameworks/Sparkle.framework/Versions/Current"),
                         "A", "framework link kept relative")
@@ -21,6 +24,12 @@ struct AppBundleTests {
         _ = try AppRestore.restore(entry, snapshot: result.snapshot, roots: f.restoreRoots, home: f.restoreHome, running: { _ in false })
         try expectEqual(try AppBundleCopy.fingerprint(f.restoreRoots[0].url.appendingPathComponent("Shoji.app")),
                         try AppBundleCopy.fingerprint(source), "framework links survive a full restore too")
+        for app in [saved, f.restoreRoots[0].url.appendingPathComponent("Shoji.app")] {
+            let attribute = Shell.run("/usr/bin/xattr", ["-p", "com.apple.quarantine", app.path])
+            try expect(attribute.ok && attribute.stdout.components(separatedBy: ";").prefix(2)
+                       == quarantine.components(separatedBy: ";").prefix(2),
+                       "backup and restore preserve quarantine flags and timestamp; macOS normalizes the agent")
+        }
 
         let signed = try f.app("Signed.app", identifier: "com.example.signed", signed: true)
         let target = f.box.root.appendingPathComponent("signed-copy.app")
@@ -40,7 +49,7 @@ struct AppBundleTests {
         let second = try f.backup()
         let entries = try AppCapture.read(from: second.snapshot)!.entries
         try expectEqual(entries.filter { $0.state == .saved }.count, 3, "new system, grouped and home apps discovered without editing config")
-        let relative = "_apps/system/Shoji.app/Contents/MacOS/Shoji"
+        let relative = "_rustymacbackup/applications/system/Shoji.app/Contents/MacOS/Shoji"
         let old = try AppInventory.metadata(first.snapshot.appendingPathComponent(relative))
         let new = try AppInventory.metadata(second.snapshot.appendingPathComponent(relative))
         try expectEqual(old.st_ino, new.st_ino, "unchanged app files deduplicated")
@@ -50,7 +59,8 @@ struct AppBundleTests {
         try expectEqual(second.manifest.filesProcessed, 1, "app counts do not affect shrink guard")
 
         try f.write("#!/bin/sh\nexit 1\n", executable.path)
-        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970:
+        try FileManager.default.setAttributes([.posixPermissions: Int(original.st_mode & 0o777),
+            .modificationDate: Date(timeIntervalSince1970:
             Double(original.st_mtimespec.tv_sec) + Double(original.st_mtimespec.tv_nsec) / 1_000_000_000)],
                                               ofItemAtPath: executable.path)
         let third = try f.backup()
@@ -77,7 +87,7 @@ struct AppBundleTests {
         try expect(result.manifest.complete, "unsupported apps are reported, not promised as portable")
         try expectEqual(entries.filter { $0.state == .installer }.count, 4, "external link, app link, system helper and App Store are explicit")
         try expect(entries.allSatisfy { !$0.reason.isEmpty }, "each skipped app has a recovery reason")
-        try expect(!FileManager.default.fileExists(atPath: result.snapshot.path + "/_apps/system/Shoji.app"), "no broken partial app kept")
+        try expect(!FileManager.default.fileExists(atPath: result.snapshot.path + "/_rustymacbackup/applications/system/Shoji.app"), "no broken partial app kept")
         try expect(!entries.contains { $0.relativePath.hasPrefix("Group/") }, "linked grouping folder not traversed")
         try expectEqual(try String(contentsOf: external.appendingPathComponent("secret"), encoding: .utf8), "do not copy", "external source untouched")
     }
@@ -133,6 +143,12 @@ struct AppBundleTests {
         try expect(!FileManager.default.fileExists(atPath: first.snapshot.path + "/" + preference), "no automatic credential-bearing data capture")
         let candidates = AppInventory.dataCandidates(home: f.box.home, roots: f.roots)
         try expect(candidates.allSatisfy(\.sensitive), "data never included by picker Select All")
+        let additional = AppInventory.dataCandidates(home: f.box.home, roots: f.roots,
+                                                     excluding: ["~/" + preference])
+        try expect(!additional.flatMap(\.paths).contains("~/" + preference),
+                   "known tool settings are not duplicated as sensitive app data")
+        try expect(additional.flatMap(\.paths).contains("~/Library/Application Support/Shoji"),
+                   "new app data still needs an explicit choice")
 
         var config = f.config
         config.source.paths.append(f.box.home + "/" + preference)

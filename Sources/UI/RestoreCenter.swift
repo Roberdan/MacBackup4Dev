@@ -186,10 +186,11 @@ final class RestoreCenterModel: ObservableObject {
 
     func loadChecklist() {
         guard let snap = snapshotURL else { return }
+        let home = self.home, ignored = self.ignoredApps, roots = applicationRoots
         busy = true
-        DispatchQueue.global(qos: .userInitiated).async {
-            let items = NewMacRestore.checklist(snapshot: snap, ignoredApps: self.ignoredApps)
-            DispatchQueue.main.async { self.checklist = items; self.busy = false }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let items = NewMacRestore.checklist(snapshot: snap, home: home, ignoredApps: ignored, applicationRoots: roots)
+            DispatchQueue.main.async { [weak self, items] in self?.checklist = items; self?.busy = false }
         }
     }
 
@@ -208,7 +209,9 @@ final class RestoreCenterModel: ObservableObject {
     func loadStages() {
         guard let snap = snapshotURL else { return }
         busy = true
+        message = ""; messageIsError = false
         let config = self.config, home = self.home, applicationRoots = self.applicationRoots
+        let ignored = Set(self.ignoredApps)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let stages = NewMacRestore.stages(snapshot: snap, config: config)
             let services = NewMacRestore.availableLaunchAgents(snapshot: snap)
@@ -229,9 +232,9 @@ final class RestoreCenterModel: ObservableObject {
                 self.applications = applications
                 self.installedApplications = installedApplications
                 self.chosenApplications = Set(applications.filter {
-                    $0.state == .saved && !installedApplications.contains($0.id)
+                    $0.state == .saved && !installedApplications.contains($0.id) && !ignored.contains($0.name)
                 }.map(\.id))
-                if let applicationError { self.message = applicationError }
+                if let applicationError { self.message = applicationError; self.messageIsError = true }
                 self.busy = false
             }
             let installed = ToolInventory.installed(packages)
@@ -300,11 +303,11 @@ final class RestoreCenterModel: ObservableObject {
                     self.chosenPackages = self.chosenPackages.filter { id in
                         byID[id].map { !ToolInventory.isInstalled($0, in: installed) } ?? false
                     }
-                    if let installedApplications {
-                        self.installedApplications = installedApplications
-                        self.chosenApplications.subtract(installedApplications)
-                        self.loadChecklist()
-                    }
+                }
+                if let installedApplications {
+                    self.installedApplications = installedApplications
+                    self.chosenApplications.subtract(installedApplications)
+                    self.loadChecklist()
                 }
                 if !dryRun {
                     self.log.append(out.ok ? (stage.restartAfter ? "Fatto. Riavvia il Mac prima della fase successiva: se qualcosa non va, sai che è stata questa." : "Fatto.")
@@ -316,13 +319,21 @@ final class RestoreCenterModel: ObservableObject {
 
     func undo(_ id: String) {
         let home = self.home, applicationRoots = self.applicationRoots
+        let applications = self.applications
         busy = true
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let text = NewMacRestore.undoStage(id, home: home, applicationRoots: applicationRoots)
             let progress = NewMacRestore.progress(home: home)
-            DispatchQueue.main.async {
+            let installed = id == "app" ? AppRestore.installedIDs(applications, roots: applicationRoots, home: home) : nil
+            DispatchQueue.main.async { [weak self, text, progress, installed] in
+                guard let self else { return }
                 self.busy = false; self.progress = progress
-                self.log = ["Annullato: \(text)"]
+                self.log = ["Annullamento: \(text)"]
+                if let installed {
+                    self.chosenApplications.formUnion(self.installedApplications.subtracting(installed))
+                    self.installedApplications = installed
+                    self.loadChecklist()
+                }
             }
         }
     }

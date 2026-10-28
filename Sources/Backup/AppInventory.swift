@@ -14,7 +14,7 @@ enum AppInventory {
     }
 
     struct DataPath: Codable, Hashable {
-        enum State: String, Codable { case selected, notSelected, excluded }
+        enum State: String, Codable { case selected, notSelected, excluded, unavailable }
         var relativePath: String
         var state: State
     }
@@ -40,7 +40,9 @@ enum AppInventory {
         var dataDetail: String {
             let missing = data.filter { $0.state != .selected }
             if !missing.isEmpty {
-                return "Dati non salvati: " + missing.map { "~/" + $0.relativePath }.joined(separator: ", ")
+                return "Dati non salvati: " + missing.map {
+                    "~/" + $0.relativePath + ($0.state == .unavailable ? " (non leggibile)" : "")
+                }.joined(separator: ", ")
             }
             return data.isEmpty ? "Nessun dato locale riconosciuto; controlla i dati dell'app."
                 : "Dati selezionati nella copia dei file (con le esclusioni configurate)."
@@ -194,8 +196,14 @@ enum AppInventory {
             guard !ConfigDiscovery.isForbidden("~/" + rel), !NewMacRestore.isLoginSensitive(rel),
                   !SelectiveRestore.crossesLink(rel, root: home) else { return nil }
             let url = URL(fileURLWithPath: home + "/" + rel)
-            guard let metadata = try? metadata(url),
-                  [S_IFREG, S_IFDIR].contains(metadata.st_mode & S_IFMT) else { return nil }
+            let value: stat
+            do { value = try metadata(url) }
+            catch let error as NSError where error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT) { return nil }
+            catch {
+                Log.warn("Cannot inspect application data \(url.path): \(error)")
+                return DataPath(relativePath: rel, state: .unavailable)
+            }
+            guard [S_IFREG, S_IFDIR].contains(value.st_mode & S_IFMT) else { return nil }
             let selected = sources.contains { url.path == $0 || url.path.hasPrefix($0 + "/") }
             let state: DataPath.State = filter.isExcluded(relativePath: rel) ? .excluded
                 : selected ? .selected : .notSelected
@@ -203,13 +211,17 @@ enum AppInventory {
         }
     }
 
-    static func dataCandidates(home: String = NSHomeDirectory(), roots: [Root]? = nil) -> [DiscoveredConfig] {
+    static func dataCandidates(home: String = NSHomeDirectory(), roots: [Root]? = nil,
+                               excluding knownPaths: Set<String> = []) -> [DiscoveredConfig] {
         let result = discover(roots: roots ?? Root.standard(home: home), home: home)
         for failure in result.failures { Log.warn("Application data discovery: \(failure)") }
+        var represented = knownPaths
         return result.entries.filter { !$0.bundleID.isEmpty && $0.state != .excluded }.compactMap { entry in
-            guard !entry.data.isEmpty else { return nil }
+            // Known tool settings keep their existing picker entry and sensitivity.
+            let paths = entry.data.map { "~/" + $0.relativePath }.filter { represented.insert($0).inserted }
+            guard !paths.isEmpty else { return nil }
             return DiscoveredConfig(category: "Dati delle applicazioni", label: entry.name,
-                                    paths: entry.data.map { "~/" + $0.relativePath }, sensitive: true)
+                                    paths: paths, sensitive: true)
         }
     }
 }
