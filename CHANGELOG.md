@@ -17,6 +17,8 @@
   files deduplicate against older snapshots after a content check, never against live apps.
 - App archives use the existing reserved `_rustymacbackup` namespace, leaving ordinary
   folders such as `_apps` available to normal file recovery.
+- Application undo checks installation identity as well as contents, leaving an identical
+  replacement from another installer untouched.
 
 ## [4.1.22] - 2026-10-21
 

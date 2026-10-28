@@ -17,8 +17,14 @@ enum AppRestore {
         var undoDirectory: URL?
     }
 
+    private struct JournalEntry: Codable {
+        var application: AppInventory.Entry
+        var device: dev_t
+        var inode: ino_t
+    }
+
     private struct Journal: Codable {
-        var entries: [AppInventory.Entry]
+        var entries: [JournalEntry]
     }
 
     static func installedIDs(_ entries: [AppInventory.Entry], roots: [AppInventory.Root],
@@ -60,11 +66,14 @@ enum AppRestore {
                 continue
             }
             do {
-                let result = try restore(entry, snapshot: snapshot, roots: destinations, home: home, running: running) {
+                let result = try restore(entry, snapshot: snapshot, roots: destinations, home: home, running: running) { staging in
                     // Record the intended addition before rename: a crash cannot leave an
-                    // installed application with no recovery journal.
-                    journal.entries.append(entry)
-                    try JSONEncoder().encode(journal).write(to: undo.appendingPathComponent(journalName), options: .atomic)
+                    // installed app untracked; identity excludes an identical raced app.
+                    let metadata = try AppInventory.metadata(staging)
+                    var pending = journal
+                    pending.entries.append(JournalEntry(application: entry, device: metadata.st_dev, inode: metadata.st_ino))
+                    try JSONEncoder().encode(pending).write(to: undo.appendingPathComponent(journalName), options: .atomic)
+                    journal = pending
                 }
                 if result.installed { report.installed += 1 } else { report.skipped += 1 }
                 sink("  \(entry.name): \(result.message)")
@@ -80,7 +89,7 @@ enum AppRestore {
 
     static func restore(_ entry: AppInventory.Entry, snapshot: URL, roots: [AppInventory.Root], home: String,
                         running: (String) -> Bool = isRunning,
-                        beforeInstall: () throws -> Void = {}) throws -> Outcome {
+                        beforeInstall: (URL) throws -> Void = { _ in }) throws -> Outcome {
         guard entry.state == .saved, AppInventory.validRelativePath(entry.relativePath),
               AppInventory.safeComponent(entry.bundleID), let fingerprint = entry.fingerprint,
               let root = roots.first(where: { $0.kind == entry.root }) else {
@@ -125,7 +134,7 @@ enum AppRestore {
         guard try AppBundleCopy.copy(from: source, to: staging) == fingerprint else {
             throw AppInventory.failure("La copia dell'app non è integra.")
         }
-        try beforeInstall()
+        try beforeInstall(staging)
         guard renamex_np(staging.path, target.path, UInt32(RENAME_EXCL)) == 0 else {
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
                           userInfo: [NSLocalizedDescriptionKey: "Installazione non eseguita: la destinazione è cambiata o non è scrivibile."])
@@ -161,18 +170,22 @@ enum AppRestore {
         }
         var moved = 0
         var kept = 0
-        for entry in journal.entries {
+        for recorded in journal.entries {
+            let entry = recorded.application
             guard AppInventory.validRelativePath(entry.relativePath),
                   let root = destinations.first(where: { $0.kind == entry.root }), let fingerprint = entry.fingerprint else {
                 throw AppInventory.failure("Registro di annullamento delle app non valido.")
             }
             let app = root.url.appendingPathComponent(entry.relativePath)
             guard AppInventory.exists(app) else { continue }
-            guard !SelectiveRestore.crossesLink(entry.relativePath, root: root.url.path),
-                  try AppInventory.metadata(app).st_mode & S_IFMT == S_IFDIR else {
+            guard !SelectiveRestore.crossesLink(entry.relativePath, root: root.url.path) else {
                 throw AppInventory.failure("L'app ripristinata attraversa un collegamento.")
             }
-            if running(entry.bundleID) {
+            let metadata = try AppInventory.metadata(app)
+            guard metadata.st_mode & S_IFMT == S_IFDIR else {
+                throw AppInventory.failure("L'app ripristinata non è una cartella normale.")
+            }
+            if metadata.st_dev != recorded.device || metadata.st_ino != recorded.inode || running(entry.bundleID) {
                 kept += 1
                 continue
             }

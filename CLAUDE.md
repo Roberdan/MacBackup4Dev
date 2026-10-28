@@ -83,7 +83,8 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   files, and never uses clone flags. Failed copies prevent `complete: true`.
   `AppRestore` validates the catalog and copy, stages beside the target, and uses an exclusive
   rename: existing/running apps are untouched, nothing is launched or home-rewritten.
-  Undo moves unchanged apps aside; cleanup makes only staging directories writable,
+  Undo checks the recorded installation's device/inode and contents before moving it aside;
+  cleanup makes only staging directories writable,
   never regular files that may be linked to older snapshots.
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
 - **4 parallel workers (4.1.4)**: backup entry points, scanner and copy tasks use background

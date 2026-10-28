@@ -115,6 +115,16 @@ struct AppRecoveryTests {
         let text = try AppRestore.undo(report.undoDirectory!, home: f.restoreHome, roots: f.restoreRoots, running: { _ in false })
         try expect(text.contains("1 cambiate"), "undo keeps an app changed after restore: \(text)")
         try expectEqual(try AppBundleCopy.fingerprint(installed), before, "undo does not destroy changed app")
+
+        try FileManager.default.removeItem(at: installed.appendingPathComponent("Contents/user-changed"))
+        let replaced = f.box.root.appendingPathComponent("replaced.app")
+        try FileManager.default.moveItem(at: installed, to: replaced)
+        try AppBundleCopy.copy(from: replaced, to: installed)
+        try expectEqual(try AppBundleCopy.fingerprint(installed), entry.fingerprint!,
+                        "another installation can have identical contents")
+        _ = try AppRestore.undo(report.undoDirectory!, home: f.restoreHome, roots: f.restoreRoots, running: { _ in false })
+        try expect(FileManager.default.fileExists(atPath: installed.path),
+                   "undo cannot claim an identical app installed by someone else")
     }
 
     func test_restoreRefusesTamperingLinksAndDestinationRace() throws {
@@ -138,7 +148,7 @@ struct AppRecoveryTests {
             var failed = false
             do {
                 _ = try AppRestore.restore(entry, snapshot: result.snapshot, roots: f.restoreRoots,
-                    home: f.restoreHome, running: { _ in false }, beforeInstall: {
+                    home: f.restoreHome, running: { _ in false }, beforeInstall: { _ in
                         if scenario == "race" || scenario == "readOnlyRace" {
                             try f.write("keep", f.restoreRoots[0].url.path + "/Dev/Shoji.app/keep")
                         }
