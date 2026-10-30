@@ -20,8 +20,8 @@ bundle identifier (update continuity, notification permission), everything on th
 ./build-pkg.sh          # creates .pkg installer
 ```
 
-App and test compilation use `-warnings-as-errors`, including on the macOS 14 CI
-toolchain. Background UI callbacks capture result values explicitly and use a new
+App and test compilation use `-warnings-as-errors`, including on the hosted macOS 15 CI
+toolchain, while targeting macOS 14. Background UI callbacks capture result values explicitly and use a new
 weak capture at each nested asynchronous boundary.
 
 **Release hygiene — one installed copy, always.** After any release, install or rollback test,
