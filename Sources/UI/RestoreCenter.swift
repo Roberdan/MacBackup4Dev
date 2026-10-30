@@ -9,9 +9,18 @@ final class RestoreCenterModel: ObservableObject {
         var id: String { rawValue }
     }
 
+    enum FileMode: String, CaseIterable, Identifiable {
+        case browse = "Sfoglia", search = "Cerca"
+        var id: String { rawValue }
+    }
+
     let destination: URL
     let config: Config?
     private let restorationHome: String
+    private let undoRoot: URL
+    /// Default file recovery: folders and dates, like a timeline.
+    let browser: SnapshotBrowserModel
+    @Published var fileMode: FileMode = .browse
     @Published var tab: Tab = .file {
         didSet { if oldValue != tab { plan = nil; message = ""; messageIsError = false } }
     }
@@ -63,12 +72,16 @@ final class RestoreCenterModel: ObservableObject {
 
     init(destination: URL, config: Config?,
          home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-         applicationRoots: [AppInventory.Root]? = nil) {
+         applicationRoots: [AppInventory.Root]? = nil,
+         undoRoot: URL = RestoreEngine.preRestoreBaseURL) {
         self.destination = destination
         self.config = config
         self.restorationHome = home
+        self.undoRoot = undoRoot
+        self.browser = SnapshotBrowserModel(destination: destination, home: home, undoRoot: undoRoot)
         self.applicationRoots = applicationRoots ?? AppInventory.Root.standard(home: home)
         self.topics = Topics.all(config: config)
+        self.browser.onDone = { [weak self] in self?.onDone?($0) }
     }
 
     var snapshotURL: URL? {
@@ -76,6 +89,7 @@ final class RestoreCenterModel: ObservableObject {
     }
 
     func load() {
+        browser.load()
         busy = true
         let dest = destination
         DispatchQueue.global(qos: .userInitiated).async {
@@ -112,8 +126,9 @@ final class RestoreCenterModel: ObservableObject {
     func applyPlan() {
         guard let plan else { return }
         busy = true
+        let undoRoot = self.undoRoot
         DispatchQueue.global(qos: .userInitiated).async {
-            let outcome = Result { try SelectiveRestore.apply(plan) }
+            let outcome = Result { try SelectiveRestore.apply(plan, undoRoot: undoRoot) }
             DispatchQueue.main.async {
                 self.busy = false
                 switch outcome {
@@ -345,7 +360,7 @@ struct RestoreCenterView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(model.tab == .file ? "Recupera un file cancellato o una versione precedente."
+                Text(model.tab == .file ? "Sfoglia i backup per cartella e data: recupera un file o un'intera cartella."
                      : model.tab == .topic ? "Ripristina le impostazioni di un'app o un gruppo di file."
                      : "Ricostruisci il tuo ambiente su un nuovo Mac.")
                     .font(.headline)
@@ -434,6 +449,20 @@ struct RestoreCenterView: View {
     // MARK: File
 
     private var fileTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("", selection: $model.fileMode) {
+                ForEach(RestoreCenterModel.FileMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 200)
+            if model.fileMode == .browse {
+                SnapshotBrowserView(model: model.browser)
+            } else {
+                searchFileTab
+            }
+        }
+    }
+
+    private var searchFileTab: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("1. Cerca nei backup conservati, anche se il file non esiste più sul Mac.\n2. Scegli la versione e controlla l'anteprima.\n3. Premi Ripristina: di default salvo una copia sulla Scrivania, senza sostituire l'originale.")
                 .font(.callout).foregroundColor(.secondary)
