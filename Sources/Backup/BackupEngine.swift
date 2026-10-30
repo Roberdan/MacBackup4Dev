@@ -155,7 +155,11 @@ enum BackupEngine {
         let lockPath = destURL.appendingPathComponent("rustymacbackup.lock").path
         try acquireLock(at: lockPath)
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
-        _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home)
+        do {
+            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home)
+        } catch {
+            Log.warn("Worktree cleanup deferred; backup will continue: \(error.localizedDescription)")
+        }
 
         let onBattery = IOPriority.isOnBattery()
         let previousIOPolicy = try IOPriority.beginBackup(onBattery: onBattery)

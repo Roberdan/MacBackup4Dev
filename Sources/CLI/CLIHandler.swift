@@ -7,7 +7,8 @@ enum CLIHandler {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     }
 
-    static func run(args: [String], config: Config? = nil) {
+    static func run(args: [String], config: Config? = nil,
+                    home: String = FileManager.default.homeDirectoryForCurrentUser.path) {
         _ = config
         var configPath: String?
         var commandArgs = args
@@ -42,7 +43,7 @@ enum CLIHandler {
             case "coverage": try runCoverage(subArgs: subArgs, configPath: configPath)
             case "cleanup-worktrees":
                 let cfg = try loadConfig(configPath: configPath)
-                let result = try WorktreePolicy.cleanup(at: URL(fileURLWithPath: cfg.destination.path))
+                let result = try WorktreePolicy.cleanup(at: URL(fileURLWithPath: cfg.destination.path), home: home)
                 print("Worktree obsoleti rimossi: \(result.removed.count) · spazio liberato: \(BackupEngine.formatBytes(result.freedBytes))")
             case "versions": try runVersions(subArgs: subArgs, configPath: configPath)
             case "find": try runFind(subArgs: subArgs, configPath: configPath)

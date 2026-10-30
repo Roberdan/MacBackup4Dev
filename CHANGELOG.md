@@ -25,6 +25,7 @@
 ### Fixed
 - Project database discovery and SQLite capture resolve sandbox and home paths consistently.
 - A configuration edited during automatic discovery is not overwritten by an older copy.
+- Failed worktree cleanup is logged and retried without preventing subsequent backups.
 
 ## [4.2.0] - 2026-10-28
 

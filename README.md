@@ -642,6 +642,7 @@ ignore = ["~/Scratch"]          # never auto-add or suggest this folder
   Mac and while holding the destination lock. Each removal is recorded in that snapshot's
   manifest with its path, size, date and reason. Main repositories, live checkouts and
   uncertain cases are untouched. `MacBackup4Dev cleanup-worktrees` runs this maintenance now.
+  A cleanup failure is logged and retried on a later backup; it does not stop protection.
 - **Retention**: the 3 newest complete snapshots are never deleted; nothing is pruned while the
   Mac looks new or emptied.
 

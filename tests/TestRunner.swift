@@ -5,6 +5,13 @@ typealias TestClosure = () throws -> Void
 @main
 struct TestRunner {
     static func main() throws {
+        if CommandLine.arguments.count > 3, CommandLine.arguments[1] == "--worktree-cli-worker" {
+            let home = CommandLine.arguments[2]
+            Log.logURL = URL(fileURLWithPath: home).appendingPathComponent("cleanup.log")
+            EncryptedStore.stateDirectory = URL(fileURLWithPath: home).appendingPathComponent("store-state").path
+            CLIHandler.run(args: Array(CommandLine.arguments.dropFirst(3)), home: home)
+            return
+        }
         if CommandLine.arguments.count > 2, CommandLine.arguments[1] == "--postgres-cli-worker" {
             Log.logURL = FileManager.default.temporaryDirectory.appendingPathComponent("mbpg-cli-test-\(UUID().uuidString).log")
             CLIHandler.run(args: Array(CommandLine.arguments.dropFirst(2)))
@@ -75,6 +82,7 @@ struct TestRunner {
             ("Automatic.partialSelection", automatic.test_partialSelectionNeverBroadensItsParent),
             ("Worktrees.scannerExclusion", worktrees.test_backupSkipsLinkedWorktreesEvenWithOldConfig),
             ("Worktrees.safeCleanup", worktrees.test_cleanupOnlyRemovesMissingLinkedCopiesAndRecordsIt),
+            ("Worktrees.cleanupFailureKeepsBackingUp", worktrees.test_cleanupFailureDoesNotBlockSubsequentBackups),
             ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),
             ("Applications.discoveryDedupAndSourceSafety", appBundles.test_newAppsAndDedupNeverChangeSources),
             ("Applications.nonPortableAndLinks", appBundles.test_nonPortableAppsAreExplicitAndLinksAreNotFollowed),
