@@ -33,6 +33,7 @@ enum FileScanner {
         let keySet = Set(keys)
 
         for (index, source) in sources.enumerated() {
+            if WorktreePolicy.isTemporarySource(source.path, home: basePaths[index]) { continue }
             // Always use HOME as base — ensures snapshot preserves full relative paths
             // e.g. ~/GitHub/MyRepo/file.swift → "GitHub/MyRepo/file.swift" (not "file.swift")
             let basePath = basePaths[index].hasSuffix("/") ? basePaths[index] : basePaths[index] + "/"
@@ -121,6 +122,10 @@ enum FileScanner {
                     continue
                 }
                 let isDirectory = values.isDirectory == true
+                if isDirectory && WorktreePolicy.gitDirectory(of: url) != nil {
+                    enumerator.skipDescendants()
+                    continue
+                }
 
                 // `skipDescendants()` must only ever be called for a directory. Calling it
                 // after a FILE skips the next subdirectory the enumerator was about to

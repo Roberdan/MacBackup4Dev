@@ -621,13 +621,28 @@ postgres = ["my_app_db"]
 postgres_cluster_incremental = false
 
 [coverage]
-ignore = ["~/Scratch"]          # never report this folder as "not backed up"
+auto_include = true             # discover and include safe new items before each backup
+ignore = ["~/Scratch"]          # never auto-add or suggest this folder
 
 [topics]
 "My project" = ["~/GitHub/my-project", "~/.config/my-project"]
 ```
 
-- **Coverage audit**: active folders and databases outside the backup are shown in the menu.
+- **Automatic coverage**: before both manual and scheduled backups, new safe tool settings,
+  active folders and projects are included and saved in the configuration without a prompt.
+  New project SQLite data gets a consistent copy in that same run. Portable applications
+  are already discovered on every backup. PostgreSQL and sensitive application data remain
+  explicit choices; credentials, private agent data, cloud folders and temporary worktrees
+  are never newly selected. Ignored paths, exclusions and unchecked picker items win.
+  Set `auto_include = false` to retain a fully manual source list.
+- **Coverage audit**: remaining unprotected items are shown in the menu.
+- **Temporary worktrees**: linked checkouts and `worktrees` / `.worktrees` containers are
+  excluded even with an older config. Old copies below `GitHub` are removed only when their
+  exact live source is absent and their main repository can still be verified, on the same
+  Mac and while holding the destination lock. Each removal is recorded in that snapshot's
+  manifest with its path, size, date and reason. Main repositories, live checkouts and
+  uncertain cases are untouched. `MacBackup4Dev cleanup-worktrees` runs this maintenance now.
+  A cleanup failure is logged and retried on a later backup; it does not stop protection.
 - **Retention**: the 3 newest complete snapshots are never deleted; nothing is pruned while the
   Mac looks new or emptied.
 
@@ -836,8 +851,15 @@ export, missing-only recovery, corruption, full fallback and cancellation.
 Three ways, in the menu (**Ripristina…**) and in the CLI. Each one previews first and can be
 undone file by file (`undo`, or *Annulla l'ultimo ripristino* in the menu).
 
-For an accidentally deleted file, connect the backup disk and wait for the encrypted store
-to open, then choose **Ripristina… → File**. Search by filename or part of its path:
+Connect the backup disk and wait for the encrypted store to open, then choose
+**Ripristina… → File → Sfoglia**. Open a folder, use the time controls to choose its saved
+date, and preview either a selected file or the whole open folder. The folder stays open
+while you move through time, including dates on which it did not yet exist. Layered native
+transitions provide spatial context; Reduce Motion uses a simple fade instead.
+Only complete snapshots appear in this browser.
+
+For an accidentally deleted file whose folder you do not remember, choose **Cerca** and
+search by filename or part of its path:
 the search includes retained older backups, even if the newest one no longer contains it.
 Results are limited to 200 distinct paths; narrow the search if needed.
 

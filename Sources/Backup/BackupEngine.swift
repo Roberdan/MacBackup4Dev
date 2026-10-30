@@ -96,7 +96,11 @@ enum BackupEngine {
         var allPaths: [String] = []
         var missing: [String] = []
         var sourceReasons: [String] = []
-        for path in config.source.allExpandedPaths() {
+        for path in config.source.paths.map({ ConfigDiscovery.expand($0, home: home) }) {
+            if WorktreePolicy.isTemporarySource(path, home: home) {
+                Log.info("Skipping temporary linked worktree source: \(path)")
+                continue
+            }
             let contracted = ConfigDiscovery.contract(path)
             if ConfigDiscovery.isForbidden(contracted, allowCloudStorage: config.protection.includeCloudStorage) {
                 Log.error("BLOCKED forbidden path: \(path)")
@@ -151,6 +155,11 @@ enum BackupEngine {
         let lockPath = destURL.appendingPathComponent("rustymacbackup.lock").path
         try acquireLock(at: lockPath)
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
+        do {
+            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home)
+        } catch {
+            Log.warn("Worktree cleanup deferred; backup will continue: \(error.localizedDescription)")
+        }
 
         let onBattery = IOPriority.isOnBattery()
         let previousIOPolicy = try IOPriority.beginBackup(onBattery: onBattery)

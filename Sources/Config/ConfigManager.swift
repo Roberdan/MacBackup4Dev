@@ -88,6 +88,7 @@ struct Config {
         out.append("postgres_cluster_incremental = \(databases.postgresClusterIncremental)")
         out.append("")
         out.append("[coverage]")
+        out.append("auto_include = \(coverage.autoInclude)")
         out.append("ignore = [")
         for path in coverage.ignore { out.append("    \"\(Self.escape(path))\",") }
         out.append("]")
@@ -225,6 +226,7 @@ struct Config {
         case "protection.include_rights_managed_files": config.protection.includeRightsManagedFiles = boolValue
         case "protection.include_cloud_storage": config.protection.includeCloudStorage = boolValue
         case "applications.capture": config.applications.capture = boolValue
+        case "coverage.auto_include": config.coverage.autoInclude = boolValue
         case "databases.postgres_cluster_incremental": config.databases.postgresClusterIncremental = boolValue
         default: break
         }
@@ -320,6 +322,7 @@ struct EncryptionConfig: Equatable {
 
 /// Folders the coverage audit must not report (the user said "non mi interessa").
 struct CoverageConfig: Equatable {
+    var autoInclude = true
     var ignore: [String] = []
     /// Apps of the old Mac the user does not want back: never listed as missing.
     var ignoreApps: [String] = []
@@ -356,6 +359,8 @@ struct ProtectionConfig {
 /// Patterns excluded from every backup by default. Also used by discovery when sizing a
 /// candidate directory, so a folder that is only large because of its cache still counts
 /// as configuration.
+let sqliteFileExcludePatterns = ["*.sqlite", "*.sqlite3", "*.db", "*.db-wal", "*.db-shm"]
+
 let baseExcludePatterns: [String] = [
     // macOS system junk (CCC-recommended)
     ".DS_Store", ".Trash", ".Trashes", ".Spotlight-V100",
@@ -391,8 +396,7 @@ let baseExcludePatterns: [String] = [
     "backups", "worktrees", "blobs", "models", "registry", "downloads",
     "language_servers", "shell-snapshots", "crashpad", "tmp", "temp",
     "*-cache", "*-caches", "*-profile", "*-profiles", "*-backups", "*.old", "*.bak",
-    "*.sqlite", "*.sqlite3", "*.db", "*.db-wal", "*.db-shm",
-]
+] + sqliteFileExcludePatterns
 
 /// The full default exclusion set: the patterns above plus the hidden paths discovery
 /// refuses to treat as configuration. The second group matters because a folder can be

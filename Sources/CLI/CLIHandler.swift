@@ -7,7 +7,8 @@ enum CLIHandler {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     }
 
-    static func run(args: [String], config: Config? = nil) {
+    static func run(args: [String], config: Config? = nil,
+                    home: String = FileManager.default.homeDirectoryForCurrentUser.path) {
         _ = config
         var configPath: String?
         var commandArgs = args
@@ -40,6 +41,10 @@ enum CLIHandler {
             case "errors": runErrors(subArgs: subArgs)
             case "snapshots": try runSnapshots(configPath: configPath)
             case "coverage": try runCoverage(subArgs: subArgs, configPath: configPath)
+            case "cleanup-worktrees":
+                let cfg = try loadConfig(configPath: configPath)
+                let result = try WorktreePolicy.cleanup(at: URL(fileURLWithPath: cfg.destination.path), home: home)
+                print("Worktree obsoleti rimossi: \(result.removed.count) · spazio liberato: \(BackupEngine.formatBytes(result.freedBytes))")
             case "versions": try runVersions(subArgs: subArgs, configPath: configPath)
             case "find": try runFind(subArgs: subArgs, configPath: configPath)
             case "topics": try runTopics(configPath: configPath)
@@ -108,6 +113,7 @@ enum CLIHandler {
         Ripristino e sicurezza (3.0):
           snapshots                     Elenco snapshot: completo / incompleto / non verificato
           coverage [--days N]           Cartelle attive e database che il backup non salva
+          cleanup-worktrees             Rimuove le copie di worktree non più presenti sul Mac
           versions <file>               Tutte le versioni di un file negli snapshot
           find <testo> [--snapshot S]   Cerca file in uno snapshot
           topics                        Argomenti ripristinabili (Warp, Terminale, Claude…)
@@ -234,7 +240,7 @@ enum CLIHandler {
             Log.info(PowerGate.skipMessage)
             return
         }
-        let cfg = try loadConfig(configPath: configPath)
+        let configURL = configPath.map { URL(fileURLWithPath: expandPath($0)) } ?? Config.defaultPath
         // "Interrompi" in the menu (or `stop`) sends SIGTERM: stop like the in-app backup does,
         // closing the snapshot as incomplete, instead of dying mid-file (seen 2026-10-07: the
         // menu waited forever for a scheduled backup it could not reach).
@@ -245,6 +251,7 @@ enum CLIHandler {
         let box = ErrorBox()
         Task(priority: BackupEngine.WORK_PRIORITY) {
             do {
+                let cfg = try AutomaticCoverage.prepare(from: configURL)
                 if let r = try await BackupEngine.run(config: cfg) {
                     if r.manifest.complete {
                         print(green("Backup completo: \(r.snapshot.lastPathComponent) · \(r.manifest.filesProcessed) file"))

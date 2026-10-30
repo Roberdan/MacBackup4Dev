@@ -78,7 +78,7 @@ enum DatabaseDumps {
     }
 
     static func captureSQLite(path: String, home: String, root: URL, snapshot: URL) -> DatabaseRecord {
-        let expanded = ConfigDiscovery.expand(path)
+        let expanded = ConfigDiscovery.expand(path, home: home)
         var record = DatabaseRecord(kind: "sqlite", source: path, file: nil, bytes: 0)
         guard FileManager.default.fileExists(atPath: expanded) else {
             // A database that does not exist yet is not a failure (the app creates it later).

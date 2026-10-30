@@ -1,5 +1,32 @@
 # Changelog
 
+## [4.3.0] - 2026-10-30
+
+### Added
+- Manual and scheduled backups automatically include newly discovered safe tool settings,
+  active folders and projects. Consistent SQLite copies cover newly included project data
+  from the first run; PostgreSQL remains explicitly configured.
+- The File restore tab opens a native folder browser with breadcrumbs and a chronological
+  snapshot selector. Move through time without losing the folder, preview and restore one
+  file or the whole folder, then undo. Layered time transitions respect Reduce Motion.
+- Obsolete linked-worktree copies are removed when their exact source is gone and the main
+  repository is still present. Maintenance holds the backup lock and records each removed
+  path, allocated size, time and reason. `cleanup-worktrees` runs the same cleanup immediately.
+
+### Changed
+- Automatic inclusion preserves explicit exclusions, ignored folders, partial selections and
+  picker opt-outs. Credentials, private agent data, cloud folders and temporary worktrees
+  are not newly selected. `[coverage] auto_include = false` disables automatic additions.
+- Linked worktrees and conventional worktree containers stay out of future file snapshots,
+  including with older configuration files. Main repository history remains protected.
+- File browsing uses complete snapshots only; the existing search and topic recovery stay
+  available. Restored Desktop copies remain the default, with a preview before any write.
+
+### Fixed
+- Project database discovery and SQLite capture resolve sandbox and home paths consistently.
+- A configuration edited during automatic discovery is not overwritten by an older copy.
+- Failed worktree cleanup is logged and retried without preventing subsequent backups.
+
 ## [4.2.0] - 2026-10-28
 
 ### Added

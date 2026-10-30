@@ -739,9 +739,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             pending = try Config.forBackup(selectedPaths: selectedPaths,
                                            includeRightsManagedFiles: includeRightsManagedFiles)
-            if selectedPaths != nil || includeRightsManagedFiles != nil {
-                try pending.save(to: Config.defaultPath)
-            }
         } catch {
             Log.error("Cannot save backup preferences: \(error.localizedDescription)")
             let alert = NSAlert()
@@ -756,12 +753,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.appState = .running
         Log.info("Backup started: \(pending.source.paths.count) paths -> \(pending.destination.path)")
 
-        // Captured by value: a `var` crossing into a detached task is an error under
-        // Swift 6 concurrency checking.
-        let config = pending
-
         Task.detached(priority: BackupEngine.WORK_PRIORITY) {
             do {
+                let config = try AutomaticCoverage.prepare(selectedPaths: selectedPaths,
+                    includeRightsManagedFiles: includeRightsManagedFiles)
+                await MainActor.run {
+                    self.config = config
+                    self.uiState.config = config
+                }
                 let result = try await BackupEngine.run(config: config)
                 await MainActor.run {
                     if let m = result?.manifest {

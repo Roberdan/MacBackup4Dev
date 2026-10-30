@@ -20,8 +20,8 @@ bundle identifier (update continuity, notification permission), everything on th
 ./build-pkg.sh          # creates .pkg installer
 ```
 
-App and test compilation use `-warnings-as-errors`, including on the macOS 14 CI
-toolchain. Background UI callbacks capture result values explicitly and use a new
+App and test compilation use `-warnings-as-errors`, including on the hosted macOS 15 CI
+toolchain, while targeting macOS 14. Background UI callbacks capture result values explicitly and use a new
 weak capture at each nested asynchronous boundary.
 
 **Release hygiene — one installed copy, always.** After any release, install or rollback test,
@@ -42,14 +42,14 @@ Sources/
   Backup/       BackupEngine(+Helpers), EncryptedStore, HomeRewrite, HardLinker, FileScanner, RestoreEngine,
                 RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
-                AppInventory, AppBundleCopy, AppCapture, AppInstallers, AppRestore,
+                AppInventory, AppBundleCopy, AppCapture, AppInstallers, AppRestore, WorktreePolicy, SnapshotBrowsing,
                 SelectiveRestore (+Topics, FileVersions), NewMacRestore, NewMacStages, ToolInventory, ProtectionSummary, Shell
-  Config/       ConfigManager, ConfigDiscovery, DevEnvironment (first-launch scan), ScheduleManager,
+  Config/       ConfigManager, ConfigDiscovery, AutomaticCoverage, DevEnvironment (first-launch scan), ScheduleManager,
                 ScheduleRegistrationRefresher
   CLI/          CLIHandler, CLIRestore (3.0 commands), PruneOptions
   Diagnostics/  Log, ErrorReporter, DiskDiagnostics, FDACheck
   UI/           PopoverView, OnboardingView, EncryptionSetupView, LoginItemView, RestoreCenter, TreeView, AppUIState, ProgressBarView,
-                SnapshotPickerView, DesignTokens, TreeWindowController, PopoverViewController
+                SnapshotPickerView, SnapshotBrowserView, DesignTokens, TreeWindowController, PopoverViewController
 ```
 
 ## ⚠️ CRITICAL KNOWN TRAP — COPYFILE_CLONE DESTROYS SOURCE FILES
@@ -166,9 +166,25 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   notification registered `.deliverImmediately` (never NSRunningApplication.terminate:
   silently blocked; plain observers: suspended for a menu-bar app).
 - **Backup/retry preferences (4.1.18):** `Config.forBackup` reads current saved choices.
-  A normal start never passes cached paths or rewrites the source list; only explicit
-  picker confirmation overrides it. Failed copies remain errors but do not count toward
+  A normal start never passes cached paths or replaces the source list. In 4.3,
+  `AutomaticCoverage.prepare` reloads the file and only appends safe newly discovered
+  items before manual and scheduled backups; explicit picker confirmation replaces the
+  list and remembers unchecked items in `coverage.ignore`. Exclusions and partial
+  selections win. Credentials, private agent data, cloud and worktrees are not auto-added;
+  PostgreSQL and sensitive app data remain explicit. `coverage.auto_include = false`
+  disables additions. A concurrent config edit aborts preparation instead of being lost.
+  Failed copies remain errors but do not count toward
   the post-save source-disappearance emergency guard.
+- **Temporary worktrees (4.3):** file scanning never copies linked git worktrees or
+  `worktrees` / `.worktrees` containers, including with old configs. Cleanup only unlinks
+  historical linked-checkout copies whose exact live path is ENOENT, whose main `.git`
+  directory is present, and whose snapshot belongs to this Mac. Hold `DestinationLock`,
+  preserve live/uncertain copies, record each removal in the manifest and never chmod
+  regular files shared with other snapshots. Repository history is untouched.
+- **Temporal restore (4.3):** the File tab defaults to folder/date browsing. Only complete
+  snapshots are browsable; preserve the current folder when changing date. Preview then
+  explicitly confirm writes, defaulting to a Desktop copy. Native temporal transitions
+  honor Reduce Motion. Search and topic recovery remain available.
 - **Encrypted store (4.1):** destination lives inside `/Volumes/<encryption.volume>`, an
   encrypted sparsebundle on the disk (`Config.diskURL` = the physical disk: name it, measure
   it, eject it — closing the store first). Password chosen by the user, in the login Keychain,

@@ -21,14 +21,18 @@ enum ConfigDiscovery {
     /// Full discovery: the sources to back up, plus the data directories found inside
     /// them that must be excluded. Measuring costs a tree walk, so it is done only when
     /// a configuration is being generated, not when the list is merely displayed.
-    static func discoverAll(measuringData: Bool = true) -> (configs: [DiscoveredConfig], dataExclusions: [String]) {
+    static func discoverAll(measuringData: Bool = true,
+                            home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> (configs: [DiscoveredConfig], dataExclusions: [String]) {
         var found: [DiscoveredConfig] = []
         let fm = FileManager.default
-        let all = builtinCandidates + loadCustomCandidates()
+        let all = builtinCandidates + loadCustomCandidates(
+            from: URL(fileURLWithPath: home + "/.config/macbackup4dev/discovery-custom.toml"))
 
         for candidate in all {
             // Filter out forbidden paths even if they exist
-            let existing = candidate.paths.filter { fm.fileExists(atPath: expand($0)) && !isForbidden($0) }
+            let existing = candidate.paths.filter {
+                fm.fileExists(atPath: expand($0, home: home)) && !isForbidden($0, home: home)
+            }
             if !existing.isEmpty {
                 found.append(DiscoveredConfig(
                     category: candidate.category,
@@ -40,12 +44,12 @@ enum ConfigDiscovery {
         }
 
         // Dynamic: every hidden entry in the home directory that looks like configuration
-        let hidden = discoverHiddenHome(measuringData: measuringData)
+        let hidden = discoverHiddenHome(measuringData: measuringData, home: home)
         found.append(contentsOf: hidden.configs)
 
         // Dynamic: discover individual Git repos in ~/GitHub, ~/Developer, ~/Projects
         for repoDir in ["~/GitHub", "~/Developer", "~/Projects"] {
-            let expanded = expand(repoDir)
+            let expanded = expand(repoDir, home: home)
             guard fm.fileExists(atPath: expanded),
                   let contents = try? fm.contentsOfDirectory(atPath: expanded) else { continue }
             for name in contents.sorted() {
@@ -54,7 +58,7 @@ enum ConfigDiscovery {
                 guard fm.fileExists(atPath: repoPath, isDirectory: &isDir), isDir.boolValue else { continue }
                 // Skip hidden dirs and non-repo junk
                 if name.hasPrefix(".") || name == "node_modules" { continue }
-                let contracted = contract(repoPath)
+                let contracted = contract(repoPath, home: home)
                 found.append(DiscoveredConfig(
                     category: "Repos",
                     label: name,
@@ -70,11 +74,20 @@ enum ConfigDiscovery {
     // MARK: - Path helpers
 
     static func expand(_ path: String) -> String {
+        expand(path, home: home)
+    }
+
+    static func expand(_ path: String, home: String) -> String {
+        if path == "~" { return home }
         if path.hasPrefix("~/") { return home + String(path.dropFirst(1)) }
         return path
     }
 
     static func contract(_ path: String) -> String {
+        contract(path, home: home)
+    }
+
+    static func contract(_ path: String, home: String) -> String {
         if path.hasPrefix(home + "/") { return "~" + String(path.dropFirst(home.count)) }
         if path == home { return "~" }
         return path
@@ -87,8 +100,8 @@ enum ConfigDiscovery {
     }
 
     /// Load custom discovery entries from discovery-custom.toml
-    private static func loadCustomCandidates() -> [Candidate] {
-        guard let content = try? String(contentsOf: customDiscoveryPath, encoding: .utf8) else {
+    private static func loadCustomCandidates(from url: URL) -> [Candidate] {
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
             return []
         }
         var candidates: [Candidate] = []
@@ -365,7 +378,8 @@ enum ConfigDiscovery {
     /// what survives is kept as a whole directory — so tools installed later are
     /// covered without touching this list — and any oversized data folder found
     /// inside it is reported as an exclusion instead of being listed around.
-    static func discoverHiddenHome(measuringData: Bool = true) -> HiddenScan {
+    static func discoverHiddenHome(measuringData: Bool = true,
+                                   home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> HiddenScan {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(atPath: home) else { return HiddenScan() }
 
@@ -382,7 +396,7 @@ enum ConfigDiscovery {
             if name == "." || name == ".." { continue }
             if curatedWholeDirs.contains(name) { continue }
             if isDeniedHidden(relative: name) { continue }
-            if isForbidden("~/" + name) { continue }
+            if isForbidden("~/" + name, home: home) { continue }
 
             let full = home + "/" + name
             var isDir: ObjCBool = false
@@ -397,7 +411,7 @@ enum ConfigDiscovery {
             }
 
             if measuringData {
-                exclusions.append(contentsOf: dataSubdirectories(relative: name, depth: 1))
+                exclusions.append(contentsOf: dataSubdirectories(relative: name, depth: 1, home: home))
             }
             dirs.append(DiscoveredConfig(category: "App Configs", label: name,
                                          paths: ["~/" + name], sensitive: sensitive))
@@ -409,7 +423,7 @@ enum ConfigDiscovery {
     /// Home-relative paths of the directories inside `relative` that are too big to be
     /// configuration. Descends only into oversized branches, so the cost is bounded by
     /// the amount of data actually present, not by the number of files.
-    private static func dataSubdirectories(relative: String, depth: Int) -> [String] {
+    private static func dataSubdirectories(relative: String, depth: Int, home: String) -> [String] {
         let full = home + "/" + relative
         if approximateSize(atPath: full, limit: maxConfigDirBytes) <= maxConfigDirBytes {
             return []
@@ -425,7 +439,7 @@ enum ConfigDiscovery {
             let childRelative = relative + "/" + child
             if isDeniedHidden(relative: childRelative) { continue }
             if defaultFilter.shouldSkipDirectory(relativePath: child) { continue }
-            if isForbidden("~/" + childRelative) { continue }
+            if isForbidden("~/" + childRelative, home: home) { continue }
 
             let childFull = home + "/" + childRelative
             var isDir: ObjCBool = false
@@ -435,7 +449,7 @@ enum ConfigDiscovery {
             let size = approximateSize(atPath: childFull, limit: maxConfigDirBytes)
             guard size > maxConfigDirBytes else { continue }
 
-            let deeper = dataSubdirectories(relative: childRelative, depth: depth + 1)
+            let deeper = dataSubdirectories(relative: childRelative, depth: depth + 1, home: home)
             out.append(contentsOf: deeper.isEmpty ? [childRelative] : deeper)
         }
         return out
@@ -483,14 +497,15 @@ enum ConfigDiscovery {
     }
 
     /// Data folders to exclude inside the chosen hidden home entries ("~/.claude" …).
-    static func dataExclusions(forSources paths: [String]) -> [String] {
+    static func dataExclusions(forSources paths: [String],
+                               home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [String] {
         var out: [String] = []
         for path in paths where path.hasPrefix("~/.") {
             let relative = String(path.dropFirst(2))
             guard !relative.contains("/") else { continue }
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: home + "/" + relative, isDirectory: &isDir), isDir.boolValue else { continue }
-            out.append(contentsOf: dataSubdirectories(relative: relative, depth: 1))
+            out.append(contentsOf: dataSubdirectories(relative: relative, depth: 1, home: home))
         }
         return out
     }
@@ -624,17 +639,25 @@ enum ConfigDiscovery {
     // toggle next to the safe rights-management one would invite turning this on by mistake).
     static let cloudStoragePrefixes: [String] = ["~/Library/CloudStorage"]
 
+    static func isCloudFolderName(_ name: String) -> Bool {
+        ["OneDrive", "Dropbox", "Google Drive", "Box", "iCloud"].contains { name.hasPrefix($0) }
+    }
+
     static func isForbidden(_ path: String, allowCloudStorage: Bool = false) -> Bool {
-        let expanded = expand(path)
+        isForbidden(path, allowCloudStorage: allowCloudStorage, home: home)
+    }
+
+    static func isForbidden(_ path: String, allowCloudStorage: Bool = false, home: String) -> Bool {
+        let expanded = expand(path, home: home)
         for prefix in forbiddenPrefixes {
-            let expandedPrefix = expand(prefix)
+            let expandedPrefix = expand(prefix, home: home)
             if expanded == expandedPrefix || expanded.hasPrefix(expandedPrefix + "/") {
                 return true
             }
         }
         if !allowCloudStorage {
             for prefix in cloudStoragePrefixes {
-                let expandedPrefix = expand(prefix)
+                let expandedPrefix = expand(prefix, home: home)
                 if expanded == expandedPrefix || expanded.hasPrefix(expandedPrefix + "/") {
                     return true
                 }
