@@ -39,11 +39,11 @@ enum CoverageAuditor {
     static let projectContainers: [String] = ["GitHub", "Developer", "Projects", "Code", "src"]
 
     static func audit(config: Config, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-                      days: Int = 30, now: Date = Date()) -> [CoverageGap] {
+                      days: Int = 30, now: Date = Date(), measuringSizes: Bool = true) -> [CoverageGap] {
         let fm = FileManager.default
         let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
-        let sources = config.source.paths.map { ConfigDiscovery.expand($0) }
-        let ignored = config.coverage.ignore.map { ConfigDiscovery.expand($0) }
+        let sources = config.source.paths.map { ConfigDiscovery.expand($0, home: home) }
+        let ignored = config.coverage.ignore.map { ConfigDiscovery.expand($0, home: home) }
         let filter = ExcludeFilter(patterns: config.exclude.patterns)
 
         func covered(_ path: String) -> Bool {
@@ -62,7 +62,7 @@ enum CoverageAuditor {
         var candidates: [String] = []
         let top = (try? fm.contentsOfDirectory(atPath: home)) ?? []
         for name in top.sorted() {
-            guard !protectedTopLevel.contains(name), !isNoise(name) else { continue }
+            guard !protectedTopLevel.contains(name), !isNoise(name), !ConfigDiscovery.isCloudFolderName(name) else { continue }
             let full = home + "/" + name
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: full, isDirectory: &isDir), isDir.boolValue else { continue }
@@ -82,7 +82,7 @@ enum CoverageAuditor {
         for path in candidates {
             let rel = relative(path)
             guard !covered(path), !containsSource(path), !isIgnored(path) else { continue }
-            guard !ConfigDiscovery.isForbidden(path),
+            guard !ConfigDiscovery.isForbidden(path, home: home),
                   !ConfigDiscovery.isDeniedHidden(relative: rel),
                   !filter.isExcluded(relativePath: rel) else { continue }
             // A linked git worktree (".git" is a file) is temporary and its commits live in
@@ -91,9 +91,10 @@ enum CoverageAuditor {
             var gitIsDir: ObjCBool = false
             if fm.fileExists(atPath: path + "/.git", isDirectory: &gitIsDir), !gitIsDir.boolValue { continue }
             guard let newest = newestModification(in: path, filter: filter, home: home, after: cutoff) else { continue }
-            gaps.append(CoverageGap(kind: .folder, path: ConfigDiscovery.contract(path),
+            gaps.append(CoverageGap(kind: .folder, path: ConfigDiscovery.contract(path, home: home),
                                     lastModified: ISO8601DateFormatter().string(from: newest),
-                                    approximateBytes: ConfigDiscovery.approximateSize(atPath: path, limit: 50 * 1_073_741_824)))
+                                    approximateBytes: measuringSizes
+                                        ? ConfigDiscovery.approximateSize(atPath: path, limit: 50 * 1_073_741_824) : 0))
         }
         gaps.append(contentsOf: uncopiedDatabases(config: config, sources: sources, home: home, cutoff: cutoff))
         return gaps
@@ -104,7 +105,9 @@ enum CoverageAuditor {
     /// that live next to project/runtime data and are smaller than 2 GB are reported.
     static func uncopiedDatabases(config: Config, sources: [String], home: String, cutoff: Date) -> [CoverageGap] {
         let fm = FileManager.default
-        let listed = Set(config.databases.sqlite.map { ConfigDiscovery.expand($0) })
+        let resolvedHome = FileScanner.realPath(home)
+        let listed = Set(config.databases.sqlite.map { FileScanner.realPath(ConfigDiscovery.expand($0, home: home)) })
+        let filter = ExcludeFilter(patterns: config.exclude.patterns.filter { !sqliteFileExcludePatterns.contains($0) })
         let extensions: Set<String> = ["db", "sqlite", "sqlite3"]
         let noisy: [String] = ["cache", "caches", "node_modules", ".git", "logs", "tmp", "telemetry",
                                "embedding", "session", "history-cache", "webcache", "indexeddb"]
@@ -119,6 +122,12 @@ enum CoverageAuditor {
             for case let url as URL in walker {
                 visited += 1
                 if visited > 60_000 { break }
+                let relative = url.path.hasPrefix(resolvedHome + "/")
+                    ? String(url.path.dropFirst(resolvedHome.count + 1)) : url.path
+                if filter.isExcluded(relativePath: relative) {
+                    if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { walker.skipDescendants() }
+                    continue
+                }
                 let lower = url.path.lowercased()
                 if noisy.contains(where: { lower.contains("/\($0)") }) {
                     if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { walker.skipDescendants() }
@@ -127,14 +136,15 @@ enum CoverageAuditor {
                 guard extensions.contains(url.pathExtension.lowercased()), !listed.contains(url.path) else { continue }
                 // Only project data: a database inside a tool's own hidden folder (~/.codex,
                 // ~/.local/share/atuin, a browser profile) is that tool's state, not yours.
-                let rel = url.path.hasPrefix(home + "/") ? String(url.path.dropFirst(home.count + 1)) : url.path
+                let rel = url.path.hasPrefix(resolvedHome + "/")
+                    ? String(url.path.dropFirst(resolvedHome.count + 1)) : url.path
                 let comps = rel.split(separator: "/").map(String.init)
                 if comps.dropLast().contains(where: { $0.hasPrefix(".") || isNoise($0) }) { continue }
                 let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isSymbolicLinkKey])
                 guard values?.isSymbolicLink != true,
                       let modified = values?.contentModificationDate, modified > cutoff,
                       let size = values?.fileSize, size > 0, size < 2_147_483_648 else { continue }
-                gaps.append(CoverageGap(kind: .database, path: ConfigDiscovery.contract(url.path),
+                gaps.append(CoverageGap(kind: .database, path: ConfigDiscovery.contract(url.path, home: resolvedHome),
                                         lastModified: ISO8601DateFormatter().string(from: modified),
                                         approximateBytes: Int64(size)))
             }

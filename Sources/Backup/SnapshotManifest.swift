@@ -31,6 +31,8 @@ struct SnapshotManifest: Codable, Equatable {
     var complete: Bool
     var incompleteReasons: [String]
     var applications: AppCapture.Summary? = nil
+    /// Intentional maintenance of disposable checkouts; original copy counts stay historical.
+    var removedTemporaryWorktrees: [WorktreePolicy.Removal]? = nil
 
     static let directoryName = "_rustymacbackup"
     static let fileName = "manifest.json"

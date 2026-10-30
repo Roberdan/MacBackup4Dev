@@ -18,6 +18,8 @@ struct ExcludeFilter {
         "actions-runners/*/_work/_tool", "actions-runners/*/_work/_actions",
         // Re-clonable/re-downloadable working copies (e.g. ~/.gbrain/checkouts, 11 GB+).
         "checkouts",
+        "worktrees", ".worktrees",
+        ".config/secrets", ".roberdan-os/private",
         // "cache" (no dot) is a distinct literal from ".cache" above -- e.g. a plugin
         // manager's <tool>/plugins/cache/ (found 2026-09-27: unlabeled .docx/.pptx/.xlsx
         // template assets in there tripped an org's endpoint-DLP block during backup).

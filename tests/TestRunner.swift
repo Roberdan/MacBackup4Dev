@@ -35,6 +35,8 @@ struct TestRunner {
         let exclude = ExcludeFilterTests()
         let retention = RetentionTests()
         let config = ConfigParserTests()
+        let automatic = AutomaticCoverageTests()
+        let worktrees = WorktreePolicyTests()
         let backup = BackupEngineTests()
         let hardLinker = HardLinkerTests()
         let protection = RightsManagementTests()
@@ -46,6 +48,7 @@ struct TestRunner {
         let restore = RestoreTests()
         let protectionSummary = ProtectionSummaryTests()
         let guards = RestoreGuardTests()
+        let browser = SnapshotBrowserTests()
         let review = ReviewFixTests()
         let review2 = ReviewRound2Tests()
         let realRun = RealRunTests()
@@ -66,6 +69,12 @@ struct TestRunner {
         let postgres = PostgresBackupTests()
 
         var suites: [(String, TestClosure)] = [
+            ("Automatic.newSourcesCopied", automatic.test_newFoldersAndToolsEnterTheNextBackup),
+            ("Automatic.noUnsafeSources", automatic.test_secretsExclusionsAndLinksAreNeverAutomatic),
+            ("Automatic.pickerOptOut", automatic.test_pickerOptOutAndAutoIncludeSwitchPersist),
+            ("Automatic.partialSelection", automatic.test_partialSelectionNeverBroadensItsParent),
+            ("Worktrees.scannerExclusion", worktrees.test_backupSkipsLinkedWorktreesEvenWithOldConfig),
+            ("Worktrees.safeCleanup", worktrees.test_cleanupOnlyRemovesMissingLinkedCopiesAndRecordsIt),
             ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),
             ("Applications.discoveryDedupAndSourceSafety", appBundles.test_newAppsAndDedupNeverChangeSources),
             ("Applications.nonPortableAndLinks", appBundles.test_nonPortableAppsAreExplicitAndLinksAreNotFollowed),
@@ -131,6 +140,10 @@ struct TestRunner {
             ("Restore.newMacRepository", restore.test_newMacRebuildsRepository),
             ("Protection.levels", protectionSummary.test_levels),
             ("Restore.symlinksAndDotDot", guards.test_symlinksAndDotDotAreLeftAlone),
+            ("Browser.timeTravelRestoresDeleted", browser.test_timeTravelKeepsFolderAndRestoresDeletedFile),
+            ("Browser.folderRestoreUndo", browser.test_folderRestoreIsRecursiveAndUndoable),
+            ("Browser.linksAndTraversal", browser.test_linksAndTraversalNeverLeaveTheSnapshot),
+            ("Browser.onlyCompleteSnapshots", browser.test_onlyIncompleteHistoryOffersNothing),
             ("Review.H1.undoKeepsChanged", review.test_undoKeepsFilesChangedAfterRestore),
             ("Review.H2.unreadableRepo", review.test_unreadableRepositoryMakesSnapshotIncomplete),
             ("Review.H3.deletedSources", review.test_deletedSourcesDoNotMakeSnapshotIncomplete),

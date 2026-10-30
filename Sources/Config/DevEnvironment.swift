@@ -63,9 +63,10 @@ enum DevEnvironment {
 
     /// Fast: lists what is there without measuring folder sizes (seconds, not minutes).
     /// `config(from:)` measures only the folders the user kept.
-    static func scan(home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> DevScan {
+    static func scan(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                     includingInventory: Bool = true) -> DevScan {
         var scan = DevScan()
-        let configs = ConfigDiscovery.discoverAll(measuringData: false).configs
+        let configs = ConfigDiscovery.discoverAll(measuringData: false, home: home).configs
 
         var byGroup: [String: [DevItem]] = [:]
         var covered = Set<String>()
@@ -106,7 +107,7 @@ enum DevEnvironment {
                 detail: "\(count) repository, con le modifiche non ancora salvate su GitHub", sensitive: false))
         }
 
-        scan.postgres = postgresDatabases()
+        scan.postgres = includingInventory ? postgresDatabases() : []
         for db in scan.postgres {
             let looksTemporary = ["test", "tmp", "temp", "scratch"].contains { db.lowercased().contains($0) }
             byGroup["database", default: []].append(DevItem(
@@ -120,7 +121,7 @@ enum DevEnvironment {
             return DevGroup(id: g.id, title: g.title, symbol: g.symbol,
                             items: items.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
         }
-        scan.toolchains = toolchains(home: home)
+        scan.toolchains = includingInventory ? toolchains(home: home) : []
         return scan
     }
 
@@ -206,10 +207,10 @@ enum DevEnvironment {
             // ~/Library/CloudStorage: walking them can download files. Never.
             let full = home + "/" + name
             if (try? fm.destinationOfSymbolicLink(atPath: full)) != nil { continue }
-            if ["OneDrive", "Dropbox", "Google Drive", "Box", "iCloud"].contains(where: { name.hasPrefix($0) }) { continue }
+            if ConfigDiscovery.isCloudFolderName(name) { continue }
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: home + "/" + name, isDirectory: &isDir), isDir.boolValue,
-                  !ConfigDiscovery.isForbidden("~/" + name) else { continue }
+                  !ConfigDiscovery.isForbidden("~/" + name, home: home) else { continue }
             let known = projectRootNames.contains(name)
             if known || !gitRepositories(in: home + "/" + name, depth: 2, stopAtFirst: true).isEmpty {
                 // A known root with nothing inside is still worth backing up only if not empty.
