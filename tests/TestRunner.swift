@@ -84,6 +84,7 @@ struct TestRunner {
             ("Worktrees.safeCleanup", worktrees.test_cleanupOnlyRemovesMissingLinkedCopiesAndRecordsIt),
             ("Worktrees.cleanupFailureKeepsBackingUp", worktrees.test_cleanupFailureDoesNotBlockSubsequentBackups),
             ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),
+            ("Applications.symlinkPermissionsUmask", appBundles.test_symlinkPermissionsDoNotDependOnUmask),
             ("Applications.discoveryDedupAndSourceSafety", appBundles.test_newAppsAndDedupNeverChangeSources),
             ("Applications.nonPortableAndLinks", appBundles.test_nonPortableAppsAreExplicitAndLinksAreNotFollowed),
             ("Applications.failuresAndCancel", appBundles.test_copyMutationSpaceAndCancellationFailHonestly),
