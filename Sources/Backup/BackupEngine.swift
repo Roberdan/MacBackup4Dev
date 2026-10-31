@@ -16,6 +16,8 @@ struct BackupRunOptions {
     var applicationRoots: [AppInventory.Root]? = nil
     var applicationCopyOptions = AppBundleCopy.Options()
     var applicationInstallers: [String: AppInstallers.Hint]? = nil
+    /// Items `AutomaticCoverage` added to the settings just before this run (`~/` form).
+    var automaticallyIncluded: [String] = []
 }
 
 /// Bounded hand-off between the scanner and the copy workers. Unlike a DispatchSemaphore it
@@ -156,7 +158,7 @@ enum BackupEngine {
         try acquireLock(at: lockPath)
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
         do {
-            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home)
+            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home, cancelled: { token.isCancelled })
         } catch {
             Log.warn("Worktree cleanup deferred; backup will continue: \(error.localizedDescription)")
         }
@@ -211,6 +213,7 @@ enum BackupEngine {
         status.state = "running"
         status.phase = "scanning"
         status.startedAt = ISO8601DateFormatter().string(from: startTime)
+        status.autoIncluded = options.automaticallyIncluded
         status.filesDone = 0
         status.filesTotal = 0
         status.bytesCopied = 0
@@ -460,7 +463,8 @@ enum BackupEngine {
             filesSkipped: Int64(stats.filesSkipped), bytesCopied: stats.bytesCopied,
             errorCount: copyErrors, traversalErrorCount: traversalCount,
             git: gitRecords, databases: dbRecords, shrinkWarning: shrink,
-            complete: complete, incompleteReasons: reasons, applications: applicationReport?.summary)
+            complete: complete, incompleteReasons: reasons, applications: applicationReport?.summary,
+            automaticallyIncluded: options.automaticallyIncluded.isEmpty ? nil : options.automaticallyIncluded)
         try manifest.write(to: inProgressURL)
 
         let finalURL = destURL.appendingPathComponent(timestamp)

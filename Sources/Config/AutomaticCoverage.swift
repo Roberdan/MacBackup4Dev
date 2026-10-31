@@ -1,10 +1,24 @@
 import Foundation
 
 enum AutomaticCoverage {
+    /// What a preparation did to the configuration: `added` lists, in `~/` form, the items
+    /// included by themselves (folders and databases), for the menu and the snapshot.
+    struct Preparation {
+        var config: Config
+        var added: [String]
+    }
+
     /// Reload immediately before discovery: never save the app's launch-time configuration.
     static func prepare(from url: URL = Config.defaultPath, selectedPaths: [String]? = nil,
                         includeRightsManagedFiles: Bool? = nil,
                         home: String = FileManager.default.homeDirectoryForCurrentUser.path) throws -> Config {
+        try prepareReporting(from: url, selectedPaths: selectedPaths,
+                             includeRightsManagedFiles: includeRightsManagedFiles, home: home).config
+    }
+
+    static func prepareReporting(from url: URL = Config.defaultPath, selectedPaths: [String]? = nil,
+                                 includeRightsManagedFiles: Bool? = nil,
+                                 home: String = FileManager.default.homeDirectoryForCurrentUser.path) throws -> Preparation {
         let initialBytes = try Data(contentsOf: url)
         let original = try Config.load(from: url)
         var config = try Config.forBackup(from: url, selectedPaths: selectedPaths,
@@ -16,36 +30,30 @@ enum AutomaticCoverage {
             path == parent || path.hasPrefix(parent + "/")
         }
         var changed = selectedPaths != nil || includeRightsManagedFiles != nil
+        var included: [String] = []
 
         if let selectedPaths {
             let selected = selectedPaths.map(expanded)
             // An unchecked item stays unchecked on future scheduled runs too.
             let declined = original.source.paths + candidates.filter { $0.kind == .folder }.map(\.path)
+            // A folder is never rejected while the user chose something inside it: that is a
+            // partial selection, and rejecting the folder would also block its new projects.
+            func holdsChoice(_ path: String) -> Bool { selected.contains { contains(expanded(path), $0) } }
             config.coverage.ignore.removeAll { ignored in
-                selected.contains { contains($0, expanded(ignored)) }
+                selected.contains { contains($0, expanded(ignored)) } || holdsChoice(ignored)
             }
-            for path in declined where !selected.contains(where: { contains($0, expanded(path)) }) {
+            for path in declined where !selected.contains(where: { contains($0, expanded(path)) }) && !holdsChoice(path) {
                 if !config.coverage.ignore.contains(path) { config.coverage.ignore.append(path) }
             }
         } else if config.coverage.autoInclude {
-            var sources = config.source.paths.map(expanded)
-            var databases = Set(config.databases.sqlite.map(expanded))
-            let ignored = config.coverage.ignore.map(expanded)
-            for candidate in candidates {
-                let path = expanded(candidate.path)
-                guard !ignored.contains(where: { contains($0, path) || contains(path, $0) }) else { continue }
-                switch candidate.kind {
-                case .folder:
-                    // A selected child is not permission to broaden its parent.
-                    guard !sources.contains(where: { contains($0, path) || contains(path, $0) }) else { continue }
-                    config.source.paths.append(candidate.path)
-                    sources.append(path)
-                case .database:
-                    guard databases.insert(path).inserted else { continue }
-                    config.databases.sqlite.append(candidate.path)
+            for addition in plan(config: config, candidates: candidates, home: home) {
+                switch addition.kind {
+                case .folder: config.source.paths.append(addition.path)
+                case .database: config.databases.sqlite.append(addition.path)
                 }
+                included.append(addition.path)
                 changed = true
-                Log.info("Automatically included in backup: \(candidate.path)")
+                Log.info("Automatically included in backup: \(addition.path)")
             }
         }
         if changed {
@@ -59,17 +67,74 @@ enum AutomaticCoverage {
             }
             try config.save(to: url)
         }
-        return config
+        return Preparation(config: config, added: included)
     }
 
-    static func discover(config: Config, home: String) -> [CoverageGap] {
+    /// Which candidates an automatic preparation adds to this configuration. Pure: the menu
+    /// previews it and the next backup applies it, so both always agree.
+    static func plan(config: Config, candidates: [CoverageGap], home: String) -> [CoverageGap] {
+        func expanded(_ path: String) -> String { ConfigDiscovery.expand(path, home: home) }
+        func contains(_ parent: String, _ path: String) -> Bool {
+            path == parent || path.hasPrefix(parent + "/")
+        }
+        var sources = config.source.paths.map(expanded)
+        var databases = Set(config.databases.sqlite.map(expanded))
+        let ignored = config.coverage.ignore.map(expanded)
+        var additions: [CoverageGap] = []
+        for candidate in candidates {
+            let path = expanded(candidate.path)
+            guard !ignored.contains(where: { contains($0, path) || contains(path, $0) }) else { continue }
+            switch candidate.kind {
+            case .folder:
+                // A selected child is not permission to broaden its parent.
+                guard !sources.contains(where: { contains($0, path) || contains(path, $0) }) else { continue }
+                sources.append(path)
+            case .database:
+                guard databases.insert(path).inserted else { continue }
+            }
+            additions.append(candidate)
+        }
+        return additions
+    }
+
+    /// What the next backup would add by itself, from the settings as saved now. Read-only:
+    /// nothing is saved and no inclusion is logged until a backup actually runs.
+    /// Without `knownDatabaseGaps` this is the full discovery a backup runs (slow on a large
+    /// configuration); the menu passes the databases the last audit found instead of walking
+    /// every source again, so databases that appeared since may only show up at the backup.
+    static func pending(config: Config, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                        knownDatabaseGaps: [CoverageGap]? = nil) -> [CoverageGap] {
+        guard config.coverage.autoInclude else { return [] }
+        let candidates = discover(config: config, home: home, databaseGaps: knownDatabaseGaps?.filter { $0.kind == .database })
+        return plan(config: config, candidates: candidates, home: home)
+    }
+
+    /// The one path every backup takes, from the menu or from the schedule: prepare the settings,
+    /// then run with the automatic additions recorded in the status and in the snapshot.
+    static func prepareAndRun(from url: URL = Config.defaultPath, selectedPaths: [String]? = nil,
+                              includeRightsManagedFiles: Bool? = nil,
+                              statusWriter: StatusWriter = StatusWriter(),
+                              options: BackupRunOptions = BackupRunOptions(),
+                              onPrepared: (Config) async -> Void = { _ in }) async throws -> BackupRunResult? {
+        let preparation = try prepareReporting(from: url, selectedPaths: selectedPaths,
+                                               includeRightsManagedFiles: includeRightsManagedFiles, home: options.home)
+        await onPrepared(preparation.config)
+        var runOptions = options
+        runOptions.automaticallyIncluded = preparation.added
+        return try await BackupEngine.run(config: preparation.config, statusWriter: statusWriter, options: runOptions)
+    }
+
+    /// `databaseGaps` replaces the walk over every source for uncopied databases, which takes
+    /// minutes on a large configuration: the menu passes what the last backup's audit found.
+    static func discover(config: Config, home: String, databaseGaps: [CoverageGap]? = nil) -> [CoverageGap] {
         let filter = ExcludeFilter(patterns: config.exclude.patterns)
         let databaseFilter = ExcludeFilter(patterns: config.exclude.patterns.filter { !sqliteFileExcludePatterns.contains($0) })
         let privateRoots = [".config/secrets", ".roberdan-os", ".gbrain", ".copilot",
                             ".codex", ".gemini", ".pi", ".claude/projects"]
         let scan = DevEnvironment.scan(home: home, includingInventory: false)
         let proposed = scan.allItems.filter { !$0.sensitive && $0.proposed }.flatMap(\.paths)
-        let gaps = CoverageAuditor.audit(config: config, home: home, measuringSizes: false)
+        let gaps = CoverageAuditor.audit(config: config, home: home, measuringSizes: false,
+                                         includingDatabases: databaseGaps == nil) + (databaseGaps ?? [])
         var seen = Set<String>()
         let folders = proposed.map {
             CoverageGap(kind: .folder, path: $0, lastModified: "", approximateBytes: 0)

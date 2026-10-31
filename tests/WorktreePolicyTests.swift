@@ -120,4 +120,168 @@ final class WorktreePolicyTests {
                        "maintenance failure is logged instead of silently ignored")
         }
     }
+
+    /// Saved checkouts of deleted worktrees were left behind whenever they sat outside
+    /// GitHub/worktrees (201 of them on 2026-10-31): the marker, not the place, identifies them.
+    func test_cleanupFindsLinkedCopiesByMarkerWhereverTheyWereSaved() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        let fm = FileManager.default
+        try safety.write("source", to: box.home + "/GitHub/main/file.txt")
+        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try fm.createDirectory(atPath: box.home + "/Code/other/.git/worktrees", withIntermediateDirectories: true)
+        let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
+        // Saved repositories carry their own .git directory.
+        try safety.write("ref: refs/heads/main\n", to: snapshot.path + "/GitHub/main/.git/HEAD")
+        @discardableResult
+        func plant(_ relative: String, main: String = "GitHub/main") throws -> URL {
+            let copy = snapshot.appendingPathComponent(relative)
+            try safety.write("gitdir: \(box.home)/\(main)/.git/worktrees/\((relative as NSString).lastPathComponent)\n",
+                             to: copy.path + "/.git")
+            try safety.write("temporary", to: copy.path + "/file.txt")
+            return copy
+        }
+        let obsolete = ["GitHub/main/.claude/worktrees/agent-1", "GitHub/agents/2026/10/28/run-7/step/a/wt",
+                        "Documents/notes/agent-checkout", "Code/scratch/wt-outside"]
+        for relative in obsolete { try plant(relative, main: relative.hasPrefix("Code/") ? "Code/other" : "GitHub/main") }
+
+        let livePresent = try plant("Scratch/live-wt")
+        try safety.write("unsaved", to: box.home + "/Scratch/live-wt/unsaved.txt")
+        let mainGone = try plant("Archive/old-wt", main: "GitHub/vanished")
+        let foreign = snapshot.appendingPathComponent("Archive/foreign-wt")
+        try safety.write("gitdir: /opt/elsewhere/.git/worktrees/foreign-wt\n", to: foreign.path + "/.git")
+        try safety.write("keep", to: foreign.path + "/file.txt")
+        let submodule = snapshot.appendingPathComponent("Code/submodule")
+        try safety.write("gitdir: ../main/.git/modules/submodule\n", to: submodule.path + "/.git")
+        try safety.write("keep", to: submodule.path + "/file.txt")
+        let repository = snapshot.appendingPathComponent("Code/other-copy")
+        try safety.write("keep", to: repository.path + "/.git/objects/pack/p")
+        let reserved = try plant("_rustymacbackup/stash/wt")
+        let volume = try plant("Volumes/Data/wt")
+        let preserved = snapshot.appendingPathComponent("GitHub/main/preserved.txt")
+        try fm.linkItem(at: snapshot.appendingPathComponent(obsolete[0] + "/file.txt"), to: preserved)
+        let before = try fm.attributesOfItem(atPath: preserved.path)[.posixPermissions] as? NSNumber
+
+        let outcome = try WorktreePolicy.cleanup(at: URL(fileURLWithPath: box.dest), home: box.home)
+        try expectEqual(Set(outcome.removed), Set(obsolete.map { snapshot.lastPathComponent + "/" + $0 }),
+                        "every absent linked copy is found, wherever it is")
+        for relative in obsolete { try expect(!fm.fileExists(atPath: snapshot.path + "/" + relative), "removed: \(relative)") }
+        for kept in [livePresent, mainGone, foreign, submodule, repository, reserved, volume] {
+            try expect(fm.fileExists(atPath: kept.path + "/file.txt") || fm.fileExists(atPath: kept.path + "/.git/objects/pack/p"),
+                       "not provably obsolete, so kept: \(kept.path)")
+        }
+        try expectEqual(try String(contentsOf: preserved, encoding: .utf8), "temporary", "shared hard-link content intact")
+        try expectEqual(try fm.attributesOfItem(atPath: preserved.path)[.posixPermissions] as? NSNumber, before,
+                        "cleanup never changes modes on shared files")
+        try expectEqual(try String(contentsOfFile: box.home + "/Scratch/live-wt/unsaved.txt", encoding: .utf8),
+                        "unsaved", "live working copies are never touched")
+        let manifest = SnapshotManifest.read(from: snapshot)
+        try expectEqual(Set(manifest?.removedTemporaryWorktrees?.map(\.path) ?? []), Set(obsolete),
+                        "each removal is auditable with its snapshot-relative path")
+        try expect(manifest?.removedTemporaryWorktrees?.allSatisfy { $0.bytes > 0 } == true, "records include measured size")
+        try expectEqual(try WorktreePolicy.cleanup(at: URL(fileURLWithPath: box.dest), home: box.home).removed.count, 0,
+                        "repeat cleanup is idempotent")
+    }
+
+    /// Searching every old snapshot at every backup would slow each one down: a searched snapshot
+    /// is remembered, and only the copies found in it are checked again.
+    func test_searchedSnapshotsAreRememberedAndOnlyKnownCopiesAreChecked() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        let fm = FileManager.default
+        try safety.write("source", to: box.home + "/GitHub/main/file.txt")
+        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
+        func plant(_ relative: String) throws {
+            try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/\((relative as NSString).lastPathComponent)\n",
+                             to: snapshot.path + "/" + relative + "/.git")
+            try safety.write("temporary", to: snapshot.path + "/" + relative + "/file.txt")
+        }
+        let destination = URL(fileURLWithPath: box.dest)
+        try plant("Scratch/still-live")
+        try safety.write("unsaved", to: box.home + "/Scratch/still-live/unsaved.txt")
+
+        try expectEqual(try WorktreePolicy.cleanup(at: destination, home: box.home).removed.count, 0,
+                        "a copy whose live checkout exists is kept")
+        try expectEqual(SnapshotManifest.read(from: snapshot)?.temporaryWorktreeCopies, ["Scratch/still-live"],
+                        "the search is remembered together with what it found")
+
+        try fm.removeItem(atPath: box.home + "/Scratch")
+        try plant("Elsewhere/appeared-later")
+        let later = try WorktreePolicy.cleanup(at: destination, home: box.home)
+        try expectEqual(later.removed, [snapshot.lastPathComponent + "/Scratch/still-live"],
+                        "the remembered copy is checked again and goes once its live checkout is gone")
+        try expect(fm.fileExists(atPath: snapshot.path + "/Elsewhere/appeared-later/file.txt"),
+                   "an already searched snapshot is not walked again")
+        try expectEqual(SnapshotManifest.read(from: snapshot)?.temporaryWorktreeCopies, [], "nothing is left to check")
+
+        let explicit = try WorktreePolicy.cleanup(at: destination, home: box.home, searchAgain: true)
+        try expectEqual(explicit.removed, [snapshot.lastPathComponent + "/Elsewhere/appeared-later"],
+                        "an explicit request searches again")
+    }
+
+    /// The remembered list is a file: whatever it says, nothing outside the snapshot is touched.
+    func test_aTamperedMemoNeverLeadsOutsideTheSnapshot() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        let fm = FileManager.default
+        try safety.write("source", to: box.home + "/GitHub/main/file.txt")
+        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
+        func decoy(_ path: String) throws {
+            try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/wt\n", to: path + "/.git")
+            try safety.write("precious", to: path + "/file.txt")
+        }
+        try decoy(box.dest + "/stray")
+        try decoy(box.root.path + "/outside/wt")
+        try fm.createSymbolicLink(atPath: snapshot.path + "/Linked", withDestinationPath: box.root.path + "/outside")
+        try decoy(snapshot.path + "/_rustymacbackup/stash/wt")
+        var manifest = SnapshotManifest.read(from: snapshot)!
+        manifest.temporaryWorktreeCopies = ["../stray", box.root.path + "/outside/wt", "Linked/wt",
+                                            "_rustymacbackup/stash/wt", "a//b", ""]
+        try manifest.write(to: snapshot)
+
+        let outcome = try WorktreePolicy.cleanup(at: URL(fileURLWithPath: box.dest), home: box.home)
+        try expect(outcome.removed.isEmpty, "nothing is removed on the word of a file: \(outcome.removed)")
+        for path in [box.dest + "/stray", box.root.path + "/outside/wt", snapshot.path + "/_rustymacbackup/stash/wt"] {
+            try expectEqual(try String(contentsOfFile: path + "/file.txt", encoding: .utf8), "precious", "untouched: \(path)")
+        }
+        try expectEqual(SnapshotManifest.read(from: snapshot)?.temporaryWorktreeCopies, [],
+                        "the unusable entries are dropped from the list")
+    }
+
+    func test_searchTimeVersionAndCancellationBoundTheWork() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        let fm = FileManager.default
+        try safety.write("source", to: box.home + "/GitHub/main/file.txt")
+        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
+        let copy = snapshot.appendingPathComponent("Elsewhere/wt")
+        try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/wt\n", to: copy.path + "/.git")
+        try safety.write("temporary", to: copy.path + "/file.txt")
+        let destination = URL(fileURLWithPath: box.dest)
+
+        let cancelled = try WorktreePolicy.cleanup(at: destination, home: box.home, cancelled: { true })
+        try expect(cancelled.removed.isEmpty && fm.fileExists(atPath: copy.path), "a cancelled run touches nothing")
+        try expectNil(SnapshotManifest.read(from: snapshot)?.temporaryWorktreeCopies, "and remembers nothing")
+
+        let hurried = try WorktreePolicy.cleanup(at: destination, home: box.home, scanBudget: 0)
+        try expectEqual(hurried.unsearched, 1, "the snapshot left for later is counted")
+        try expect(hurried.removed.isEmpty && fm.fileExists(atPath: copy.path), "no time, no search")
+        try expectNil(SnapshotManifest.read(from: snapshot)?.temporaryWorktreeCopies, "so it is searched next time")
+
+        var manifest = SnapshotManifest.read(from: snapshot)!
+        manifest.appVersion = "4.3.2"
+        try manifest.write(to: snapshot)
+        try expect(try WorktreePolicy.cleanup(at: destination, home: box.home).removed.isEmpty,
+                   "snapshots made since 4.3.0 cannot hold such copies and are never searched")
+        try expectNil(SnapshotManifest.read(from: snapshot)?.temporaryWorktreeCopies, "nothing remembered for them either")
+
+        manifest.appVersion = "4.2.0"
+        try manifest.write(to: snapshot)
+        let found = try WorktreePolicy.cleanup(at: destination, home: box.home)
+        try expectEqual(found.removed, [snapshot.lastPathComponent + "/Elsewhere/wt"], "older snapshots are searched")
+        try expectEqual(found.unsearched, 0, "nothing was left over")
+    }
 }

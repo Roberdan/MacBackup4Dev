@@ -190,6 +190,10 @@ An app copy is **not a promise that all its data or dependencies were saved**:
   the catalog explains why. **Programmi** retains known reinstall options. A copied Homebrew
   cask is not downloaded twice, but copying its bundle does **not** recreate Homebrew's
   registration or update management.
+- A launcher whose main executable is a link to a program installed elsewhere (Claude Code's
+  URL handler) is listed as *non autonoma, ricreata dalla sua app*: there is nothing to copy,
+  so it is neither saved nor an error. Signature checks of ordinary apps are unchanged: a
+  broken signature still stops the snapshot from being complete.
 - A failed promised copy makes the snapshot incomplete; an explicitly listed installer-only
   app does not. A complete snapshot can therefore still require manual installers and
   unselected data. This is not a clone of macOS.
@@ -634,14 +638,24 @@ ignore = ["~/Scratch"]          # never auto-add or suggest this folder
   are already discovered on every backup. PostgreSQL and sensitive application data remain
   explicit choices; credentials, private agent data, cloud folders and temporary worktrees
   are never newly selected. Ignored paths, exclusions and unchecked picker items win.
-  Set `auto_include = false` to retain a fully manual source list.
+  Set `auto_include = false` to retain a fully manual source list. Choosing some projects in
+  **Scegli cartelle** never rejects the folder that holds them: only what stays unchecked is
+  remembered, so a new project created later under the same folder is still added.
+  The menu says what happened: after every backup **Aggiunte da sole: N**, and, read-only,
+  **Entreranno al prossimo backup** with what the next one will add (the same rule decides
+  both and nothing is saved until a backup runs; databases that appeared since the last
+  backup are found by the backup itself). `MacBackup4Dev coverage` lists the same items.
 - **Coverage audit**: remaining unprotected items are shown in the menu.
 - **Temporary worktrees**: linked checkouts and `worktrees` / `.worktrees` containers are
-  excluded even with an older config. Old copies below `GitHub` are removed only when their
-  exact live source is absent and their main repository can still be verified, on the same
-  Mac and while holding the destination lock. Each removal is recorded in that snapshot's
-  manifest with its path, size, date and reason. Main repositories, live checkouts and
-  uncertain cases are untouched. `MacBackup4Dev cleanup-worktrees` runs this maintenance now.
+  excluded even with an older config. Saved copies of checkouts are recognised by their `.git`
+  marker (a file starting with `gitdir:`) wherever they sit in a snapshot, and removed only
+  when their exact live source is absent, their main repository can still be verified under
+  your home folder, on the same Mac and while holding the destination lock. Snapshots made
+  before 4.3.0 are searched once, a little at a time (at most 30 s per backup) and the result
+  is remembered in their manifest; later snapshots cannot contain such copies. Each removal is
+  recorded in that snapshot's manifest with its path, size, date and reason. Main
+  repositories, live checkouts and uncertain cases are untouched. `MacBackup4Dev
+  cleanup-worktrees` searches every old snapshot again now.
   A cleanup failure is logged and retried on a later backup; it does not stop protection.
 - **Retention**: the 3 newest complete snapshots are never deleted; nothing is pruned while the
   Mac looks new or emptied.

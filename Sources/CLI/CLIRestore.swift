@@ -80,9 +80,19 @@ extension CLIHandler {
         let days = Int(flags.values["--days"] ?? "30") ?? 30
         let gaps = CoverageAuditor.audit(config: cfg, days: days)
         try? StatusWriter().writeCoverage(CoverageReport(checkedAt: ISO8601DateFormatter().string(from: Date()), gaps: gaps))
-        if gaps.isEmpty { print(green("Copertura ok: niente di attivo resta fuori dal backup.")); return }
+        // Read-only: what the next backup adds by itself is not an open problem.
+        let coming = AutomaticCoverage.pending(config: cfg, knownDatabaseGaps: gaps)
+        let comingPaths = Set(coming.map(\.path))
+        let open = gaps.filter { !comingPaths.contains($0.path) }
+        if gaps.isEmpty && coming.isEmpty { print(green("Copertura ok: niente di attivo resta fuori dal backup.")); return }
+        if !coming.isEmpty {
+            print(bold("Entreranno da soli al prossimo backup (\(coming.count)):"))
+            for item in coming { print("  \(item.kind == .database ? "database" : "cartella")  \(item.path)") }
+            print("Per lasciarne fuori qualcuna: aggiungila a [coverage] ignore oppure togli la spunta in Scegli cartelle.")
+        }
+        guard !open.isEmpty else { return }
         print(bold("Attivo negli ultimi \(days) giorni ma NON salvato:"))
-        for g in gaps {
+        for g in open {
             print("  \(g.kind == .database ? "database" : "cartella")  \(g.path)  (\(BackupEngine.formatBytes(UInt64(max(0, g.approximateBytes)))))")
         }
         print("\nPer salvarla: aggiungi il percorso in [source] paths (cartelle) o [databases] sqlite (database).")

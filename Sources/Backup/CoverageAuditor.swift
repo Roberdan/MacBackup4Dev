@@ -39,7 +39,8 @@ enum CoverageAuditor {
     static let projectContainers: [String] = ["GitHub", "Developer", "Projects", "Code", "src"]
 
     static func audit(config: Config, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-                      days: Int = 30, now: Date = Date(), measuringSizes: Bool = true) -> [CoverageGap] {
+                      days: Int = 30, now: Date = Date(), measuringSizes: Bool = true,
+                      includingDatabases: Bool = true) -> [CoverageGap] {
         let fm = FileManager.default
         let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
         let sources = config.source.paths.map { ConfigDiscovery.expand($0, home: home) }
@@ -96,7 +97,10 @@ enum CoverageAuditor {
                                     approximateBytes: measuringSizes
                                         ? ConfigDiscovery.approximateSize(atPath: path, limit: 50 * 1_073_741_824) : 0))
         }
-        gaps.append(contentsOf: uncopiedDatabases(config: config, sources: sources, home: home, cutoff: cutoff))
+        // Walking every source for databases is what takes minutes on a large configuration.
+        if includingDatabases {
+            gaps.append(contentsOf: uncopiedDatabases(config: config, sources: sources, home: home, cutoff: cutoff))
+        }
         return gaps
     }
 

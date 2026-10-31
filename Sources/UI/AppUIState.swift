@@ -122,6 +122,43 @@ final class AppUIState: ObservableObject {
     // MARK: - 3.0: protection and coverage (computed by AppDelegate, never while rendering)
     @Published var protection: ProtectionSummary?
     @Published var coverageGaps: [CoverageGap] = []
+    /// Safe items the next backup will include by itself: a read-only preview that the app
+    /// refreshes in the background. Nothing is saved until a backup runs.
+    @Published var pendingAutomatic: [CoverageGap] = []
+
+    /// A gap the next backup takes care of is announced as such, not shown as an open problem.
+    var visibleCoverageGaps: [CoverageGap] {
+        let pending = Set(pendingAutomatic.map(\.path))
+        return coverageGaps.filter { !pending.contains($0.path) }
+    }
+
+    /// "Aggiunte da sole: N" for the last finished backup; nil while one runs or when that
+    /// backup's status was written before the app recorded it.
+    var automaticallyAddedLabel: String? {
+        guard !isRunning, status?.lastResult != nil, let added = status?.autoIncluded else { return nil }
+        return "Aggiunte da sole: \(added.count)"
+    }
+
+    var automaticallyAddedHelp: String {
+        let added = status?.autoIncluded ?? []
+        return added.isEmpty ? "L'ultimo backup non ha trovato niente di nuovo da aggiungere."
+            : "Inserite da sole nell'ultimo backup:\n" + added.joined(separator: "\n")
+    }
+
+    var pendingAutomaticTitle: String? {
+        pendingAutomatic.isEmpty ? nil : "Entreranno al prossimo backup: \(pendingAutomatic.count)"
+    }
+
+    var pendingAutomaticDetail: String {
+        let names = pendingAutomatic.map(\.path)
+        let shown = names.prefix(3).joined(separator: ", ")
+        return names.count > 3 ? shown + " e altre \(names.count - 3)" : shown
+    }
+
+    var pendingAutomaticHelp: String {
+        "Si aggiungono da sole, senza chiedere niente:\n" + pendingAutomatic.map(\.path).joined(separator: "\n")
+            + "\nPer lasciarne fuori qualcuna usa Scegli cartelle."
+    }
     var onAddCoverage: ((CoverageGap) -> Void)?
     var onIgnoreCoverage: ((CoverageGap) -> Void)?
     var onRequestAdvancedRestore: (() -> Void)?

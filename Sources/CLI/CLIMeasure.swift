@@ -92,6 +92,13 @@ extension CLIHandler {
         st.applications = AppCapture.Summary(saved: 42, needsInstaller: 8, failed: 0, unselectedDataPaths: 12)
         state.status = st
         report("applicazioni salvate (dati da scegliere)")
+        st.autoIncluded = ["~/Projects/new-app", "~/.config/nvim"]
+        state.status = st
+        state.pendingAutomatic = ["~/Projects/draft-api", "~/Projects/notes", "~/.config/helix", "~/Projects/site"].map {
+            CoverageGap(kind: .folder, path: $0, lastModified: "", approximateBytes: 0)
+        }
+        report("aggiunte da sole e anteprima del prossimo backup")
+        state.pendingAutomatic = []
         state.protection?.lastCompleteFinishedDate = nil
         state.status = nil
         report("backup vecchio (ora finale sconosciuta)")

@@ -22,6 +22,9 @@ struct BackupStatusFile: Codable {
     var scanFinished: Bool?
     var finalizationStepStartedAt: String?
     var applications: AppCapture.Summary?
+    /// Items added to the settings by themselves for the last backup; nil in status files from
+    /// before 4.3.2, where nobody recorded it.
+    var autoIncluded: [String]?
 
     var finalizationStepDate: Date? {
         guard state == "running", phase == "finalizing",
@@ -86,6 +89,7 @@ struct BackupStatusFile: Codable {
         case scanFinished = "scan_finished"
         case finalizationStepStartedAt = "finalization_step_started_at"
         case applications
+        case autoIncluded = "auto_included"
     }
 
     init(state: String = "idle", phase: String = "",

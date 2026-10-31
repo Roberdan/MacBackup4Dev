@@ -31,8 +31,13 @@ struct SnapshotManifest: Codable, Equatable {
     var complete: Bool
     var incompleteReasons: [String]
     var applications: AppCapture.Summary? = nil
+    /// Items the app added to the settings by itself just before this backup (`~/` form).
+    var automaticallyIncluded: [String]? = nil
     /// Intentional maintenance of disposable checkouts; original copy counts stay historical.
     var removedTemporaryWorktrees: [WorktreePolicy.Removal]? = nil
+    /// Linked-worktree copies a snapshot still holds, found by the marker search (nil = not searched
+    /// yet). A searched snapshot is never walked again: only these paths are checked again.
+    var temporaryWorktreeCopies: [String]? = nil
 
     static let directoryName = "_rustymacbackup"
     static let fileName = "manifest.json"

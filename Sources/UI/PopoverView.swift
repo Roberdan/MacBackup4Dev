@@ -41,6 +41,7 @@ struct PopoverView: View {
                 if state.appState == .error { errorCard }
                 if let result = state.restoreResult { restoreResultCard(result) }
                 issuesList.disabled(state.isEjecting)
+                pendingCard
                 if let p = state.protection, state.appState != .diskAbsent { timeline(p) }
             }
             primaryActions.disabled(state.isCleaning || state.isEjecting)
@@ -242,6 +243,15 @@ struct PopoverView: View {
                     .font(.system(size: 11)).foregroundColor(Look.secondaryText)
                     .accessibilityLabel("Applicazioni: \(apps.saved) copie salvate, \(apps.needsInstaller) da reinstallare")
             }
+            if !state.isRunning, let label = state.automaticallyAddedLabel {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle").font(.system(size: 10))
+                    Text(label)
+                }
+                .font(.system(size: 11)).foregroundColor(Look.secondaryText)
+                .help(state.automaticallyAddedHelp)
+                .accessibilityElement(children: .combine)
+            }
             if state.isRunning, let s = state.status {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -343,7 +353,7 @@ struct PopoverView: View {
                              detail: "\(apps.unselectedDataPaths) percorsi non salvati. Scegli quali includere.",
                              primary: ("Scegli dati", { state.onRequestChooseSources?() }), secondary: nil))
         }
-        for gap in state.coverageGaps {
+        for gap in state.visibleCoverageGaps {
             out.append(Issue(id: "gap-\(gap.path)",
                              icon: gap.kind == .database ? "cylinder.split.1x2" : "folder.badge.questionmark",
                              tint: Look.blue,
@@ -400,6 +410,27 @@ struct PopoverView: View {
             Image(systemName: icon).font(.system(size: size * 0.45, weight: .semibold)).foregroundColor(.white)
         }
         .frame(width: size, height: size)
+    }
+
+    /// Read-only: what the next backup adds by itself. Nothing to confirm here.
+    @ViewBuilder
+    private var pendingCard: some View {
+        if !state.isRunning, let title = state.pendingAutomaticTitle {
+            HStack(alignment: .center, spacing: 10) {
+                iconTile("plus.circle.fill", Look.green, size: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 12, weight: .semibold)).foregroundColor(Look.text)
+                    Text(state.pendingAutomaticDetail).font(.system(size: 11)).foregroundColor(Look.secondaryText)
+                        .lineLimit(2).truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(glassCard(radius: 12))
+            .help(state.pendingAutomaticHelp)
+            .accessibilityElement(children: .combine)
+        }
     }
 
     // MARK: - Timeline (last 14 days)

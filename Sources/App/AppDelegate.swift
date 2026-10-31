@@ -101,6 +101,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var snapshotPickerWC: SnapshotPickerWindowController?
     private var restoreCenterWC: RestoreCenterWindowController?
     private var lastProtectionRefresh = Date.distantPast
+    private var lastPendingRefresh = Date.distantPast
+    private var pendingRefreshRunning = false
+    private var lastPendingCompletion = ""
     private let loginItemManager = LoginItemManager()
 
     func setInitialConfig(_ config: Config?) {
@@ -755,13 +758,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task.detached(priority: BackupEngine.WORK_PRIORITY) {
             do {
-                let config = try AutomaticCoverage.prepare(selectedPaths: selectedPaths,
-                    includeRightsManagedFiles: includeRightsManagedFiles)
-                await MainActor.run {
-                    self.config = config
-                    self.uiState.config = config
-                }
-                let result = try await BackupEngine.run(config: config)
+                let result = try await AutomaticCoverage.prepareAndRun(
+                    selectedPaths: selectedPaths, includeRightsManagedFiles: includeRightsManagedFiles,
+                    onPrepared: { config in
+                        await MainActor.run {
+                            self.config = config
+                            self.uiState.config = config
+                        }
+                    })
                 await MainActor.run {
                     if let m = result?.manifest {
                         if m.complete {
@@ -1257,6 +1261,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } == true
         uiState.cachedCanUndo = RestoreEngine.hasPreRestoreBackup() || latestUndoDir() != nil
         refreshProtection(force: forceProtection)
+        if let completed = uiState.status?.lastCompleted, !completed.isEmpty, completed != lastPendingCompletion {
+            // A backup just ended (from the menu or from the schedule): look again at what is next.
+            let firstLook = lastPendingCompletion.isEmpty
+            lastPendingCompletion = completed
+            if !firstLook { refreshPendingAutomatic(force: true) }
+        }
         if let completed = uiState.status?.lastCompleted, !completed.isEmpty,
            completed != lastRecoveryCompletion {
             refreshRecoveryAppOnDisk()
@@ -1283,6 +1293,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if let summary { self.uiState.protection = summary }
                 self.uiState.coverageGaps = gaps
+            }
+        }
+    }
+
+    /// What the next backup will add by itself, shown read-only in the menu. Discovery walks
+    /// folders, so it runs in the background, never while a backup runs and at most every
+    /// ten minutes unless something changed.
+    private func refreshPendingAutomatic(force: Bool) {
+        guard config != nil, !uiState.isRunning, !pendingRefreshRunning,
+              force || Date().timeIntervalSince(lastPendingRefresh) > 600 else { return }
+        pendingRefreshRunning = true
+        lastPendingRefresh = Date()
+        DispatchQueue.global(qos: .utility).async {
+            // The saved settings, not the copy loaded at launch: they may have been edited since.
+            // The databases come from the last backup's audit: walking every source again takes minutes.
+            let known = StatusWriter().readCoverage()?.gaps ?? []
+            let pending = (try? Config.load(from: Config.defaultPath))
+                .map { AutomaticCoverage.pending(config: $0, knownDatabaseGaps: known) } ?? []
+            DispatchQueue.main.async {
+                self.pendingRefreshRunning = false
+                self.uiState.pendingAutomatic = pending
             }
         }
     }
@@ -1348,6 +1379,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             uiState.config = pending
             uiState.coverageGaps.removeAll { $0.path == gap.path }
             Log.info("Coverage: \(ignore ? "ignored" : "added") \(gap.path)")
+            refreshPendingAutomatic(force: true)
         } catch {
             Log.error("Cannot save coverage change: \(error.localizedDescription)")
         }
@@ -1372,6 +1404,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSPopoverDelegate {
     func popoverDidShow(_ notification: Notification) {
         updateVisibleProgressPolling()
+        refreshPendingAutomatic(force: false)
     }
 
     func popoverDidClose(_ notification: Notification) {

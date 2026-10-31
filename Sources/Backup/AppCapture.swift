@@ -80,6 +80,7 @@ enum AppCapture {
                     let source = root.url.appendingPathComponent(entry.relativePath)
                     let target = directory.appendingPathComponent(entry.storagePath)
                     try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try AppBundleCopy.requireSelfContainedExecutable(source)
                     entry.signed = try AppBundleCopy.isSigned(source)
                     entry.fingerprint = try AppBundleCopy.copy(from: source, to: target,
                         previous: previous?.appendingPathComponent(directoryName + "/" + entry.storagePath), options: options)

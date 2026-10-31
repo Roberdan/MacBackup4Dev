@@ -1,5 +1,29 @@
 # Changelog
 
+## [4.3.2] - 2026-10-31
+
+### Added
+- After every backup the menu says how many items were added by themselves ("Aggiunte da
+  sole: N", names on hover) and shows, read-only, what the next backup will add ("Entreranno
+  al prossimo backup"). The backup applies the very same rule that produces the preview, and
+  the preview never saves anything. The list is also kept in each snapshot's manifest, and
+  `status` and `coverage` print it.
+
+### Fixed
+- Choosing projects one by one in the folder picker no longer rejects the folder that holds
+  them. Before, a new project created later under that folder was neither added nor shown.
+  Unchecked items are still remembered; a confirmed choice also clears such a rejection left
+  by earlier versions.
+- An app whose main executable is a link to a program installed elsewhere (Claude Code's URL
+  handler) is listed as "non autonoma, ricreata dalla sua app" instead of failing its
+  signature check and leaving every snapshot incomplete. Signature checks of ordinary apps
+  are unchanged.
+- Saved copies of deleted worktrees are found by their `.git` marker wherever they sit in a
+  snapshot, not only below `GitHub/worktrees`, and removed under the same safety checks
+  (same Mac, main repository still present under the home folder, exact live source absent,
+  destination lock held, audit record). Snapshots made before 4.3.0 are searched once, a
+  little at a time, and the result is remembered; `cleanup-worktrees` searches them all again.
+
 ## [4.3.1] - 2026-10-31
 
 ### Fixed

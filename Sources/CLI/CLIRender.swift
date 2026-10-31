@@ -66,6 +66,17 @@ extension CLIHandler {
                 s.coverageGaps = [CoverageGap(kind: .folder, path: "~/Projects/new-app",
                                               lastModified: ISO8601DateFormatter().string(from: now), approximateBytes: 1_000_000)]
             }),
+            ("aggiunte", { s in
+                s.appState = .idle
+                s.protection = summary(.protected, "Protetto · ultimo completo 2 ore fa", "oggi 07:42 · 0 errori")
+                var st = BackupStatusFile()
+                st.state = "idle"; st.lastResult = "complete"
+                st.autoIncluded = ["~/Projects/new-app", "~/.config/nvim"]
+                s.status = st
+                s.pendingAutomatic = ["~/Projects/draft-api", "~/Projects/notes", "~/.config/helix", "~/Projects/site"].map {
+                    CoverageGap(kind: .folder, path: $0, lastModified: ISO8601DateFormatter().string(from: now), approximateBytes: 0)
+                }
+            }),
             ("chiusura-disco", { s in
                 s.appState = .idle
                 s.ejection = EjectionFeedback(disk: Self.menuDemoConfig.diskURL, phase: .closingStore)
