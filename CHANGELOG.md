@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The preparation before every backup no longer walks all the saved folders looking for new
+  databases (it took one to five minutes with 171 folders before the copy even started). It
+  reuses the audit made at the end of the previous backup, like the menu's preview, and checks
+  that each database it lists is still a plain recent file. New folders and what they hold are
+  still found right now. A database created inside a folder that is already saved enters the
+  backup after the next one, at most one interval later; with no earlier audit the folders are
+  walked once, as before.
+- The cleanup of old saved worktree copies (up to 30 s of searching per backup while old
+  snapshots are still being searched) runs at the end of a backup, after the copy, instead of
+  before it, so the copy no longer waits for it.
+
 ## [4.3.2] - 2026-10-31
 
 ### Added

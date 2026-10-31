@@ -195,7 +195,14 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   the status) until a snapshot records them; the engine writes it before any check that
   can end the run.
   Discovery walks every source for databases (measured 1–2 minutes on a 171-source
-  configuration); the menu preview must pass `knownDatabaseGaps` (last audit) instead.
+  configuration, 5 minutes on a loaded Mac): neither the menu preview nor the preparation
+  before a backup may do it. Both pass `knownDatabaseGaps` (the audit at the end of the last
+  backup, `coverage.json`), and `AutomaticCoverage.stillThere` revalidates each entry (still a
+  plain, non-empty, recent, non-linked file). Folders and what a newly added folder holds are
+  still discovered right now. A database created inside an already saved folder after the last
+  audit therefore enters the backup after the next one (at most one interval later); without
+  any audit the sources are walked once. The audit at the end of each backup is what feeds
+  the next preparation: keep it.
 - **Temporary worktrees (4.3):** file scanning never copies linked git worktrees or
   `worktrees` / `.worktrees` containers, including with old configs. Cleanup only unlinks
   historical linked-checkout copies whose exact live path is ENOENT, whose main `.git`
@@ -211,8 +218,9 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   (`WorktreePolicy.search` stops between two folders when the 30 s budget, `cancelled` or a
   test's `maxFolders` say so and `manifest.worktreeSearch` resumes it) and the result is
   remembered in `manifest.temporaryWorktreeCopies`; searched snapshots are only re-checked,
-  never walked again (`cleanup-worktrees` forces a new search). The search runs after the
-  disk priority is lowered. Never search every snapshot at every backup, never trust a
+  never walked again (`cleanup-worktrees` forces a new search). The search runs at the end
+  of the backup, after the copy and with the disk priority still lowered: never before the
+  copy, which must not wait for it. Never search every snapshot at every backup, never trust a
   remembered or half-done list without `isSafeRelative` and the realpath containment check.
   A copy is removed only when `WorktreeContents.inspect` (git, with the main repository's
   rules, `ls-files --others --ignored`) finds nothing ignored except known caches: files git

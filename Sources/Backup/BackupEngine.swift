@@ -173,12 +173,6 @@ enum BackupEngine {
             catch { Log.error("Cannot restore disk I/O priority: \(error.localizedDescription)") }
         }
         Log.info("Backup priorities: CPU=\(Task.currentPriority.rawValue), disk=\(IOPriority.backupPolicy(onBattery: onBattery, previous: previousIOPolicy)), workers=\(MAX_WORKERS)")
-        // After the priorities: searching old snapshots walks a lot of folders and must be gentle.
-        do {
-            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home, cancelled: { token.isCancelled })
-        } catch {
-            Log.warn("Worktree cleanup deferred; backup will continue: \(error.localizedDescription)")
-        }
 
         let previousComplete = SnapshotCatalog.latestComplete(at: destURL)
         // Without a verified snapshot yet (first 3.0 run), compare with the newest old one,
@@ -493,6 +487,17 @@ enum BackupEngine {
             Log.info("Capturing environment snapshot...")
             options.environmentCapture(finalURL)
             Log.info("Environment snapshot complete")
+        }
+
+        // Maintenance of old snapshots comes after the copy: searching them takes up to 30 s, nothing
+        // here depends on it, and the copy no longer waits for it. The disk priority is still lowered,
+        // and the snapshot just made cannot hold a saved worktree: it is left alone.
+        reportFinalization("Pulisco le vecchie copie di worktree…")
+        do {
+            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home, skipping: [finalURL.lastPathComponent],
+                                                 cancelled: { token.isCancelled })
+        } catch {
+            Log.warn("Worktree cleanup deferred; backup will continue: \(error.localizedDescription)")
         }
 
         if !errorList.isEmpty || !skipList.isEmpty {
