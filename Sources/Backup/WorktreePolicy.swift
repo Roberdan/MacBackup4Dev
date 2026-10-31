@@ -13,6 +13,19 @@ enum WorktreePolicy {
     struct CleanupResult {
         var removed: [String] = []
         var freedBytes: UInt64 = 0
+        /// Old snapshots still to search because the time allowed for it ran out.
+        var unsearched = 0
+        /// Copies whose source is gone but that stay: they hold files git ignores that nothing else
+        /// has, or git could not say what they hold. Listed, so nobody loses them unseen.
+        var kept: [KeptCopy] = []
+        /// Copies left for the next backup because the time allowed for looking at them ran out.
+        var deferred = 0
+    }
+
+    struct KeptCopy: Equatable {
+        enum Reason: Equatable { case ignoredFiles([String]), unverified(String) }
+        let path: String
+        let reason: Reason
     }
 
     static func gitDirectory(of directory: URL) -> String? {
@@ -42,27 +55,40 @@ enum WorktreePolicy {
     }
 
     static func cleanup(at destination: URL,
-                        home: String = FileManager.default.homeDirectoryForCurrentUser.path) throws -> CleanupResult {
+                        home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                        scanBudget: TimeInterval = WorktreePolicy.scanBudget, searchAgain: Bool = false,
+                        maxFolders: Int = .max, cancelled: () -> Bool = { false }) throws -> CleanupResult {
         try RetentionManager.validateDestination(destination)
         let lock = try DestinationLock(at: destination)
-        return try withExtendedLifetime(lock) { try cleanupLocked(at: destination, home: home) }
+        return try withExtendedLifetime(lock) {
+            try cleanupLocked(at: destination, home: home, scanBudget: scanBudget, searchAgain: searchAgain,
+                              maxFolders: maxFolders, cancelled: cancelled)
+        }
     }
 
+    private enum CopyState { case vanished, keep, obsolete(repository: URL) }
+
     /// Only disposable linked checkouts are removed, never repository history or live data.
-    static func cleanupLocked(at destination: URL, home: String) throws -> CleanupResult {
+    /// `searchAgain` (an explicit request) ignores what earlier searches remembered.
+    /// `maxFolders` bounds a search the way the time does, for tests that need a small step.
+    static func cleanupLocked(at destination: URL, home liveHome: String,
+                              scanBudget: TimeInterval = WorktreePolicy.scanBudget, searchAgain: Bool = false,
+                              maxFolders: Int = .max, cancelled: () -> Bool = { false }) throws -> CleanupResult {
         let fm = FileManager.default
-        let liveRoot = URL(fileURLWithPath: home).appendingPathComponent("GitHub")
-        guard isRealDirectory(liveRoot) else { return CleanupResult() }
+        let home = liveHome.count > 1 && liveHome.hasSuffix("/") ? String(liveHome.dropLast()) : liveHome
+        guard isRealDirectory(URL(fileURLWithPath: home)) else { return CleanupResult() }
         let backups = try RetentionManager.readBackups(at: destination)
         if let latest = backups.first, SnapshotManifest.read(from: latest.url)?.shrinkWarning != nil {
             Log.warn("Worktree cleanup deferred: the newest backup reports an emptied Mac")
             return CleanupResult()
         }
         let before = BackupEngine.diskFreeSpace(at: destination.path)
+        let deadline = Date().addingTimeInterval(scanBudget)
+        let host = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
         var result = CleanupResult()
-        for backup in backups {
-            guard var manifest = SnapshotManifest.read(from: backup.url),
-                  manifest.host == (Host.current().localizedName ?? ProcessInfo.processInfo.hostName) else { continue }
+        snapshots: for backup in backups {
+            if cancelled() { break snapshots }
+            guard var manifest = SnapshotManifest.read(from: backup.url), manifest.host == host else { continue }
             let metadata = backup.url.appendingPathComponent(SnapshotManifest.directoryName)
             guard isRealDirectory(metadata) else { continue }
             for record in manifest.removedTemporaryWorktrees ?? [] {
@@ -72,66 +98,122 @@ enum WorktreePolicy {
                 let staged = metadata.appendingPathComponent(record.stagingName)
                 if isRealDirectory(staged) { try fm.removeItem(at: staged) }
             }
-            let root = backup.url.appendingPathComponent("GitHub")
-            guard isRealDirectory(root) else { continue }
-            let candidates = try obsoleteCopies(in: root, liveRoot: liveRoot, repositoryRoot: liveRoot, depth: 0)
-            for candidate in candidates {
-                let relative = "GitHub/" + String(candidate.path.dropFirst(root.path.count + 1))
-                let live = URL(fileURLWithPath: home).appendingPathComponent(relative)
-                guard isMissing(live), gitDirectory(of: candidate) != nil else { continue }
-                let record = Removal(path: relative, bytes: try allocatedBytes(in: candidate),
-                    reason: "Linked git worktree: exact live source is absent (ENOENT).",
-                    removedAt: ISO8601DateFormatter().string(from: Date()),
-                    stagingName: ".obsolete-worktree-" + UUID().uuidString)
-                let staged = metadata.appendingPathComponent(record.stagingName)
-                try fm.moveItem(at: candidate, to: staged)
-                manifest.removedTemporaryWorktrees = (manifest.removedTemporaryWorktrees ?? []) + [record]
-                do {
-                    try manifest.write(to: backup.url)
-                } catch {
-                    do { try fm.moveItem(at: staged, to: candidate) }
-                    catch {
-                        Log.error("Worktree cleanup rollback failed; preserved copy at \(staged.path): \(error.localizedDescription)")
-                    }
-                    throw error
+            let known: [String]
+            var searched = false
+            if !searchAgain, let remembered = manifest.temporaryWorktreeCopies {
+                known = remembered
+            } else if mayHoldCopies(manifest) {
+                guard Date() < deadline else { result.unsearched += 1; continue }
+                let outcome = search(backup.url, from: searchAgain ? nil : manifest.worktreeSearch,
+                                     until: deadline, maxFolders: maxFolders, cancelled: cancelled)
+                switch outcome {
+                case .unfinished(let progress):
+                    // Out of time (or stopped): keep what the search has seen, continue next time.
+                    manifest.worktreeSearch = progress
+                    do { try manifest.write(to: backup.url) }
+                    catch { Log.warn("Worktree search of \(backup.name) not saved; it restarts next time: \(error.localizedDescription)") }
+                    result.unsearched += 1
+                    if cancelled() { break snapshots }
+                    continue snapshots
+                case .finished(let found):
+                    known = found
+                    manifest.worktreeSearch = nil
+                    searched = true
                 }
-                // Unlink only: chmod would mutate regular files shared with other snapshots.
-                try fm.removeItem(at: staged)
-                result.removed.append(backup.name + "/" + relative)
-                Log.info("Removed obsolete worktree copy: \(backup.name)/\(relative), \(record.bytes) allocated bytes; \(record.reason)")
+            } else {
+                continue
+            }
+            var remaining = known
+            if searched { manifest.retainedWorktreeCopies = nil }
+            var retained = manifest.retainedWorktreeCopies ?? []
+            let snapshotRoot = FileScanner.realPath(backup.url.path)
+            for relative in known {
+                guard isSafeRelative(relative) else {
+                    Log.warn("Worktree search of \(backup.name): ignoring the remembered path \(relative)")
+                    remaining.removeAll { $0 == relative }
+                    continue
+                }
+                let candidate = backup.url.appendingPathComponent(relative)
+                switch assess(candidate, relative: relative, in: snapshotRoot, home: home, reportUnverified: searched) {
+                case .keep: continue
+                case .vanished: remaining.removeAll { $0 == relative }
+                case .obsolete(let repository):
+                    guard Date() < deadline, !cancelled() else { result.deferred += 1; continue }
+                    let allowed = max(5, min(60, deadline.timeIntervalSinceNow))
+                    switch WorktreeContents.inspect(copy: candidate, repository: repository, timeout: allowed, cancelled: cancelled) {
+                    case .disposable:
+                        break
+                    case .holdsIgnoredFiles(let sample):
+                        // Not a cache: possibly the only copy of files that are in no commit. Kept for
+                        // good (not looked at again) and listed.
+                        remaining.removeAll { $0 == relative }
+                        retained.append(relative)
+                        manifest.retainedWorktreeCopies = retained
+                        result.kept.append(.init(path: backup.name + "/" + relative, reason: .ignoredFiles(sample)))
+                        Log.warn("Worktree copy kept: \(backup.name)/\(relative) holds files git ignores that may exist nowhere else: \(sample.joined(separator: ", "))")
+                        continue
+                    case .unverified(let why):
+                        result.kept.append(.init(path: backup.name + "/" + relative, reason: .unverified(why)))
+                        Log.warn("Worktree copy kept: \(backup.name)/\(relative) cannot be examined: \(why)")
+                        continue
+                    }
+                    let record = Removal(path: relative, bytes: try allocatedBytes(in: candidate),
+                        reason: "Linked git worktree: exact live source is absent (ENOENT).",
+                        removedAt: ISO8601DateFormatter().string(from: Date()),
+                        stagingName: ".obsolete-worktree-" + UUID().uuidString)
+                    let staged = metadata.appendingPathComponent(record.stagingName)
+                    try fm.moveItem(at: candidate, to: staged)
+                    manifest.removedTemporaryWorktrees = (manifest.removedTemporaryWorktrees ?? []) + [record]
+                    manifest.temporaryWorktreeCopies = remaining.filter { $0 != relative }
+                    do {
+                        try manifest.write(to: backup.url)
+                    } catch {
+                        manifest.removedTemporaryWorktrees?.removeLast()
+                        manifest.temporaryWorktreeCopies = remaining
+                        do { try fm.moveItem(at: staged, to: candidate) }
+                        catch {
+                            Log.error("Worktree cleanup rollback failed; preserved copy at \(staged.path): \(error.localizedDescription)")
+                        }
+                        throw error
+                    }
+                    remaining.removeAll { $0 == relative }
+                    // Unlink only: chmod would mutate regular files shared with other snapshots.
+                    try fm.removeItem(at: staged)
+                    result.removed.append(backup.name + "/" + relative)
+                    Log.info("Removed obsolete worktree copy: \(backup.name)/\(relative), \(record.bytes) allocated bytes; \(record.reason)")
+                }
+            }
+            if searched || manifest.temporaryWorktreeCopies != remaining {
+                manifest.temporaryWorktreeCopies = remaining
+                do { try manifest.write(to: backup.url) }
+                catch { Log.warn("Worktree search of \(backup.name) not remembered; it is repeated next time: \(error.localizedDescription)") }
+            }
+            if searched {
+                Log.info("Worktree search of \(backup.name): \(known.count) marked copies, \(remaining.count) kept")
             }
         }
         let after = BackupEngine.diskFreeSpace(at: destination.path)
         result.freedBytes = after > before ? after - before : 0
+        if result.deferred > 0 { Log.info("Worktree cleanup: \(result.deferred) copies left for the next backup (time ran out)") }
         if !result.removed.isEmpty { EncryptedStore.markSpaceFreed(destination: destination) }
         return result
     }
 
-    private static func obsoleteCopies(in directory: URL, liveRoot: URL,
-                                       repositoryRoot: URL, depth: Int) throws -> [URL] {
-        if let gitDirectory = gitDirectory(of: directory) {
-            // A missing/unmounted main repository is not proof that its work is disposable.
-            let common = URL(fileURLWithPath: gitDirectory).deletingLastPathComponent().deletingLastPathComponent()
-            guard common.path.hasPrefix(repositoryRoot.path + "/"), isRealDirectory(common) else {
-                Log.warn("Worktree copy retained: main repository cannot be verified at \(common.path)")
-                return []
-            }
-            return isMissing(liveRoot) ? [directory] : []
+    private static func assess(_ copy: URL, relative: String, in snapshotRoot: String, home: String,
+                               reportUnverified: Bool) -> CopyState {
+        // No link may lead out of the snapshot on the way to the copy.
+        guard isRealDirectory(copy), FileScanner.realPath(copy.path) == snapshotRoot + "/" + relative,
+              let gitDirectory = gitDirectory(of: copy) else { return .vanished }
+        // A missing/unmounted main repository is not proof that its work is disposable.
+        let main = URL(fileURLWithPath: gitDirectory).deletingLastPathComponent().deletingLastPathComponent()
+        guard main.path.hasPrefix(home + "/"), isRealDirectory(main) else {
+            if reportUnverified { Log.warn("Worktree copy retained: main repository cannot be verified at \(main.path)") }
+            return .keep
         }
-        guard depth < 4 else { return [] }
-        let children = try FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-        var found: [URL] = []
-        for child in children where child.lastPathComponent != ".git" {
-            let values = try child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            guard values.isDirectory == true, values.isSymbolicLink != true else { continue }
-            // Main repositories need only their conventional worktree containers inspected.
-            if isRealDirectory(directory.appendingPathComponent(".git")),
-               !["worktrees", ".worktrees"].contains(child.lastPathComponent) { continue }
-            found += try obsoleteCopies(in: child, liveRoot: liveRoot.appendingPathComponent(child.lastPathComponent),
-                                        repositoryRoot: repositoryRoot, depth: depth + 1)
-        }
-        return found
+        // A snapshot path is relative to the home folder, or to / for sources outside it:
+        // the copy is obsolete only when neither place exists.
+        return isMissing(URL(fileURLWithPath: home + "/" + relative))
+            && isMissing(URL(fileURLWithPath: "/" + relative)) ? .obsolete(repository: main) : .keep
     }
 
     private static func isRealDirectory(_ url: URL) -> Bool {
@@ -139,12 +221,29 @@ enum WorktreePolicy {
         return values.isDirectory == true && values.isSymbolicLink != true
     }
 
+    /// ENOENT proves absence only where the place the path would be in can be reached: a link to an
+    /// unplugged disk, or a folder that cannot be read, makes the path "not found" just the same.
+    /// So the nearest folder that exists above it must be a real, reachable directory.
     private static func isMissing(_ url: URL) -> Bool {
         var metadata = stat()
         if lstat(url.path, &metadata) == 0 { return false }
-        let code = errno
-        if code != ENOENT { Log.warn("Worktree copy retained: cannot verify source \(url.path), errno \(code)") }
-        return code == ENOENT
+        guard errno == ENOENT else {
+            Log.warn("Worktree copy retained: cannot verify source \(url.path), errno \(errno)")
+            return false
+        }
+        var ancestor = url.deletingLastPathComponent().path
+        while true {
+            if lstat(ancestor, &metadata) == 0 {
+                var reached = stat()
+                let isDirectory = metadata.st_mode & S_IFMT == S_IFLNK
+                    ? stat(ancestor, &reached) == 0 && reached.st_mode & S_IFMT == S_IFDIR
+                    : metadata.st_mode & S_IFMT == S_IFDIR
+                if !isDirectory { Log.warn("Worktree copy retained: \(ancestor) cannot be reached to verify \(url.path)") }
+                return isDirectory
+            }
+            guard errno == ENOENT, ancestor != "/" else { return false }
+            ancestor = (ancestor as NSString).deletingLastPathComponent
+        }
     }
 
     private static func allocatedBytes(in directory: URL) throws -> UInt64 {

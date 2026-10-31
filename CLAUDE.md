@@ -87,6 +87,15 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   Undo checks the recorded installation's device/inode and contents before moving it aside;
   cleanup makes only staging directories writable,
   never regular files that may be linked to older snapshots.
+  A launcher whose main executable is a link leaving the bundle (Claude Code's URL handler)
+  is classified `installer` — "non autonoma, ricreata dalla sua app" — before any signature
+  check or copy (macOS rejects such a bundle's signature); never weaken `isSigned` for it.
+  The menu's "Dati delle applicazioni da scegliere" counts only `AppCapture.dataToChoose`:
+  data the picker can still offer (never excluded apps' data, never excluded/unreadable data).
+  The menu reads the persisted count through `AppUIState.appDataToChoose`, which trusts it
+  only when it carries `AppCapture.dataCountRule` (a status written by 4.3.1 or earlier counted
+  by the old rule and said "1 percorso non salvato" with everything selected); bump the rule
+  whenever the counting changes.
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
 - **4 parallel workers (4.1.4)**: backup entry points, scanner and copy tasks use background
   priority. Disk I/O uses the SDK constants, preserves an existing passive/throttled policy
@@ -175,12 +184,43 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   disables additions. A concurrent config edit aborts preparation instead of being lost.
   Failed copies remain errors but do not count toward
   the post-save source-disappearance emergency guard.
+  In 4.3.2 a folder holding chosen paths is never "rejected" (picker choices of children
+  must not block new projects under it; a confirmed choice also clears a stale rejection
+  of such a folder). `AutomaticCoverage.plan` is the single rule: `prepareReporting` applies
+  it and `pending` previews it read-only for the menu, so the two always agree. Every backup,
+  from the menu or the schedule, goes through `prepareAndRun`, which records the additions in
+  `status.json` (`auto_included`) and the manifest; the menu shows "Aggiunte da sole: N".
+  Additions made for a run that cannot start (disk absent) are kept in their own file
+  (`auto-included-pending.json`, next to the status file: a running backup keeps rewriting
+  the status) until a snapshot records them; the engine writes it before any check that
+  can end the run.
+  Discovery walks every source for databases (measured 1–2 minutes on a 171-source
+  configuration); the menu preview must pass `knownDatabaseGaps` (last audit) instead.
 - **Temporary worktrees (4.3):** file scanning never copies linked git worktrees or
   `worktrees` / `.worktrees` containers, including with old configs. Cleanup only unlinks
   historical linked-checkout copies whose exact live path is ENOENT, whose main `.git`
   directory is present, and whose snapshot belongs to this Mac. Hold `DestinationLock`,
   preserve live/uncertain copies, record each removal in the manifest and never chmod
   regular files shared with other snapshots. Repository history is untouched.
+  Since 4.3.2 copies are found by marker (a `.git` file `gitdir: <home>/…/.git/worktrees/<name>`)
+  anywhere in a snapshot except `_rustymacbackup`, `_environment`, `Volumes` and `.git`
+  stores; the main repository must be a real directory under the home folder and neither
+  `<home>/<path>` nor `/<path>` may exist. ENOENT counts as absence only when the nearest
+  existing folder above the path is a real, reachable directory (a link to an unplugged disk
+  also says "not found"). Snapshots made before 4.3.0 are searched once
+  (`WorktreePolicy.search` stops between two folders when the 30 s budget, `cancelled` or a
+  test's `maxFolders` say so and `manifest.worktreeSearch` resumes it) and the result is
+  remembered in `manifest.temporaryWorktreeCopies`; searched snapshots are only re-checked,
+  never walked again (`cleanup-worktrees` forces a new search). The search runs after the
+  disk priority is lowered. Never search every snapshot at every backup, never trust a
+  remembered or half-done list without `isSafeRelative` and the realpath containment check.
+  A copy is removed only when `WorktreeContents.inspect` (git, with the main repository's
+  rules, `ls-files --others --ignored`) finds nothing ignored except known caches: files git
+  ignores are in no commit and a deleted worktree's copy may be the last one (tinyMatrix
+  helpers, 2026-10-31). A copy with other ignored files, or one git cannot examine, is kept
+  and listed; the first kind is remembered in `manifest.retainedWorktreeCopies` and not
+  inspected again unless `cleanup-worktrees` runs. Untracked work that is not ignored is not
+  protected by this rule.
 - **Temporal restore (4.3):** the File tab defaults to folder/date browsing. Only complete
   snapshots are browsable; preserve the current folder when changing date. Preview then
   explicitly confirm writes, defaulting to a Desktop copy. Native temporal transitions

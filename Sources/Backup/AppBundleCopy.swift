@@ -64,11 +64,47 @@ enum AppBundleCopy {
         return fingerprint(nodes)
     }
 
+    /// The main executable of a launcher can be a link to a program installed elsewhere (Claude
+    /// Code's URL handler). Such a bundle holds nothing that could run on its own and macOS
+    /// cannot verify its signature, so it is recreated by the program it belongs to.
+    /// Links that stay inside the bundle are ordinary and are judged by the usual checks.
+    static func externalMainExecutable(_ app: URL, info: [String: Any]) -> String? {
+        guard let name = info["CFBundleExecutable"] as? String, AppInventory.safeComponent(name) else { return nil }
+        let relative = "Contents/MacOS/" + name
+        let executable = app.appendingPathComponent(relative)
+        guard let metadata = try? AppInventory.metadata(executable) else { return nil }
+        var target: String?
+        if metadata.st_mode & S_IFMT == S_IFLNK {
+            target = try? FileManager.default.destinationOfSymbolicLink(atPath: executable.path)
+        }
+        let escapes: Bool
+        if target?.hasPrefix("/") == true {
+            escapes = true
+        } else if let root = try? resolvedPath(app), let resolved = try? resolvedPath(executable) {
+            escapes = !resolved.hasPrefix(root + "/")
+        } else {
+            escapes = true
+        }
+        return escapes ? relative + (target.map { " → " + $0 } ?? "") : nil
+    }
+
+    static func notSelfContainedReason(_ link: String) -> String {
+        "App non autonoma, ricreata dalla sua app: l'eseguibile principale è un collegamento esterno o interrotto (\(link))."
+    }
+
+    /// Classification comes before the signature check, which fails for such a launcher.
+    static func requireSelfContainedExecutable(_ app: URL) throws {
+        guard let info = try? AppInventory.info(app),
+              let link = externalMainExecutable(app, info: info) else { return }
+        throw NeedsInstaller(errorDescription: notSelfContainedReason(link))
+    }
+
     @discardableResult
     static func copy(from source: URL, to destination: URL, previous: URL? = nil,
                      options: Options = Options()) throws -> Fingerprint {
         try check(options)
         guard !AppInventory.exists(destination) else { throw AppInventory.failure("La destinazione esiste già.") }
+        try requireSelfContainedExecutable(source)
         let signed = try isSigned(source)
         let before = try scan(source, hashing: true, options: options)
         let expected = fingerprint(before)

@@ -43,8 +43,11 @@ enum CLIHandler {
             case "coverage": try runCoverage(subArgs: subArgs, configPath: configPath)
             case "cleanup-worktrees":
                 let cfg = try loadConfig(configPath: configPath)
-                let result = try WorktreePolicy.cleanup(at: URL(fileURLWithPath: cfg.destination.path), home: home)
+                // An explicit request searches every old snapshot again, however long it takes.
+                let result = try WorktreePolicy.cleanup(at: URL(fileURLWithPath: cfg.destination.path), home: home,
+                                                        scanBudget: .infinity, searchAgain: true)
                 print("Worktree obsoleti rimossi: \(result.removed.count) · spazio liberato: \(BackupEngine.formatBytes(result.freedBytes))")
+                WorktreeContents.report(result.kept).forEach { print($0) }
             case "versions": try runVersions(subArgs: subArgs, configPath: configPath)
             case "find": try runFind(subArgs: subArgs, configPath: configPath)
             case "topics": try runTopics(configPath: configPath)
@@ -113,7 +116,7 @@ enum CLIHandler {
         Ripristino e sicurezza (3.0):
           snapshots                     Elenco snapshot: completo / incompleto / non verificato
           coverage [--days N]           Cartelle attive e database che il backup non salva
-          cleanup-worktrees             Rimuove le copie di worktree non più presenti sul Mac
+          cleanup-worktrees             Rimuove le copie di worktree non più presenti sul Mac (tiene quelle con file ignorati da git)
           versions <file>               Tutte le versioni di un file negli snapshot
           find <testo> [--snapshot S]   Cerca file in uno snapshot
           topics                        Argomenti ripristinabili (Warp, Terminale, Claude…)
@@ -251,8 +254,7 @@ enum CLIHandler {
         let box = ErrorBox()
         Task(priority: BackupEngine.WORK_PRIORITY) {
             do {
-                let cfg = try AutomaticCoverage.prepare(from: configURL)
-                if let r = try await BackupEngine.run(config: cfg) {
+                if let r = try await AutomaticCoverage.prepareAndRun(from: configURL) {
                     if r.manifest.complete {
                         print(green("Backup completo: \(r.snapshot.lastPathComponent) · \(r.manifest.filesProcessed) file"))
                     } else {
@@ -319,6 +321,7 @@ enum CLIHandler {
                     print("Last backup: \(status.lastCompleted)")
                     print("Duration: \(String(format: "%.1f", status.lastDurationSecs))s")
                     print("Files: \(status.filesTotal)")
+                    if let added = status.autoIncluded { print("Aggiunte da sole: \(added.count)") }
                 }
             case "error":
                 print("State: \(red(bold("ERROR")))")

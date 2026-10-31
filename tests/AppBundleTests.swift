@@ -132,6 +132,127 @@ struct AppBundleTests {
         try expectEqual(try String(contentsOf: external.appendingPathComponent("secret"), encoding: .utf8), "do not copy", "external source untouched")
     }
 
+    /// A launcher whose only executable is a link to a tool installed elsewhere (Claude Code's
+    /// URL handler) cannot be copied or verified on its own: macOS rejects its signature.
+    func test_externalMainExecutableIsListedAsNotSelfContainedNotAnError() throws {
+        let f = try AppTestFixture(); defer { f.cleanup() }
+        let fm = FileManager.default
+        let tool = f.box.root.appendingPathComponent("external/tool").path
+        try fm.createDirectory(atPath: (tool as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try AppBundleCopy.copyRegularFile(from: "/usr/bin/true", to: tool)
+        let launcher = try f.app("Launcher.app", identifier: "com.example.launcher")
+        let executable = launcher.path + "/Contents/MacOS/Shoji"
+        try fm.removeItem(atPath: executable)
+        try fm.createSymbolicLink(atPath: executable, withDestinationPath: tool)
+        let dangling = try f.app("Dangling.app", identifier: "com.example.dangling")
+        try fm.removeItem(atPath: dangling.path + "/Contents/MacOS/Shoji")
+        try fm.createSymbolicLink(atPath: dangling.path + "/Contents/MacOS/Shoji",
+                                  withDestinationPath: f.box.root.path + "/never-installed")
+        try f.app("Ordinary.app", identifier: "com.example.ordinary")
+
+        var refused = false
+        do { try AppBundleCopy.copy(from: launcher, to: f.box.root.appendingPathComponent("direct.app")) }
+        catch is AppBundleCopy.NeedsInstaller { refused = true }
+        try expect(refused, "a direct copy classifies the external launcher instead of failing on its signature")
+        try expect(!fm.fileExists(atPath: f.box.root.appendingPathComponent("direct.app").path), "no partial copy left")
+
+        let result = try f.backup()
+        try expect(result.manifest.complete, "an app that is recreated by its own program is not a backup error: \(result.manifest.incompleteReasons)")
+        let catalog = try AppCapture.read(from: result.snapshot)!
+        try expect(catalog.failures.isEmpty, "nothing is reported as a failure: \(catalog.failures)")
+        for name in ["Launcher.app", "Dangling.app"] {
+            guard let entry = catalog.entries.first(where: { $0.relativePath == name }) else {
+                throw TestFailure.failed("\(name) must stay listed in the catalog")
+            }
+            try expectEqual(entry.state, .installer, "\(name) is classified, not copied")
+            try expect(entry.reason.contains("non autonoma, ricreata dalla sua app"), "plain reason for \(name): \(entry.reason)")
+            try expect(!fm.fileExists(atPath: result.snapshot.path + "/_rustymacbackup/applications/system/" + name),
+                       "\(name) has no copy that could not run")
+        }
+        try expectEqual(catalog.entries.first { $0.relativePath == "Ordinary.app" }?.state, .saved,
+                        "ordinary apps are still saved whole")
+        try expectEqual(try fm.destinationOfSymbolicLink(atPath: executable), tool, "source link untouched")
+    }
+
+    /// Scar 2026-10-31: the menu kept asking to choose "1 path" with everything selected, because the
+    /// count included data of apps the picker never offers (this app itself).
+    func test_dataOfExcludedAppsIsNotARequestThePickerCannotMeet() throws {
+        let f = try AppTestFixture(); defer { f.cleanup() }
+        try f.app("Shoji.app", identifier: "com.example.shoji")
+        try f.app("Itself.app", identifier: AppIdentity.bundleID)
+        try f.app("Declined.app", identifier: "com.example.declined")
+        for identifier in ["com.example.shoji", AppIdentity.bundleID, "com.example.declined"] {
+            try f.write("settings", f.box.home + "/Library/Preferences/\(identifier).plist")
+        }
+        var config = f.config
+        config.applications.excludeBundleIDs = ["com.example.declined"]
+        let result = try f.backup(config: config)
+        let catalog = try AppCapture.read(from: result.snapshot)!
+        for identifier in [AppIdentity.bundleID, "com.example.declined"] {
+            let entry = catalog.entries.first { $0.bundleID == identifier }
+            try expectEqual(entry?.state, .excluded, "fixture: \(identifier) is excluded")
+            try expect(entry?.data.contains { $0.state == .notSelected } == true, "fixture: it has unselected data")
+        }
+        let offered = Set(AppInventory.dataCandidates(home: f.box.home, roots: f.roots).flatMap(\.paths))
+        try expect(offered.contains("~/Library/Preferences/com.example.shoji.plist"), "the picker offers the ordinary app's data")
+        try expect(!offered.contains("~/Library/Preferences/\(AppIdentity.bundleID).plist"),
+                   "the picker never offers this app's own data")
+        try expectEqual(result.manifest.applications?.unselectedDataPaths, 1,
+                        "only data that can still be chosen is asked for")
+        try expectEqual(StatusWriter(directory: f.box.state).read()?.applications?.unselectedDataPaths, 1,
+                        "the menu reads the same number")
+    }
+
+    func test_onlyDataThatCanStillBeChosenIsCounted() throws {
+        func entry(_ id: String, _ state: AppInventory.Entry.State, _ data: [(String, AppInventory.DataPath.State)]) -> AppInventory.Entry {
+            var entry = AppInventory.Entry(root: .system, relativePath: id + ".app", name: id)
+            entry.bundleID = "com.example." + id
+            entry.state = state
+            entry.data = data.map { AppInventory.DataPath(relativePath: $0.0, state: $0.1) }
+            return entry
+        }
+        let catalog = AppCapture.Catalog(entries: [
+            entry("saved", .saved, [("a", .notSelected), ("b", .selected), ("c", .excluded), ("d", .unavailable)]),
+            entry("excluded", .excluded, [("e", .notSelected)]),
+            entry("installer", .installer, [("a", .notSelected), ("f", .notSelected)]),
+        ], failures: [])
+        try expectEqual(AppCapture.Report(catalog: catalog).summary.unselectedDataPaths, 2,
+                        "a, f: not selected yet, from apps the picker offers, each path once")
+    }
+
+    /// The reclassification must not turn a broken signature of an ordinary app into a pass.
+    func test_signatureChecksOfOrdinaryAppsStayStrict() throws {
+        let f = try AppTestFixture(); defer { f.cleanup() }
+        let fm = FileManager.default
+        let signed = try f.app("Signed.app", identifier: "com.example.signed", signed: true)
+        try f.write("sealed", signed.path + "/Contents/Resources/data.txt")
+        let sealing = Shell.run("/usr/bin/codesign", ["--force", "--sign", "-", signed.path])
+        try expect(sealing.ok, "sealing the resource into the signature: \(sealing.stderr)")
+        try f.write("changed after signing", signed.path + "/Contents/Resources/data.txt")
+        var invalid = false
+        do { _ = try AppBundleCopy.isSigned(signed) } catch { invalid = true }
+        try expect(invalid, "the tampered fixture really has an invalid signature")
+        let linked = try f.app("Linked.app", identifier: "com.example.linked")
+        try f.write("#!/bin/sh\nexit 0\n", linked.path + "/Contents/Resources/real")
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: linked.path + "/Contents/Resources/real")
+        try fm.removeItem(atPath: linked.path + "/Contents/MacOS/Shoji")
+        try fm.createSymbolicLink(atPath: linked.path + "/Contents/MacOS/Shoji", withDestinationPath: "../Resources/real")
+
+        let result = try f.backup()
+        try expect(!result.manifest.complete, "an app with a broken signature still stops the snapshot from being complete")
+        try expect(result.manifest.incompleteReasons.contains { $0.contains("Firma dell'app non valida") },
+                   "the broken signature is reported: \(result.manifest.incompleteReasons)")
+        let catalog = try AppCapture.read(from: result.snapshot)!
+        try expectEqual(catalog.entries.first { $0.relativePath == "Signed.app" }?.state, .failed, "tampered signed app fails")
+        try expectEqual(catalog.entries.first { $0.relativePath == "Linked.app" }?.state, .saved,
+                        "an executable that is a link inside the bundle remains a portable app")
+        var rejected = false
+        do { try AppBundleCopy.copy(from: signed, to: f.box.root.appendingPathComponent("tampered.app")) }
+        catch is AppBundleCopy.NeedsInstaller { throw TestFailure.failed("a broken signature must not be reported as a launcher") }
+        catch { rejected = true }
+        try expect(rejected, "direct copies still reject an invalid signature")
+    }
+
     func test_copyMutationSpaceAndCancellationFailHonestly() throws {
         for scenario in ["copy", "mutation", "space", "cancel"] {
             let f = try AppTestFixture(); defer { f.cleanup() }

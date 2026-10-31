@@ -44,6 +44,7 @@ struct TestRunner {
         let config = ConfigParserTests()
         let automatic = AutomaticCoverageTests()
         let worktrees = WorktreePolicyTests()
+        let worktreeContents = WorktreeContentsTests()
         let backup = BackupEngineTests()
         let hardLinker = HardLinkerTests()
         let protection = RightsManagementTests()
@@ -72,6 +73,7 @@ struct TestRunner {
         let recovery = RecoveryCopyTests()
         let loginItem = LoginItemTests()
         let appBundles = AppBundleTests()
+        let appDataCount = AppDataCountTests()
         let appRecovery = AppRecoveryTests()
         let postgres = PostgresBackupTests()
 
@@ -80,13 +82,39 @@ struct TestRunner {
             ("Automatic.noUnsafeSources", automatic.test_secretsExclusionsAndLinksAreNeverAutomatic),
             ("Automatic.pickerOptOut", automatic.test_pickerOptOutAndAutoIncludeSwitchPersist),
             ("Automatic.partialSelection", automatic.test_partialSelectionNeverBroadensItsParent),
+            ("Automatic.pickerChildren", automatic.test_choosingFoldersOneByOneNeverRejectsTheirContainer),
+            ("Automatic.pickerHealsContainer", automatic.test_pickerConfirmationHealsAContainerRejectedBefore),
+            ("Automatic.rejectedFolderStaysRejected", automatic.test_aFolderWithNothingChosenStaysRejected),
+            ("Automatic.previewIsReadOnly", automatic.test_nextBackupPreviewIsReadOnlyAndMatchesWhatTheBackupAdds),
+            ("Automatic.previewIsQuick", automatic.test_menuPreviewReadsDatabasesFromTheLastAuditInsteadOfWalkingEverySource),
+            ("Automatic.additionsRecorded", automatic.test_automaticAdditionsAreRecordedAfterEveryBackup),
+            ("Automatic.additionsOwed", automatic.test_additionsOfARunThatCouldNotStartAreReportedByTheNextOne),
+            ("Automatic.menuAnnouncements", automatic.test_menuAnnouncesWhatWasAddedAndWhatComesNext),
             ("Worktrees.scannerExclusion", worktrees.test_backupSkipsLinkedWorktreesEvenWithOldConfig),
             ("Worktrees.safeCleanup", worktrees.test_cleanupOnlyRemovesMissingLinkedCopiesAndRecordsIt),
             ("Worktrees.cleanupFailureKeepsBackingUp", worktrees.test_cleanupFailureDoesNotBlockSubsequentBackups),
+            ("Worktrees.markerAnywhere", worktrees.test_cleanupFindsLinkedCopiesByMarkerWhereverTheyWereSaved),
+            ("Worktrees.searchRemembered", worktrees.test_searchedSnapshotsAreRememberedAndOnlyKnownCopiesAreChecked),
+            ("Worktrees.searchBounded", worktrees.test_searchTimeVersionAndCancellationBoundTheWork),
+            ("Worktrees.tamperedMemo", worktrees.test_aTamperedMemoNeverLeadsOutsideTheSnapshot),
+            ("Worktrees.unreachableLink", worktrees.test_aSourceBehindAnUnreachableLinkIsNotProvenAbsent),
+            ("Worktrees.rootPath", worktrees.test_aCheckoutThatStillExistsAtTheRootIsKept),
+            ("Worktrees.searchResumes", worktrees.test_aSearchThatRunsOutOfTimeContinuesWhereItStopped),
+            ("Worktrees.tamperedProgress", worktrees.test_aTamperedSearchProgressIsCheckedLikeAnyOtherPath),
+            ("Worktrees.keepsIgnoredFiles", worktreeContents.test_aCopyHoldingIgnoredFilesThatAreNotCachesIsKeptAndListed),
+            ("Worktrees.removesCachesOnly", worktreeContents.test_aCopyWithOnlyCachesIsStillRemoved),
+            ("Worktrees.unverifiableKept", worktreeContents.test_aCopyGitCannotExamineIsKeptAndListed),
+            ("Worktrees.knownCaches", worktreeContents.test_onlyKnownCachesAreRegenerable),
             ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),
             ("Applications.symlinkPermissionsUmask", appBundles.test_symlinkPermissionsDoNotDependOnUmask),
             ("Applications.discoveryDedupAndSourceSafety", appBundles.test_newAppsAndDedupNeverChangeSources),
             ("Applications.nonPortableAndLinks", appBundles.test_nonPortableAppsAreExplicitAndLinksAreNotFollowed),
+            ("Applications.externalLauncher", appBundles.test_externalMainExecutableIsListedAsNotSelfContainedNotAnError),
+            ("Applications.excludedAppData", appBundles.test_dataOfExcludedAppsIsNotARequestThePickerCannotMeet),
+            ("Applications.dataToChoose", appBundles.test_onlyDataThatCanStillBeChosenIsCounted),
+            ("Applications.oldCountIgnored", appDataCount.test_anOldCountOfOneWithNothingLeftToChooseIsNotShown),
+            ("Applications.realCountAsked", appDataCount.test_dataThatCanReallyBeChosenIsStillAsked),
+            ("Applications.signatureStaysStrict", appBundles.test_signatureChecksOfOrdinaryAppsStayStrict),
             ("Applications.failuresAndCancel", appBundles.test_copyMutationSpaceAndCancellationFailHonestly),
             ("Applications.explicitDataChoice", appBundles.test_appDataIsAnExplicitChoiceAndConfigPersists),
             ("Applications.fullRecoveryAndUndo", appRecovery.test_realEngineAndNewMacRecoverAppsAndSelectedSettings),

@@ -1,5 +1,42 @@
 # Changelog
 
+## [4.3.2] - 2026-10-31
+
+### Added
+- After every backup the menu says how many items were added by themselves ("Aggiunte da
+  sole: N", names on hover) and shows, read-only, what the next backup will add ("Entreranno
+  al prossimo backup"). The backup applies the very same rule that produces the preview, and
+  the preview never saves anything. The list is also kept in each snapshot's manifest, and
+  `status` and `coverage` print it. Items added for a run that could not start (disk not
+  connected) stay owed until a snapshot records them, so the next backup reports them.
+
+### Fixed
+- Choosing projects one by one in the folder picker no longer rejects the folder that holds
+  them. Before, a new project created later under that folder was neither added nor shown.
+  Unchecked items are still remembered; a confirmed choice also clears such a rejection left
+  by earlier versions.
+- The menu no longer asks to choose application data that cannot be chosen ("N percorsi non
+  salvati" with everything selected): data of excluded apps (this app itself, macOS apps,
+  your exclusions) and data that is excluded or unreadable is not counted. A count left in
+  the status file by an older version is ignored until the next backup counts again.
+- An app whose main executable is a link to a program installed elsewhere (Claude Code's URL
+  handler) is listed as "non autonoma, ricreata dalla sua app" instead of failing its
+  signature check and leaving every snapshot incomplete. Signature checks of ordinary apps
+  are unchanged.
+- Saved copies of deleted worktrees are found by their `.git` marker wherever they sit in a
+  snapshot, not only below `GitHub/worktrees`, and removed under the same safety checks
+  (same Mac, main repository still present under the home folder, exact live source absent
+  and its place reachable, destination lock held, audit record). Snapshots made before
+  4.3.0 are searched once, in short steps (at most 30 s per backup, at low disk priority,
+  cancellable, resumed where it stopped) and the result is remembered; `cleanup-worktrees`
+  searches them all again. While a step runs the menu can look idle for a few seconds
+  before the backup starts.
+- A saved copy of a deleted worktree that holds files git ignores and that are not caches
+  (exports, local helpers: they are in no commit and may exist nowhere else) is never
+  removed. It is kept, remembered in the snapshot's manifest and listed by
+  `cleanup-worktrees`; so is a copy git cannot examine. Caches their tool rebuilds
+  (`__pycache__`, `node_modules`, `.venv`, `.build`, `DerivedData`, …) do not count.
+
 ## [4.3.1] - 2026-10-31
 
 ### Fixed

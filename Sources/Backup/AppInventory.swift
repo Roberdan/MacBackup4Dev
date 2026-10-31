@@ -159,6 +159,9 @@ enum AppInventory {
                         }) {
                             entry.state = .installer
                             entry.reason = "Contiene componenti di sistema: usa l'installer originale."
+                        } else if let link = AppBundleCopy.externalMainExecutable(app, info: info) {
+                            entry.state = .installer
+                            entry.reason = AppBundleCopy.notSelfContainedReason(link)
                         } else {
                             entry.warnings.append("Accessi, licenze e permessi di macOS possono richiedere una nuova conferma.")
                         }

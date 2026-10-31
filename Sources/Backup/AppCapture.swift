@@ -15,7 +15,14 @@ enum AppCapture {
         var needsInstaller: Int
         var failed: Int
         var unselectedDataPaths: Int
+        /// The rule `unselectedDataPaths` was counted by; absent in files written before 4.3.2.
+        var dataCountRule: Int? = nil
     }
+
+    /// Before 4.3.2 the count included data of excluded apps (this app itself) that the picker never
+    /// offers, so the menu asked to choose what could not be chosen. A count made by that rule
+    /// must not be trusted: it carries no number here.
+    static let dataCountRule = 2
 
     struct Report {
         var catalog: Catalog
@@ -24,9 +31,17 @@ enum AppCapture {
             Summary(saved: catalog.entries.filter { $0.state == .saved }.count,
                     needsInstaller: catalog.entries.filter { $0.state == .installer }.count,
                     failed: catalog.failures.count,
-                    unselectedDataPaths: Set(catalog.entries.flatMap(\.data)
-                        .filter { $0.state != .selected }.map(\.relativePath)).count)
+                    unselectedDataPaths: AppCapture.dataToChoose(in: catalog.entries).count,
+                    dataCountRule: AppCapture.dataCountRule)
         }
+    }
+
+    /// App data the user can still choose in the picker. Apps that are excluded (this app, macOS,
+    /// the user's own exclusions) are not offered there, and data that is excluded or unreadable
+    /// cannot be chosen: counting them made the menu ask for something impossible.
+    static func dataToChoose(in entries: [AppInventory.Entry]) -> Set<String> {
+        Set(entries.filter { $0.state != .excluded && !$0.bundleID.isEmpty }
+            .flatMap(\.data).filter { $0.state == .notSelected }.map(\.relativePath))
     }
 
     static func catalogURL(in snapshot: URL) -> URL {
@@ -80,6 +95,7 @@ enum AppCapture {
                     let source = root.url.appendingPathComponent(entry.relativePath)
                     let target = directory.appendingPathComponent(entry.storagePath)
                     try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try AppBundleCopy.requireSelfContainedExecutable(source)
                     entry.signed = try AppBundleCopy.isSigned(source)
                     entry.fingerprint = try AppBundleCopy.copy(from: source, to: target,
                         previous: previous?.appendingPathComponent(directoryName + "/" + entry.storagePath), options: options)

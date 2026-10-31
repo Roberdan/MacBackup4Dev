@@ -16,6 +16,8 @@ struct BackupRunOptions {
     var applicationRoots: [AppInventory.Root]? = nil
     var applicationCopyOptions = AppBundleCopy.Options()
     var applicationInstallers: [String: AppInstallers.Hint]? = nil
+    /// Items `AutomaticCoverage` added to the settings just before this run (`~/` form).
+    var automaticallyIncluded: [String] = []
 }
 
 /// Bounded hand-off between the scanner and the copy workers. Unlike a DispatchSemaphore it
@@ -89,6 +91,14 @@ enum BackupEngine {
         let destPath = config.destination.path
         let destURL = URL(fileURLWithPath: destPath)
         let home = options.home
+        // What the settings gained by themselves is owed to a snapshot: remember it before any check
+        // that can end the run (disk absent, store not open), and keep it until a snapshot records it.
+        let carried = statusWriter.readPendingAdditions()
+        let reportedAdditions = carried + options.automaticallyIncluded.filter { !carried.contains($0) }
+        if !options.automaticallyIncluded.isEmpty {
+            do { try statusWriter.writePendingAdditions(reportedAdditions) }
+            catch { Log.error("Cannot remember the automatic additions: \(error.localizedDescription)") }
+        }
         let excludeFilter = ExcludeFilter(patterns: config.exclude.patterns)
         let homePrefix = home.hasSuffix("/") ? home : home + "/"
 
@@ -155,11 +165,6 @@ enum BackupEngine {
         let lockPath = destURL.appendingPathComponent("rustymacbackup.lock").path
         try acquireLock(at: lockPath)
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
-        do {
-            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home)
-        } catch {
-            Log.warn("Worktree cleanup deferred; backup will continue: \(error.localizedDescription)")
-        }
 
         let onBattery = IOPriority.isOnBattery()
         let previousIOPolicy = try IOPriority.beginBackup(onBattery: onBattery)
@@ -168,6 +173,12 @@ enum BackupEngine {
             catch { Log.error("Cannot restore disk I/O priority: \(error.localizedDescription)") }
         }
         Log.info("Backup priorities: CPU=\(Task.currentPriority.rawValue), disk=\(IOPriority.backupPolicy(onBattery: onBattery, previous: previousIOPolicy)), workers=\(MAX_WORKERS)")
+        // After the priorities: searching old snapshots walks a lot of folders and must be gentle.
+        do {
+            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home, cancelled: { token.isCancelled })
+        } catch {
+            Log.warn("Worktree cleanup deferred; backup will continue: \(error.localizedDescription)")
+        }
 
         let previousComplete = SnapshotCatalog.latestComplete(at: destURL)
         // Without a verified snapshot yet (first 3.0 run), compare with the newest old one,
@@ -211,6 +222,7 @@ enum BackupEngine {
         status.state = "running"
         status.phase = "scanning"
         status.startedAt = ISO8601DateFormatter().string(from: startTime)
+        status.autoIncluded = reportedAdditions
         status.filesDone = 0
         status.filesTotal = 0
         status.bytesCopied = 0
@@ -460,11 +472,15 @@ enum BackupEngine {
             filesSkipped: Int64(stats.filesSkipped), bytesCopied: stats.bytesCopied,
             errorCount: copyErrors, traversalErrorCount: traversalCount,
             git: gitRecords, databases: dbRecords, shrinkWarning: shrink,
-            complete: complete, incompleteReasons: reasons, applications: applicationReport?.summary)
+            complete: complete, incompleteReasons: reasons, applications: applicationReport?.summary,
+            automaticallyIncluded: reportedAdditions.isEmpty ? nil : reportedAdditions)
         try manifest.write(to: inProgressURL)
 
         let finalURL = destURL.appendingPathComponent(timestamp)
         try FileManager.default.moveItem(at: inProgressURL, to: finalURL)
+        // The snapshot is on disk with the additions in its manifest: nothing is owed any more.
+        do { try statusWriter.writePendingAdditions([]) }
+        catch { Log.error("Cannot clear the owed automatic additions: \(error.localizedDescription)") }
         if complete {
             Log.info("Snapshot \(timestamp) complete: \(processedCount) files")
         } else {
