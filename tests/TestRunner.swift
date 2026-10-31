@@ -95,6 +95,8 @@ struct TestRunner {
             ("Worktrees.searchRemembered", worktrees.test_searchedSnapshotsAreRememberedAndOnlyKnownCopiesAreChecked),
             ("Worktrees.searchBounded", worktrees.test_searchTimeVersionAndCancellationBoundTheWork),
             ("Worktrees.tamperedMemo", worktrees.test_aTamperedMemoNeverLeadsOutsideTheSnapshot),
+            ("Worktrees.unreachableLink", worktrees.test_aSourceBehindAnUnreachableLinkIsNotProvenAbsent),
+            ("Worktrees.rootPath", worktrees.test_aCheckoutThatStillExistsAtTheRootIsKept),
             ("Worktrees.searchResumes", worktrees.test_aSearchThatRunsOutOfTimeContinuesWhereItStopped),
             ("Worktrees.tamperedProgress", worktrees.test_aTamperedSearchProgressIsCheckedLikeAnyOtherPath),
             ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),

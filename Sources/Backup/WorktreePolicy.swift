@@ -262,12 +262,29 @@ enum WorktreePolicy {
         return values.isDirectory == true && values.isSymbolicLink != true
     }
 
+    /// ENOENT proves absence only where the place the path would be in can be reached: a link to an
+    /// unplugged disk, or a folder that cannot be read, makes the path "not found" just the same.
+    /// So the nearest folder that exists above it must be a real, reachable directory.
     private static func isMissing(_ url: URL) -> Bool {
         var metadata = stat()
         if lstat(url.path, &metadata) == 0 { return false }
-        let code = errno
-        if code != ENOENT { Log.warn("Worktree copy retained: cannot verify source \(url.path), errno \(code)") }
-        return code == ENOENT
+        guard errno == ENOENT else {
+            Log.warn("Worktree copy retained: cannot verify source \(url.path), errno \(errno)")
+            return false
+        }
+        var ancestor = url.deletingLastPathComponent().path
+        while true {
+            if lstat(ancestor, &metadata) == 0 {
+                var reached = stat()
+                let isDirectory = metadata.st_mode & S_IFMT == S_IFLNK
+                    ? stat(ancestor, &reached) == 0 && reached.st_mode & S_IFMT == S_IFDIR
+                    : metadata.st_mode & S_IFMT == S_IFDIR
+                if !isDirectory { Log.warn("Worktree copy retained: \(ancestor) cannot be reached to verify \(url.path)") }
+                return isDirectory
+            }
+            guard errno == ENOENT, ancestor != "/" else { return false }
+            ancestor = (ancestor as NSString).deletingLastPathComponent
+        }
     }
 
     private static func allocatedBytes(in directory: URL) throws -> UInt64 {

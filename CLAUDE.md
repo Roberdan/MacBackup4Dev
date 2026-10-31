@@ -186,9 +186,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   it and `pending` previews it read-only for the menu, so the two always agree. Every backup,
   from the menu or the schedule, goes through `prepareAndRun`, which records the additions in
   `status.json` (`auto_included`) and the manifest; the menu shows "Aggiunte da sole: N".
-  Additions made for a run that cannot start (disk absent) are kept in
-  `status.auto_included_pending` until a snapshot records them; the engine persists them
-  before any check that can end the run.
+  Additions made for a run that cannot start (disk absent) are kept in their own file
+  (`auto-included-pending.json`, next to the status file: a running backup keeps rewriting
+  the status) until a snapshot records them; the engine writes it before any check that
+  can end the run.
   Discovery walks every source for databases (measured 1–2 minutes on a 171-source
   configuration); the menu preview must pass `knownDatabaseGaps` (last audit) instead.
 - **Temporary worktrees (4.3):** file scanning never copies linked git worktrees or
@@ -200,7 +201,9 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   Since 4.3.2 copies are found by marker (a `.git` file `gitdir: <home>/…/.git/worktrees/<name>`)
   anywhere in a snapshot except `_rustymacbackup`, `_environment`, `Volumes` and `.git`
   stores; the main repository must be a real directory under the home folder and neither
-  `<home>/<path>` nor `/<path>` may exist. Snapshots made before 4.3.0 are searched once
+  `<home>/<path>` nor `/<path>` may exist. ENOENT counts as absence only when the nearest
+  existing folder above the path is a real, reachable directory (a link to an unplugged disk
+  also says "not found"). Snapshots made before 4.3.0 are searched once
   (`WorktreePolicy.search` stops between two folders when the 30 s budget, `cancelled` or a
   test's `maxFolders` say so and `manifest.worktreeSearch` resumes it) and the result is
   remembered in `manifest.temporaryWorktreeCopies`; searched snapshots are only re-checked,

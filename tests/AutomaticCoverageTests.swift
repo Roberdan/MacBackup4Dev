@@ -328,7 +328,7 @@ final class AutomaticCoverageTests {
         do { _ = try run() } catch BackupError.volumeNotMounted { refused = true }
         try expect(refused, "the first run really could not start")
         try expect(try Config.load(from: url).source.paths.contains("~/NewFolder"), "the settings already hold the new folder")
-        try expectEqual(writer.read()?.autoIncludedPending, ["~/NewFolder"], "the addition is owed to a snapshot, not lost")
+        try expectEqual(writer.readPendingAdditions(), ["~/NewFolder"], "the addition is owed to a snapshot, not lost")
         try expectNil(writer.read()?.autoIncluded, "and not announced as part of a backup that never happened")
 
         var back = try Config.load(from: url)
@@ -338,7 +338,7 @@ final class AutomaticCoverageTests {
         try expect(second.manifest.complete, "backup complete: \(second.manifest.incompleteReasons)")
         try expectEqual(writer.read()?.autoIncluded, ["~/NewFolder"], "the backup that copies it first reports it")
         try expectEqual(second.manifest.automaticallyIncluded, ["~/NewFolder"], "so does its snapshot")
-        try expectNil(writer.read()?.autoIncludedPending, "nothing is owed once a snapshot records it")
+        try expect(writer.readPendingAdditions().isEmpty, "nothing is owed once a snapshot records it")
         _ = try run()
         try expectEqual(writer.read()?.autoIncluded, [], "and the next one is back to zero")
     }

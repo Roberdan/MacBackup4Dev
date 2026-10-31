@@ -1313,7 +1313,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 .map { AutomaticCoverage.pending(config: $0, knownDatabaseGaps: known) } ?? []
             // Already in the settings but not yet recorded by a snapshot (the run that added them did
             // not start): they are still coming.
-            let owed = (StatusWriter().read()?.autoIncludedPending ?? []).map {
+            let owed = StatusWriter().readPendingAdditions().map {
                 CoverageGap(kind: .folder, path: $0, lastModified: "", approximateBytes: 0)
             }
             let coming = owed + pending.filter { gap in !owed.contains { $0.path == gap.path } }

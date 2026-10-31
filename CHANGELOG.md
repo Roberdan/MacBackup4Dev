@@ -24,10 +24,12 @@
   are unchanged.
 - Saved copies of deleted worktrees are found by their `.git` marker wherever they sit in a
   snapshot, not only below `GitHub/worktrees`, and removed under the same safety checks
-  (same Mac, main repository still present under the home folder, exact live source absent,
-  destination lock held, audit record). Snapshots made before 4.3.0 are searched once, in
-  short steps (at most 30 s per backup, at low disk priority, cancellable, resumed where it
-  stopped) and the result is remembered; `cleanup-worktrees` searches them all again.
+  (same Mac, main repository still present under the home folder, exact live source absent
+  and its place reachable, destination lock held, audit record). Snapshots made before
+  4.3.0 are searched once, in short steps (at most 30 s per backup, at low disk priority,
+  cancellable, resumed where it stopped) and the result is remembered; `cleanup-worktrees`
+  searches them all again. While a step runs the menu can look idle for a few seconds
+  before the backup starts.
 
 ## [4.3.1] - 2026-10-31
 

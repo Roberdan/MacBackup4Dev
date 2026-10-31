@@ -93,12 +93,10 @@ enum BackupEngine {
         let home = options.home
         // What the settings gained by themselves is owed to a snapshot: remember it before any check
         // that can end the run (disk absent, store not open), and keep it until a snapshot records it.
-        let carried = statusWriter.read()?.autoIncludedPending ?? []
+        let carried = statusWriter.readPendingAdditions()
         let reportedAdditions = carried + options.automaticallyIncluded.filter { !carried.contains($0) }
         if !options.automaticallyIncluded.isEmpty {
-            var early = statusWriter.read() ?? BackupStatusFile()
-            early.autoIncludedPending = reportedAdditions
-            do { try statusWriter.write(status: early) }
+            do { try statusWriter.writePendingAdditions(reportedAdditions) }
             catch { Log.error("Cannot remember the automatic additions: \(error.localizedDescription)") }
         }
         let excludeFilter = ExcludeFilter(patterns: config.exclude.patterns)
@@ -480,6 +478,9 @@ enum BackupEngine {
 
         let finalURL = destURL.appendingPathComponent(timestamp)
         try FileManager.default.moveItem(at: inProgressURL, to: finalURL)
+        // The snapshot is on disk with the additions in its manifest: nothing is owed any more.
+        do { try statusWriter.writePendingAdditions([]) }
+        catch { Log.error("Cannot clear the owed automatic additions: \(error.localizedDescription)") }
         if complete {
             Log.info("Snapshot \(timestamp) complete: \(processedCount) files")
         } else {
@@ -526,8 +527,6 @@ enum BackupEngine {
         status.errors = UInt64(errorList.count)
         status.filesSkipped = stats.filesSkipped
         status.lastResult = complete ? "complete" : "incomplete"
-        // The snapshot is on disk with the additions in its manifest: nothing is owed any more.
-        status.autoIncludedPending = nil
         status.incompleteReasons = reasons
         status.lastSnapshot = timestamp
         status.applications = applicationReport?.summary

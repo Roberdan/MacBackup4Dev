@@ -220,6 +220,56 @@ final class WorktreePolicyTests {
                         "an explicit request searches again")
     }
 
+    /// "Not found" is no proof when the folder above cannot be reached (a link to an unplugged disk):
+    /// the only copy of someone's unsaved work must wait until the place can be looked at.
+    func test_aSourceBehindAnUnreachableLinkIsNotProvenAbsent() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        let fm = FileManager.default
+        try safety.write("source", to: box.home + "/GitHub/main/file.txt")
+        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
+        let copy = snapshot.appendingPathComponent("Ext/agents/wt")
+        try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/wt\n", to: copy.path + "/.git")
+        try safety.write("only copy", to: copy.path + "/unsaved.txt")
+        let unplugged = box.root.appendingPathComponent("external-disk").path
+        try fm.createSymbolicLink(atPath: box.home + "/Ext", withDestinationPath: unplugged)
+        let destination = URL(fileURLWithPath: box.dest)
+
+        let away = try WorktreePolicy.cleanup(at: destination, home: box.home)
+        try expect(away.removed.isEmpty && fm.fileExists(atPath: copy.path + "/unsaved.txt"),
+                   "the disk is away: the checkout is not proven absent")
+        try fm.createDirectory(atPath: unplugged + "/agents", withIntermediateDirectories: true)
+        let back = try WorktreePolicy.cleanup(at: destination, home: box.home)
+        try expectEqual(back.removed, [snapshot.lastPathComponent + "/Ext/agents/wt"],
+                        "the place can be looked at again and the checkout is really gone: removed")
+    }
+
+    /// A snapshot path is relative to the home folder or, for sources outside it, to /.
+    func test_aCheckoutThatStillExistsAtTheRootIsKept() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        let fm = FileManager.default
+        try safety.write("source", to: box.home + "/GitHub/main/file.txt")
+        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
+        let name = "mb4d-live-" + UUID().uuidString
+        let live = "/tmp/" + name
+        try safety.write("unsaved", to: live + "/unsaved.txt")
+        defer { try? fm.removeItem(atPath: live) }
+        let copy = snapshot.appendingPathComponent("tmp/" + name)
+        try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/wt\n", to: copy.path + "/.git")
+        try safety.write("temporary", to: copy.path + "/file.txt")
+        let destination = URL(fileURLWithPath: box.dest)
+
+        let present = try WorktreePolicy.cleanup(at: destination, home: box.home)
+        try expect(present.removed.isEmpty && fm.fileExists(atPath: copy.path + "/file.txt"),
+                   "the checkout still exists at /<path>: kept even though ~/<path> does not exist")
+        try fm.removeItem(atPath: live)
+        let gone = try WorktreePolicy.cleanup(at: destination, home: box.home)
+        try expectEqual(gone.removed, [snapshot.lastPathComponent + "/tmp/" + name], "gone from both places: removed")
+    }
+
     /// The remembered list is a file: whatever it says, nothing outside the snapshot is touched.
     func test_aTamperedMemoNeverLeadsOutsideTheSnapshot() throws {
         let box = try safety.makeSandbox()

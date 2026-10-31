@@ -25,9 +25,6 @@ struct BackupStatusFile: Codable {
     /// Items added to the settings by themselves for the last backup; nil in status files from
     /// before 4.3.2, where nobody recorded it.
     var autoIncluded: [String]?
-    /// Added to the settings but not yet recorded by any snapshot (the run that added them could
-    /// not start or was stopped): the next backup that finishes reports them.
-    var autoIncludedPending: [String]?
 
     var finalizationStepDate: Date? {
         guard state == "running", phase == "finalizing",
@@ -93,7 +90,6 @@ struct BackupStatusFile: Codable {
         case finalizationStepStartedAt = "finalization_step_started_at"
         case applications
         case autoIncluded = "auto_included"
-        case autoIncludedPending = "auto_included_pending"
     }
 
     init(state: String = "idle", phase: String = "",
@@ -140,11 +136,15 @@ final class StatusWriter {
     let statusPath: String
     let errorPath: String
     let coveragePath: String
+    /// What the settings gained by themselves for runs that could not start, until a snapshot
+    /// records it. A file of its own: a running backup keeps rewriting the status file.
+    let pendingAdditionsPath: String
 
     init(directory: String = StatusWriter.directory) {
         statusPath = "\(directory)/status.json"
         errorPath = "\(directory)/errors.json"
         coveragePath = "\(directory)/coverage.json"
+        pendingAdditionsPath = "\(directory)/auto-included-pending.json"
     }
 
     func write(status: BackupStatusFile) throws {
@@ -157,6 +157,21 @@ final class StatusWriter {
 
     func writeCoverage(_ report: CoverageReport) throws {
         try writeJSON(report, to: URL(fileURLWithPath: coveragePath))
+    }
+
+    func readPendingAdditions() -> [String] {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: pendingAdditionsPath)) else { return [] }
+        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+
+    /// An empty list removes the file: nothing is owed.
+    func writePendingAdditions(_ paths: [String]) throws {
+        if paths.isEmpty {
+            do { try FileManager.default.removeItem(atPath: pendingAdditionsPath) }
+            catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {}
+            return
+        }
+        try writeJSON(paths, to: URL(fileURLWithPath: pendingAdditionsPath))
     }
 
     func readCoverage() -> CoverageReport? {
