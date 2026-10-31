@@ -121,12 +121,17 @@ final class PreparationSpeedTests {
     }
 
     /// Round 1 of @thor: a `..` in a path made the search for links turn for ever, and so stalled every backup.
+    /// Round 2: the first version of this test never got into the loop, because nothing it named existed
+    /// and the first look at the path already failed; the folders and the file must be there.
     func test_aPathWithParentPartsNeverHangsTheSearchForLinks() throws {
         let box = try safety.makeSandbox()
         defer { safety.cleanup(box) }
+        try FileManager.default.createDirectory(atPath: box.home + "/existing", withIntermediateDirectories: true)
+        try safety.write("x", to: box.home + "/.config/secrets/x.db")
         let done = DispatchSemaphore(value: 0)
         let answer = ResultBox<Bool>()
         let path = box.home + "/existing/../.config/secrets/x.db"
+        try expect(FileManager.default.fileExists(atPath: path), "fixture: the path really leads to a file")
         let home = box.home
         Thread.detachNewThread {
             answer.value = AutomaticCoverage.hasLinkedAncestor(path, home: home)
