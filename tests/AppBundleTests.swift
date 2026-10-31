@@ -37,6 +37,46 @@ struct AppBundleTests {
         try expect(try AppBundleCopy.isSigned(target), "ad-hoc signature remains valid")
     }
 
+    func test_symlinkPermissionsDoNotDependOnUmask() throws {
+        let originalMask = umask(0o022)
+        defer { umask(originalMask) }
+        let f = try AppTestFixture(); defer { f.cleanup() }
+        let source = try f.app(signed: true)
+        let relative = "Contents/Resources/payload"
+        let payload = source.appendingPathComponent(relative)
+        let link = source.appendingPathComponent("Contents/Resources/current")
+        try f.write("immutable resource", payload.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: payload.path)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "payload")
+        let signing = Shell.run("/usr/bin/codesign", ["--force", "--sign", "-", source.path])
+        try expect(signing.ok, "signing the sandbox app with its internal link: \(signing.stderr)")
+        let expected = try AppBundleCopy.fingerprint(source)
+        let originalPayload = try AppInventory.metadata(payload)
+        let originalLink = try AppInventory.metadata(link)
+        try expectEqual(originalLink.st_mode & 0o777, 0o755, "fixture link starts with ordinary launch permissions")
+
+        let first = f.box.root.appendingPathComponent("first-copy.app")
+        try AppBundleCopy.copy(from: source, to: first)
+        umask(0o077)
+        let second = f.box.root.appendingPathComponent("restricted-copy.app")
+        try AppBundleCopy.copy(from: source, to: second, previous: first)
+
+        for saved in [first, second] {
+            try expectEqual(try AppBundleCopy.fingerprint(saved), expected, "all app contents and modes survive either umask")
+            try expect(try AppBundleCopy.isSigned(saved), "signature survives either umask")
+            try expectEqual(try AppInventory.metadata(saved.appendingPathComponent("Contents/Resources/current")).st_mode & 0o777,
+                            originalLink.st_mode & 0o777, "link permissions are independent of umask")
+        }
+        let oldPayload = try AppInventory.metadata(first.appendingPathComponent(relative))
+        let newPayload = try AppInventory.metadata(second.appendingPathComponent(relative))
+        try expectEqual(newPayload.st_ino, oldPayload.st_ino, "regular resource remains deduplicated")
+        try expectEqual(newPayload.st_mode & 0o777, 0o640, "link metadata does not change its shared target")
+        try expect(oldPayload.st_ino != originalPayload.st_ino, "resource is never linked to the live source")
+        try expectEqual(try AppInventory.metadata(payload).st_ino, originalPayload.st_ino, "source resource is not replaced")
+        try expectEqual(try AppInventory.metadata(link).st_ino, originalLink.st_ino, "source link is not replaced")
+        try expectEqual(try AppBundleCopy.fingerprint(source), expected, "source contents and modes are unchanged")
+    }
+
     func test_newAppsAndDedupNeverChangeSources() throws {
         let f = try AppTestFixture(); defer { f.cleanup() }
         let app = try f.app()

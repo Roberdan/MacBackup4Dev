@@ -88,7 +88,7 @@ enum AppBundleCopy {
                     if !node.relative.isEmpty { try FileManager.default.createDirectory(at: to, withIntermediateDirectories: false) }
                 case S_IFLNK:
                     guard let target = node.target else { throw AppInventory.failure("Collegamento non leggibile.") }
-                    try FileManager.default.createSymbolicLink(atPath: to.path, withDestinationPath: target)
+                    try copySymbolicLink(target: target, to: to, mode: node.metadata.st_mode)
                 case S_IFREG:
                     if regularFiles % 100 == 0 || UInt64(node.metadata.st_size) >= spaceBudget {
                         let free = try options.availableBytes(destination)
@@ -165,6 +165,24 @@ enum AppBundleCopy {
         defer { close(descriptor) }
         try prepare(descriptor, root)
         try FileManager.default.removeItem(at: root)
+    }
+
+    private static func copySymbolicLink(target: String, to destination: URL, mode: mode_t) throws {
+        try FileManager.default.createSymbolicLink(atPath: destination.path, withDestinationPath: target)
+        // O_SYMLINK pins the link itself, so changing its mode never follows its target.
+        let descriptor = open(destination.path, O_RDONLY | O_SYMLINK | O_CLOEXEC)
+        guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        defer { close(descriptor) }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        guard metadata.st_mode & S_IFMT == S_IFLNK else {
+            throw AppInventory.failure("Il collegamento dell'app non è più un collegamento simbolico.")
+        }
+        guard fchmod(descriptor, mode & 0o777) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
     }
 
     static func copyRegularFile(from source: String, to destination: String) throws {

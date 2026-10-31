@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.1] - 2026-10-31
+
+### Fixed
+- Application copies preserve the permissions of internal symbolic links even when the
+  backup starts with restrictive permissions. Integrity and signature checks remain
+  enforced; live source files and files shared with older snapshots stay unchanged.
+
 ## [4.3.0] - 2026-10-30
 
 ### Added
