@@ -25,6 +25,9 @@ struct BackupStatusFile: Codable {
     /// Items added to the settings by themselves for the last backup; nil in status files from
     /// before 4.3.2, where nobody recorded it.
     var autoIncluded: [String]?
+    /// Added to the settings but not yet recorded by any snapshot (the run that added them could
+    /// not start or was stopped): the next backup that finishes reports them.
+    var autoIncludedPending: [String]?
 
     var finalizationStepDate: Date? {
         guard state == "running", phase == "finalizing",
@@ -90,6 +93,7 @@ struct BackupStatusFile: Codable {
         case finalizationStepStartedAt = "finalization_step_started_at"
         case applications
         case autoIncluded = "auto_included"
+        case autoIncludedPending = "auto_included_pending"
     }
 
     init(state: String = "idle", phase: String = "",

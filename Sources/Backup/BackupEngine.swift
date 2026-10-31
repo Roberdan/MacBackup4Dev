@@ -91,6 +91,16 @@ enum BackupEngine {
         let destPath = config.destination.path
         let destURL = URL(fileURLWithPath: destPath)
         let home = options.home
+        // What the settings gained by themselves is owed to a snapshot: remember it before any check
+        // that can end the run (disk absent, store not open), and keep it until a snapshot records it.
+        let carried = statusWriter.read()?.autoIncludedPending ?? []
+        let reportedAdditions = carried + options.automaticallyIncluded.filter { !carried.contains($0) }
+        if !options.automaticallyIncluded.isEmpty {
+            var early = statusWriter.read() ?? BackupStatusFile()
+            early.autoIncludedPending = reportedAdditions
+            do { try statusWriter.write(status: early) }
+            catch { Log.error("Cannot remember the automatic additions: \(error.localizedDescription)") }
+        }
         let excludeFilter = ExcludeFilter(patterns: config.exclude.patterns)
         let homePrefix = home.hasSuffix("/") ? home : home + "/"
 
@@ -157,11 +167,6 @@ enum BackupEngine {
         let lockPath = destURL.appendingPathComponent("rustymacbackup.lock").path
         try acquireLock(at: lockPath)
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
-        do {
-            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home, cancelled: { token.isCancelled })
-        } catch {
-            Log.warn("Worktree cleanup deferred; backup will continue: \(error.localizedDescription)")
-        }
 
         let onBattery = IOPriority.isOnBattery()
         let previousIOPolicy = try IOPriority.beginBackup(onBattery: onBattery)
@@ -170,6 +175,12 @@ enum BackupEngine {
             catch { Log.error("Cannot restore disk I/O priority: \(error.localizedDescription)") }
         }
         Log.info("Backup priorities: CPU=\(Task.currentPriority.rawValue), disk=\(IOPriority.backupPolicy(onBattery: onBattery, previous: previousIOPolicy)), workers=\(MAX_WORKERS)")
+        // After the priorities: searching old snapshots walks a lot of folders and must be gentle.
+        do {
+            _ = try WorktreePolicy.cleanupLocked(at: destURL, home: home, cancelled: { token.isCancelled })
+        } catch {
+            Log.warn("Worktree cleanup deferred; backup will continue: \(error.localizedDescription)")
+        }
 
         let previousComplete = SnapshotCatalog.latestComplete(at: destURL)
         // Without a verified snapshot yet (first 3.0 run), compare with the newest old one,
@@ -213,7 +224,7 @@ enum BackupEngine {
         status.state = "running"
         status.phase = "scanning"
         status.startedAt = ISO8601DateFormatter().string(from: startTime)
-        status.autoIncluded = options.automaticallyIncluded
+        status.autoIncluded = reportedAdditions
         status.filesDone = 0
         status.filesTotal = 0
         status.bytesCopied = 0
@@ -464,7 +475,7 @@ enum BackupEngine {
             errorCount: copyErrors, traversalErrorCount: traversalCount,
             git: gitRecords, databases: dbRecords, shrinkWarning: shrink,
             complete: complete, incompleteReasons: reasons, applications: applicationReport?.summary,
-            automaticallyIncluded: options.automaticallyIncluded.isEmpty ? nil : options.automaticallyIncluded)
+            automaticallyIncluded: reportedAdditions.isEmpty ? nil : reportedAdditions)
         try manifest.write(to: inProgressURL)
 
         let finalURL = destURL.appendingPathComponent(timestamp)
@@ -515,6 +526,8 @@ enum BackupEngine {
         status.errors = UInt64(errorList.count)
         status.filesSkipped = stats.filesSkipped
         status.lastResult = complete ? "complete" : "incomplete"
+        // The snapshot is on disk with the additions in its manifest: nothing is owed any more.
+        status.autoIncludedPending = nil
         status.incompleteReasons = reasons
         status.lastSnapshot = timestamp
         status.applications = applicationReport?.summary

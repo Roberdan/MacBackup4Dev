@@ -183,6 +183,8 @@ An app copy is **not a promise that all its data or dependencies were saved**:
   `~/Library/Application Support/` folders require explicit selection in **Scegli dati**.
   Additional app-data choices start off; known-tool settings keep their existing picker
   entries and choices. Configured exclusions still apply. Unknown locations are not guessed.
+  The menu asks only for what the picker can still offer: data of excluded apps (this app,
+  macOS apps, your own exclusions) and excluded or unreadable data are never counted.
 - Protected containers, Keychain, login services, system components, accounts, licences and
   macOS permissions are not transferred by copying an app. Sign-in, activation, a compatible
   macOS version or the original installer may still be necessary.
@@ -651,8 +653,9 @@ ignore = ["~/Scratch"]          # never auto-add or suggest this folder
   marker (a file starting with `gitdir:`) wherever they sit in a snapshot, and removed only
   when their exact live source is absent, their main repository can still be verified under
   your home folder, on the same Mac and while holding the destination lock. Snapshots made
-  before 4.3.0 are searched once, a little at a time (at most 30 s per backup) and the result
-  is remembered in their manifest; later snapshots cannot contain such copies. Each removal is
+  before 4.3.0 are searched once, a little at a time (at most 30 s per backup, at low disk
+  priority, resumed where it stopped) and the result is remembered in their manifest; later
+  snapshots cannot contain such copies. Each removal is
   recorded in that snapshot's manifest with its path, size, date and reason. Main
   repositories, live checkouts and uncertain cases are untouched. `MacBackup4Dev
   cleanup-worktrees` searches every old snapshot again now.

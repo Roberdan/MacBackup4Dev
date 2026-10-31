@@ -174,6 +174,52 @@ struct AppBundleTests {
         try expectEqual(try fm.destinationOfSymbolicLink(atPath: executable), tool, "source link untouched")
     }
 
+    /// Scar 2026-10-31: the menu kept asking to choose "1 path" with everything selected, because the
+    /// count included data of apps the picker never offers (this app itself).
+    func test_dataOfExcludedAppsIsNotARequestThePickerCannotMeet() throws {
+        let f = try AppTestFixture(); defer { f.cleanup() }
+        try f.app("Shoji.app", identifier: "com.example.shoji")
+        try f.app("Itself.app", identifier: AppIdentity.bundleID)
+        try f.app("Declined.app", identifier: "com.example.declined")
+        for identifier in ["com.example.shoji", AppIdentity.bundleID, "com.example.declined"] {
+            try f.write("settings", f.box.home + "/Library/Preferences/\(identifier).plist")
+        }
+        var config = f.config
+        config.applications.excludeBundleIDs = ["com.example.declined"]
+        let result = try f.backup(config: config)
+        let catalog = try AppCapture.read(from: result.snapshot)!
+        for identifier in [AppIdentity.bundleID, "com.example.declined"] {
+            let entry = catalog.entries.first { $0.bundleID == identifier }
+            try expectEqual(entry?.state, .excluded, "fixture: \(identifier) is excluded")
+            try expect(entry?.data.contains { $0.state == .notSelected } == true, "fixture: it has unselected data")
+        }
+        let offered = Set(AppInventory.dataCandidates(home: f.box.home, roots: f.roots).flatMap(\.paths))
+        try expect(offered.contains("~/Library/Preferences/com.example.shoji.plist"), "the picker offers the ordinary app's data")
+        try expect(!offered.contains("~/Library/Preferences/\(AppIdentity.bundleID).plist"),
+                   "the picker never offers this app's own data")
+        try expectEqual(result.manifest.applications?.unselectedDataPaths, 1,
+                        "only data that can still be chosen is asked for")
+        try expectEqual(StatusWriter(directory: f.box.state).read()?.applications?.unselectedDataPaths, 1,
+                        "the menu reads the same number")
+    }
+
+    func test_onlyDataThatCanStillBeChosenIsCounted() throws {
+        func entry(_ id: String, _ state: AppInventory.Entry.State, _ data: [(String, AppInventory.DataPath.State)]) -> AppInventory.Entry {
+            var entry = AppInventory.Entry(root: .system, relativePath: id + ".app", name: id)
+            entry.bundleID = "com.example." + id
+            entry.state = state
+            entry.data = data.map { AppInventory.DataPath(relativePath: $0.0, state: $0.1) }
+            return entry
+        }
+        let catalog = AppCapture.Catalog(entries: [
+            entry("saved", .saved, [("a", .notSelected), ("b", .selected), ("c", .excluded), ("d", .unavailable)]),
+            entry("excluded", .excluded, [("e", .notSelected)]),
+            entry("installer", .installer, [("a", .notSelected), ("f", .notSelected)]),
+        ], failures: [])
+        try expectEqual(AppCapture.Report(catalog: catalog).summary.unselectedDataPaths, 2,
+                        "a, f: not selected yet, from apps the picker offers, each path once")
+    }
+
     /// The reclassification must not turn a broken signature of an ordinary app into a pass.
     func test_signatureChecksOfOrdinaryAppsStayStrict() throws {
         let f = try AppTestFixture(); defer { f.cleanup() }

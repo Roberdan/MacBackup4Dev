@@ -294,6 +294,55 @@ final class AutomaticCoverageTests {
         try expect(third.result.manifest.complete, "and still completes")
     }
 
+    /// The schedule runs whether or not the disk is there: what the settings gained by themselves for a
+    /// run that could not start must still be reported by the backup that finally copies it.
+    func test_additionsOfARunThatCouldNotStartAreReportedByTheNextOne() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        try safety.write("old", to: box.home + "/existing/old.txt")
+        try safety.write("new", to: box.home + "/NewFolder/new.txt")
+        let url = box.root.appendingPathComponent("config.toml")
+        var config = safety.config(box, sources: ["existing"])
+        config.destination.path = "/Volumes/mb4d-test-absent-\(UUID().uuidString)/MacBackup4Dev"
+        try config.save(to: url)
+        let writer = StatusWriter(directory: box.state)
+
+        func run() throws -> BackupRunResult {
+            let options = BackupRunOptions(home: box.home, captureEnvironment: false, captureGit: false,
+                                           captureDatabases: false, auditCoverage: false, captureApplications: false)
+            let outcome = ResultBox<Result<BackupRunResult?, Error>>()
+            let done = DispatchSemaphore(value: 0)
+            Task {
+                do {
+                    outcome.value = .success(try await AutomaticCoverage.prepareAndRun(
+                        from: url, statusWriter: writer, options: options))
+                } catch { outcome.value = .failure(error) }
+                done.signal()
+            }
+            done.wait()
+            guard let result = try outcome.value!.get() else { throw TestFailure.failed("backup cancelled") }
+            return result
+        }
+
+        var refused = false
+        do { _ = try run() } catch BackupError.volumeNotMounted { refused = true }
+        try expect(refused, "the first run really could not start")
+        try expect(try Config.load(from: url).source.paths.contains("~/NewFolder"), "the settings already hold the new folder")
+        try expectEqual(writer.read()?.autoIncludedPending, ["~/NewFolder"], "the addition is owed to a snapshot, not lost")
+        try expectNil(writer.read()?.autoIncluded, "and not announced as part of a backup that never happened")
+
+        var back = try Config.load(from: url)
+        back.destination.path = box.dest
+        try back.save(to: url)
+        let second = try run()
+        try expect(second.manifest.complete, "backup complete: \(second.manifest.incompleteReasons)")
+        try expectEqual(writer.read()?.autoIncluded, ["~/NewFolder"], "the backup that copies it first reports it")
+        try expectEqual(second.manifest.automaticallyIncluded, ["~/NewFolder"], "so does its snapshot")
+        try expectNil(writer.read()?.autoIncludedPending, "nothing is owed once a snapshot records it")
+        _ = try run()
+        try expectEqual(writer.read()?.autoIncluded, [], "and the next one is back to zero")
+    }
+
     func test_menuAnnouncesWhatWasAddedAndWhatComesNext() throws {
         let state = AppUIState()
         try expectNil(state.automaticallyAddedLabel, "no backup yet, nothing to announce")

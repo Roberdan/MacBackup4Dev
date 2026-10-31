@@ -38,6 +38,8 @@ struct SnapshotManifest: Codable, Equatable {
     /// Linked-worktree copies a snapshot still holds, found by the marker search (nil = not searched
     /// yet). A searched snapshot is never walked again: only these paths are checked again.
     var temporaryWorktreeCopies: [String]? = nil
+    /// An unfinished marker search of this (older) snapshot, continued at the next backup.
+    var worktreeSearch: WorktreePolicy.Search? = nil
 
     static let directoryName = "_rustymacbackup"
     static let fileName = "manifest.json"

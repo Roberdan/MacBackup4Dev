@@ -1311,9 +1311,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let known = StatusWriter().readCoverage()?.gaps ?? []
             let pending = (try? Config.load(from: Config.defaultPath))
                 .map { AutomaticCoverage.pending(config: $0, knownDatabaseGaps: known) } ?? []
+            // Already in the settings but not yet recorded by a snapshot (the run that added them did
+            // not start): they are still coming.
+            let owed = (StatusWriter().read()?.autoIncludedPending ?? []).map {
+                CoverageGap(kind: .folder, path: $0, lastModified: "", approximateBytes: 0)
+            }
+            let coming = owed + pending.filter { gap in !owed.contains { $0.path == gap.path } }
             DispatchQueue.main.async {
                 self.pendingRefreshRunning = false
-                self.uiState.pendingAutomatic = pending
+                self.uiState.pendingAutomatic = coming
             }
         }
     }

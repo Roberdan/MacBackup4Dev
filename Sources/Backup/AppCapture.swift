@@ -24,9 +24,16 @@ enum AppCapture {
             Summary(saved: catalog.entries.filter { $0.state == .saved }.count,
                     needsInstaller: catalog.entries.filter { $0.state == .installer }.count,
                     failed: catalog.failures.count,
-                    unselectedDataPaths: Set(catalog.entries.flatMap(\.data)
-                        .filter { $0.state != .selected }.map(\.relativePath)).count)
+                    unselectedDataPaths: AppCapture.dataToChoose(in: catalog.entries).count)
         }
+    }
+
+    /// App data the user can still choose in the picker. Apps that are excluded (this app, macOS,
+    /// the user's own exclusions) are not offered there, and data that is excluded or unreadable
+    /// cannot be chosen: counting them made the menu ask for something impossible.
+    static func dataToChoose(in entries: [AppInventory.Entry]) -> Set<String> {
+        Set(entries.filter { $0.state != .excluded && !$0.bundleID.isEmpty }
+            .flatMap(\.data).filter { $0.state == .notSelected }.map(\.relativePath))
     }
 
     static func catalogURL(in snapshot: URL) -> URL {

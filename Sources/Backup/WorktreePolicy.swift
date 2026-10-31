@@ -46,19 +46,31 @@ enum WorktreePolicy {
     /// Snapshots made before 4.3.0 can hold saved checkouts of linked worktrees; the scanner
     /// has refused them ever since, so later snapshots are never searched.
     static let firstVersionWithoutCopies = "4.3.0"
-    /// Seconds a backup may spend searching old snapshots for marked copies; the search resumes
-    /// at the next backup, one snapshot at a time, because every searched snapshot is remembered.
+    /// Seconds a backup may spend searching old snapshots for marked copies. A search that runs
+    /// out of time stops between two folders and goes on from there at the next backup.
     static let scanBudget: TimeInterval = 30
+
+    /// Where an unfinished search of one snapshot stands: `pending` are the folders still to enter
+    /// ("" is the snapshot itself), `found` the marked copies met so far (snapshot-relative paths).
+    struct Search: Codable, Equatable {
+        var found: [String] = []
+        var pending: [String] = [""]
+    }
+
+    enum SearchOutcome: Equatable {
+        case finished([String])
+        case unfinished(Search)
+    }
 
     static func cleanup(at destination: URL,
                         home: String = FileManager.default.homeDirectoryForCurrentUser.path,
                         scanBudget: TimeInterval = WorktreePolicy.scanBudget, searchAgain: Bool = false,
-                        cancelled: () -> Bool = { false }) throws -> CleanupResult {
+                        maxFolders: Int = .max, cancelled: () -> Bool = { false }) throws -> CleanupResult {
         try RetentionManager.validateDestination(destination)
         let lock = try DestinationLock(at: destination)
         return try withExtendedLifetime(lock) {
-            try cleanupLocked(at: destination, home: home, scanBudget: scanBudget,
-                              searchAgain: searchAgain, cancelled: cancelled)
+            try cleanupLocked(at: destination, home: home, scanBudget: scanBudget, searchAgain: searchAgain,
+                              maxFolders: maxFolders, cancelled: cancelled)
         }
     }
 
@@ -66,9 +78,10 @@ enum WorktreePolicy {
 
     /// Only disposable linked checkouts are removed, never repository history or live data.
     /// `searchAgain` (an explicit request) ignores what earlier searches remembered.
+    /// `maxFolders` bounds a search the way the time does, for tests that need a small step.
     static func cleanupLocked(at destination: URL, home liveHome: String,
                               scanBudget: TimeInterval = WorktreePolicy.scanBudget, searchAgain: Bool = false,
-                              cancelled: () -> Bool = { false }) throws -> CleanupResult {
+                              maxFolders: Int = .max, cancelled: () -> Bool = { false }) throws -> CleanupResult {
         let fm = FileManager.default
         let home = liveHome.count > 1 && liveHome.hasSuffix("/") ? String(liveHome.dropLast()) : liveHome
         guard isRealDirectory(URL(fileURLWithPath: home)) else { return CleanupResult() }
@@ -81,8 +94,8 @@ enum WorktreePolicy {
         let deadline = Date().addingTimeInterval(scanBudget)
         let host = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
         var result = CleanupResult()
-        for backup in backups {
-            if cancelled() { break }
+        snapshots: for backup in backups {
+            if cancelled() { break snapshots }
             guard var manifest = SnapshotManifest.read(from: backup.url), manifest.host == host else { continue }
             let metadata = backup.url.appendingPathComponent(SnapshotManifest.directoryName)
             guard isRealDirectory(metadata) else { continue }
@@ -99,9 +112,22 @@ enum WorktreePolicy {
                 known = remembered
             } else if mayHoldCopies(manifest) {
                 guard Date() < deadline else { result.unsearched += 1; continue }
-                guard let found = markedCopies(in: backup.url, cancelled: cancelled) else { break }
-                known = found
-                searched = true
+                let outcome = search(backup.url, from: searchAgain ? nil : manifest.worktreeSearch,
+                                     until: deadline, maxFolders: maxFolders, cancelled: cancelled)
+                switch outcome {
+                case .unfinished(let progress):
+                    // Out of time (or stopped): keep what the search has seen, continue next time.
+                    manifest.worktreeSearch = progress
+                    do { try manifest.write(to: backup.url) }
+                    catch { Log.warn("Worktree search of \(backup.name) not saved; it restarts next time: \(error.localizedDescription)") }
+                    result.unsearched += 1
+                    if cancelled() { break snapshots }
+                    continue snapshots
+                case .finished(let found):
+                    known = found
+                    manifest.worktreeSearch = nil
+                    searched = true
+                }
             } else {
                 continue
             }
@@ -174,35 +200,44 @@ enum WorktreePolicy {
             && !reservedTopLevel.contains(String(parts[0]))
     }
 
-    /// Every saved checkout of a linked worktree in a snapshot, found by its marker wherever it sits.
-    /// Nil when cancelled. Repository stores, links, the app's own folders and other volumes are not entered.
-    static func markedCopies(in snapshot: URL, cancelled: () -> Bool) -> [String]? {
-        var found: [String] = []
-        var pending: [(url: URL, relative: String)] = [(snapshot, "")]
-        while let (directory, relative) = pending.popLast() {
-            if cancelled() { return nil }
+    /// Looks for saved checkouts of linked worktrees, found by their marker wherever they sit in a
+    /// snapshot. Stops between two folders when time, `maxFolders` or `cancelled` say so, handing
+    /// back where it stands. Repository stores, links, the app's own folders and other volumes are
+    /// not entered. What `prior` says is read from a file, so it is checked like any other path.
+    static func search(_ snapshot: URL, from prior: Search? = nil, until deadline: Date = .distantFuture,
+                       maxFolders: Int = .max, cancelled: () -> Bool = { false }) -> SearchOutcome {
+        var found = (prior?.found ?? []).filter(isSafeRelative)
+        var pending = prior.map { $0.pending.filter { $0.isEmpty || isSafeRelative($0) } } ?? [""]
+        var visited = 0
+        while let relative = pending.popLast() {
+            let directory = relative.isEmpty ? snapshot : snapshot.appendingPathComponent(relative)
             let children: [URL]
             do {
                 children = try FileManager.default.contentsOfDirectory(
                     at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             } catch {
                 Log.warn("Worktree search skipped an unreadable folder \(directory.path): \(error.localizedDescription)")
-                continue
+                children = []
             }
             if !relative.isEmpty, children.contains(where: { $0.lastPathComponent == ".git" }),
                gitDirectory(of: directory) != nil {
                 found.append(relative)
-                continue
+            } else {
+                for child in children {
+                    let name = child.lastPathComponent
+                    if name == ".git" || (relative.isEmpty && reservedTopLevel.contains(name)) { continue }
+                    guard let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                          values.isDirectory == true, values.isSymbolicLink != true else { continue }
+                    pending.append(relative.isEmpty ? name : relative + "/" + name)
+                }
             }
-            for child in children {
-                let name = child.lastPathComponent
-                if name == ".git" || (relative.isEmpty && reservedTopLevel.contains(name)) { continue }
-                guard let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-                      values.isDirectory == true, values.isSymbolicLink != true else { continue }
-                pending.append((child, relative.isEmpty ? name : relative + "/" + name))
+            visited += 1
+            // At least one folder per call, so every call makes progress.
+            if !pending.isEmpty, visited >= maxFolders || cancelled() || Date() >= deadline {
+                return .unfinished(Search(found: found.sorted(), pending: pending))
             }
         }
-        return found.sorted()
+        return .finished(found.sorted())
     }
 
     private static func assess(_ copy: URL, relative: String, in snapshotRoot: String, home: String,

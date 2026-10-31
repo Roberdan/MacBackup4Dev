@@ -250,6 +250,77 @@ final class WorktreePolicyTests {
                         "the unusable entries are dropped from the list")
     }
 
+    /// A search that runs out of time must not be a promise it cannot keep: it stops between two
+    /// folders and the next backup goes on from there, never from scratch.
+    func test_aSearchThatRunsOutOfTimeContinuesWhereItStopped() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        let fm = FileManager.default
+        try safety.write("source", to: box.home + "/GitHub/main/file.txt")
+        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
+        for index in 0..<6 { try safety.write("x", to: snapshot.path + "/Documents/area\(index)/sub/note.txt") }
+        let copy = snapshot.appendingPathComponent("Documents/area3/sub/agent-wt")
+        try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/agent-wt\n", to: copy.path + "/.git")
+        try safety.write("temporary", to: copy.path + "/file.txt")
+        var folders = 0
+        if let walker = fm.enumerator(at: snapshot, includingPropertiesForKeys: [.isDirectoryKey]) {
+            for case let url as URL in walker where (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                if url.lastPathComponent == SnapshotManifest.directoryName { walker.skipDescendants() } else { folders += 1 }
+            }
+        }
+        let destination = URL(fileURLWithPath: box.dest)
+
+        var runs = 0
+        var lastFound = 0
+        var outcome = try WorktreePolicy.cleanup(at: destination, home: box.home, maxFolders: 2)
+        while outcome.unsearched > 0 {
+            runs += 1
+            try expect(runs <= folders, "the search keeps making progress (\(runs) runs for \(folders) folders)")
+            let progress = SnapshotManifest.read(from: snapshot)?.worktreeSearch
+            try expectNotNil(progress, "an unfinished search is written down")
+            try expectNil(SnapshotManifest.read(from: snapshot)?.temporaryWorktreeCopies, "and not yet taken for a finished one")
+            try expect((progress?.found.count ?? 0) >= lastFound, "what was found is never forgotten")
+            lastFound = progress?.found.count ?? 0
+            try expect(fm.fileExists(atPath: copy.path), "nothing is removed before the search is over")
+            outcome = try WorktreePolicy.cleanup(at: destination, home: box.home, maxFolders: 2)
+        }
+        try expect(runs >= 2, "the fixture really needed several steps: \(runs)")
+        try expectEqual(outcome.removed, [snapshot.lastPathComponent + "/Documents/area3/sub/agent-wt"],
+                        "the last step finds and removes the copy")
+        let manifest = SnapshotManifest.read(from: snapshot)
+        try expectNil(manifest?.worktreeSearch, "a finished search leaves no progress behind")
+        try expectEqual(manifest?.temporaryWorktreeCopies, [], "and is remembered")
+    }
+
+    /// What a half-done search says comes from a file, like the remembered list.
+    func test_aTamperedSearchProgressIsCheckedLikeAnyOtherPath() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        let fm = FileManager.default
+        try safety.write("source", to: box.home + "/GitHub/main/file.txt")
+        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
+        func plant(_ path: String) throws {
+            try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/wt\n", to: path + "/.git")
+            try safety.write("precious", to: path + "/file.txt")
+        }
+        try plant(box.dest + "/stray")
+        try plant(box.root.path + "/elsewhere/wt")
+        try plant(snapshot.path + "/Documents/real-wt")
+        var manifest = SnapshotManifest.read(from: snapshot)!
+        manifest.worktreeSearch = WorktreePolicy.Search(found: ["../stray", "/etc"],
+                                                        pending: ["../../elsewhere", box.root.path + "/elsewhere", ""])
+        try manifest.write(to: snapshot)
+
+        let outcome = try WorktreePolicy.cleanup(at: URL(fileURLWithPath: box.dest), home: box.home)
+        try expectEqual(outcome.removed, [snapshot.lastPathComponent + "/Documents/real-wt"],
+                        "only what the real search finds is removed")
+        for path in [box.dest + "/stray", box.root.path + "/elsewhere/wt"] {
+            try expectEqual(try String(contentsOfFile: path + "/file.txt", encoding: .utf8), "precious", "untouched: \(path)")
+        }
+    }
+
     func test_searchTimeVersionAndCancellationBoundTheWork() throws {
         let box = try safety.makeSandbox()
         defer { safety.cleanup(box) }

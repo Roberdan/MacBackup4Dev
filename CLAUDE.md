@@ -90,6 +90,8 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   A launcher whose main executable is a link leaving the bundle (Claude Code's URL handler)
   is classified `installer` — "non autonoma, ricreata dalla sua app" — before any signature
   check or copy (macOS rejects such a bundle's signature); never weaken `isSigned` for it.
+  The menu's "Dati delle applicazioni da scegliere" counts only `AppCapture.dataToChoose`:
+  data the picker can still offer (never excluded apps' data, never excluded/unreadable data).
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
 - **4 parallel workers (4.1.4)**: backup entry points, scanner and copy tasks use background
   priority. Disk I/O uses the SDK constants, preserves an existing passive/throttled policy
@@ -184,6 +186,9 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   it and `pending` previews it read-only for the menu, so the two always agree. Every backup,
   from the menu or the schedule, goes through `prepareAndRun`, which records the additions in
   `status.json` (`auto_included`) and the manifest; the menu shows "Aggiunte da sole: N".
+  Additions made for a run that cannot start (disk absent) are kept in
+  `status.auto_included_pending` until a snapshot records them; the engine persists them
+  before any check that can end the run.
   Discovery walks every source for databases (measured 1–2 minutes on a 171-source
   configuration); the menu preview must pass `knownDatabaseGaps` (last audit) instead.
 - **Temporary worktrees (4.3):** file scanning never copies linked git worktrees or
@@ -196,9 +201,12 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   anywhere in a snapshot except `_rustymacbackup`, `_environment`, `Volumes` and `.git`
   stores; the main repository must be a real directory under the home folder and neither
   `<home>/<path>` nor `/<path>` may exist. Snapshots made before 4.3.0 are searched once
-  (budget 30 s per backup, `cancelled` honored) and remembered in
-  `manifest.temporaryWorktreeCopies`; searched snapshots are only re-checked, never walked
-  again (`cleanup-worktrees` forces a new search). Never search every snapshot at every backup.
+  (`WorktreePolicy.search` stops between two folders when the 30 s budget, `cancelled` or a
+  test's `maxFolders` say so and `manifest.worktreeSearch` resumes it) and the result is
+  remembered in `manifest.temporaryWorktreeCopies`; searched snapshots are only re-checked,
+  never walked again (`cleanup-worktrees` forces a new search). The search runs after the
+  disk priority is lowered. Never search every snapshot at every backup, never trust a
+  remembered or half-done list without `isSafeRelative` and the realpath containment check.
 - **Temporal restore (4.3):** the File tab defaults to folder/date browsing. Only complete
   snapshots are browsable; preserve the current folder when changing date. Preview then
   explicitly confirm writes, defaulting to a Desktop copy. Native temporal transitions
