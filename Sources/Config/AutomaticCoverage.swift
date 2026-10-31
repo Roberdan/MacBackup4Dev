@@ -183,11 +183,17 @@ enum AutomaticCoverage {
     /// What the last audit listed may be gone, replaced by a link, emptied or untouched for a month
     /// by now: only a plain database with a size the audit accepts and a recent change is kept.
     /// Same rule as the walk, so a backup adds exactly what a fresh walk would have found there.
+    /// The path comes out of a file: only an absolute one with no `.`, `..` or empty part is
+    /// trusted, so the later string checks (saved folder, private roots) mean what they say.
     static func stillThere(_ gaps: [CoverageGap], home: String, now: Date = Date()) -> [CoverageGap] {
         let cutoff = now.addingTimeInterval(-30 * 86_400)
         return gaps.filter { gap in
             guard gap.kind == .database else { return false }
-            let url = URL(fileURLWithPath: ConfigDiscovery.expand(gap.path, home: home))
+            let path = ConfigDiscovery.expand(gap.path, home: home)
+            let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+            guard path.hasPrefix("/"),
+                  !parts.dropFirst().contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return false }
+            let url = URL(fileURLWithPath: path)
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
                                                                  .contentModificationDateKey]),
                   values.isRegularFile == true, values.isSymbolicLink != true,
@@ -197,7 +203,9 @@ enum AutomaticCoverage {
         }
     }
 
-    private static func hasLinkedAncestor(_ path: String, home: String) -> Bool {
+    /// True when the path or one of its folders under `home` is a link, or cannot be inspected, or
+    /// cannot be climbed (a `..` part never shortens it: the loop used to turn there for ever).
+    static func hasLinkedAncestor(_ path: String, home: String) -> Bool {
         var url = URL(fileURLWithPath: path)
         while url.path.hasPrefix(home + "/") {
             do {
@@ -206,7 +214,9 @@ enum AutomaticCoverage {
                 Log.warn("Automatic inclusion skipped: cannot inspect \(url.path): \(error.localizedDescription)")
                 return true
             }
-            url.deleteLastPathComponent()
+            let parent = url.deletingLastPathComponent()
+            guard parent.path.count < url.path.count else { return true }
+            url = parent
         }
         return false
     }

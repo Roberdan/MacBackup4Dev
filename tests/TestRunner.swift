@@ -91,6 +91,7 @@ struct TestRunner {
             ("Automatic.noSavedFolderWalk", preparation.test_aBackupDoesNotWalkTheSavedFoldersForDatabases),
             ("Automatic.auditFeedsNextPreparation", preparation.test_theAuditOfAFinishedBackupFeedsTheNextPreparation),
             ("Automatic.staleAuditEntries", preparation.test_aDatabaseTheAuditListedButThatChangedIsNotAdded),
+            ("Automatic.parentPartsNeverHang", preparation.test_aPathWithParentPartsNeverHangsTheSearchForLinks),
             ("Worktrees.cleanupAfterTheCopy", preparation.test_theCleanupOfOldWorktreeCopiesWaitsForTheCopy),
             ("Automatic.additionsRecorded", automatic.test_automaticAdditionsAreRecordedAfterEveryBackup),
             ("Automatic.additionsOwed", automatic.test_additionsOfARunThatCouldNotStartAreReportedByTheNextOne),

@@ -198,7 +198,8 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   configuration, 5 minutes on a loaded Mac): neither the menu preview nor the preparation
   before a backup may do it. Both pass `knownDatabaseGaps` (the audit at the end of the last
   backup, `coverage.json`), and `AutomaticCoverage.stillThere` revalidates each entry (still a
-  plain, non-empty, recent, non-linked file). Folders and what a newly added folder holds are
+  plain, non-empty, recent, non-linked file, its path absolute with no `.`/`..`/empty part:
+  the file is read back, so it is never trusted blindly). Folders and what a newly added folder holds are
   still discovered right now. A database created inside an already saved folder after the last
   audit therefore enters the backup after the next one (at most one interval later); without
   any audit the sources are walked once. The audit at the end of each backup is what feeds

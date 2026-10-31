@@ -102,6 +102,11 @@ final class PreparationSpeedTests {
                         "gone, empty, untouched for a month and linked databases are dropped")
         let folder = CoverageGap(kind: .folder, path: "~/Elsewhere", lastModified: "", approximateBytes: 1)
         try expect(AutomaticCoverage.stillThere([folder], home: box.home).isEmpty, "only databases are taken from the audit")
+        // The audit's file is read back: a hand-edited or damaged path must not reach the string checks that follow.
+        let tampered = ["~/existing/../.config/secrets/x.db", "~/existing/./runtime/known.db",
+                        "~/existing//runtime/known.db", "~/existing/runtime/known.db/"].map(gap)
+        try expect(AutomaticCoverage.stillThere(tampered, home: box.home).isEmpty,
+                   "paths with ., .. or empty parts are not trusted: \(AutomaticCoverage.stillThere(tampered, home: box.home))")
 
         let prepared = try AutomaticCoverage.prepareReporting(from: url, home: box.home, knownDatabaseGaps: listed).config
         try expectEqual(prepared.databases.sqlite.filter { $0.hasPrefix("~/existing/") }, ["~/existing/runtime/known.db"],
@@ -113,6 +118,22 @@ final class PreparationSpeedTests {
         let again = try AutomaticCoverage.prepareReporting(from: url, home: box.home, knownDatabaseGaps: outside).config
         try expect(!again.databases.sqlite.contains("~/Documents/outside.db"),
                    "a database outside the saved folders, from an old audit, is not added: \(again.databases.sqlite)")
+    }
+
+    /// Round 1 of @thor: a `..` in a path made the search for links turn for ever, and so stalled every backup.
+    func test_aPathWithParentPartsNeverHangsTheSearchForLinks() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        let done = DispatchSemaphore(value: 0)
+        let answer = ResultBox<Bool>()
+        let path = box.home + "/existing/../.config/secrets/x.db"
+        let home = box.home
+        Thread.detachNewThread {
+            answer.value = AutomaticCoverage.hasLinkedAncestor(path, home: home)
+            done.signal()
+        }
+        try expect(done.wait(timeout: .now() + 10) == .success, "the search for links ends")
+        try expectEqual(answer.value, true, "and a path it cannot climb is not trusted")
     }
 
     /// Scar 2026-10-31: the cleanup of old saved worktree copies ran before the copy and made it wait up to
