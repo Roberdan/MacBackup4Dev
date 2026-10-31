@@ -657,7 +657,10 @@ ignore = ["~/Scratch"]          # never auto-add or suggest this folder
   priority, resumed where it stopped) and the result is remembered in their manifest; later
   snapshots cannot contain such copies. Each removal is
   recorded in that snapshot's manifest with its path, size, date and reason. Main
-  repositories, live checkouts and uncertain cases are untouched. `MacBackup4Dev
+  repositories, live checkouts and uncertain cases are untouched. A saved copy that holds
+  files git ignores which are not caches (exports, local helpers: in no commit, possibly the
+  only copy) is never removed; it is listed by `MacBackup4Dev cleanup-worktrees` and noted in
+  the manifest, and so is a copy git cannot examine. `MacBackup4Dev
   cleanup-worktrees` searches every old snapshot again now.
   A cleanup failure is logged and retried on a later backup; it does not stop protection.
 - **Retention**: the 3 newest complete snapshots are never deleted; nothing is pruned while the

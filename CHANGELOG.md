@@ -17,7 +17,8 @@
   by earlier versions.
 - The menu no longer asks to choose application data that cannot be chosen ("N percorsi non
   salvati" with everything selected): data of excluded apps (this app itself, macOS apps,
-  your exclusions) and data that is excluded or unreadable is not counted.
+  your exclusions) and data that is excluded or unreadable is not counted. A count left in
+  the status file by an older version is ignored until the next backup counts again.
 - An app whose main executable is a link to a program installed elsewhere (Claude Code's URL
   handler) is listed as "non autonoma, ricreata dalla sua app" instead of failing its
   signature check and leaving every snapshot incomplete. Signature checks of ordinary apps
@@ -30,6 +31,11 @@
   cancellable, resumed where it stopped) and the result is remembered; `cleanup-worktrees`
   searches them all again. While a step runs the menu can look idle for a few seconds
   before the backup starts.
+- A saved copy of a deleted worktree that holds files git ignores and that are not caches
+  (exports, local helpers: they are in no commit and may exist nowhere else) is never
+  removed. It is kept, remembered in the snapshot's manifest and listed by
+  `cleanup-worktrees`; so is a copy git cannot examine. Caches their tool rebuilds
+  (`__pycache__`, `node_modules`, `.venv`, `.build`, `DerivedData`, …) do not count.
 
 ## [4.3.1] - 2026-10-31
 

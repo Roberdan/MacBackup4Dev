@@ -29,7 +29,7 @@ final class WorktreePolicyTests {
         defer { safety.cleanup(box) }
         let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
         let config = safety.config(box, sources: ["GitHub/main"])
         let snapshot = try safety.runEngine(config, box).snapshot
         let gone = snapshot.appendingPathComponent("GitHub/worktrees/main/gone")
@@ -95,7 +95,7 @@ final class WorktreePolicyTests {
         defer { safety.cleanup(box) }
         let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
         let config = safety.config(box, sources: ["GitHub/main"])
         let snapshot = try safety.runEngine(config, box).snapshot
         let gone = snapshot.appendingPathComponent("GitHub/worktrees/main/gone")
@@ -128,8 +128,8 @@ final class WorktreePolicyTests {
         defer { safety.cleanup(box) }
         let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
-        try fm.createDirectory(atPath: box.home + "/Code/other/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
+        try safety.makeRepository(box.home + "/Code/other")
         let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
         // Saved repositories carry their own .git directory.
         try safety.write("ref: refs/heads/main\n", to: snapshot.path + "/GitHub/main/.git/HEAD")
@@ -190,7 +190,7 @@ final class WorktreePolicyTests {
         defer { safety.cleanup(box) }
         let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
         let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
         func plant(_ relative: String) throws {
             try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/\((relative as NSString).lastPathComponent)\n",
@@ -227,7 +227,7 @@ final class WorktreePolicyTests {
         defer { safety.cleanup(box) }
         let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
         let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
         let copy = snapshot.appendingPathComponent("Ext/agents/wt")
         try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/wt\n", to: copy.path + "/.git")
@@ -251,7 +251,7 @@ final class WorktreePolicyTests {
         defer { safety.cleanup(box) }
         let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
         let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
         let name = "mb4d-live-" + UUID().uuidString
         let live = "/tmp/" + name
@@ -276,7 +276,7 @@ final class WorktreePolicyTests {
         defer { safety.cleanup(box) }
         let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
         let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
         func decoy(_ path: String) throws {
             try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/wt\n", to: path + "/.git")
@@ -307,7 +307,7 @@ final class WorktreePolicyTests {
         defer { safety.cleanup(box) }
         let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
         let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
         for index in 0..<6 { try safety.write("x", to: snapshot.path + "/Documents/area\(index)/sub/note.txt") }
         let copy = snapshot.appendingPathComponent("Documents/area3/sub/agent-wt")
@@ -347,9 +347,8 @@ final class WorktreePolicyTests {
     func test_aTamperedSearchProgressIsCheckedLikeAnyOtherPath() throws {
         let box = try safety.makeSandbox()
         defer { safety.cleanup(box) }
-        let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
         let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
         func plant(_ path: String) throws {
             try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/wt\n", to: path + "/.git")
@@ -376,7 +375,7 @@ final class WorktreePolicyTests {
         defer { safety.cleanup(box) }
         let fm = FileManager.default
         try safety.write("source", to: box.home + "/GitHub/main/file.txt")
-        try fm.createDirectory(atPath: box.home + "/GitHub/main/.git/worktrees", withIntermediateDirectories: true)
+        try safety.makeRepository(box.home + "/GitHub/main")
         let snapshot = try safety.runEngine(safety.config(box, sources: ["GitHub/main"]), box).snapshot
         let copy = snapshot.appendingPathComponent("Elsewhere/wt")
         try safety.write("gitdir: \(box.home)/GitHub/main/.git/worktrees/wt\n", to: copy.path + "/.git")

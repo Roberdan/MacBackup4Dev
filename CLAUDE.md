@@ -92,6 +92,10 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   check or copy (macOS rejects such a bundle's signature); never weaken `isSigned` for it.
   The menu's "Dati delle applicazioni da scegliere" counts only `AppCapture.dataToChoose`:
   data the picker can still offer (never excluded apps' data, never excluded/unreadable data).
+  The menu reads the persisted count through `AppUIState.appDataToChoose`, which trusts it
+  only when it carries `AppCapture.dataCountRule` (a status written by 4.3.1 or earlier counted
+  by the old rule and said "1 percorso non salvato" with everything selected); bump the rule
+  whenever the counting changes.
 - **Snapshot naming**: `in-progress-YYYY-MM-DD_HHmmss` during backup, renamed to `YYYY-MM-DD_HHmmss` on success.
 - **4 parallel workers (4.1.4)**: backup entry points, scanner and copy tasks use background
   priority. Disk I/O uses the SDK constants, preserves an existing passive/throttled policy
@@ -210,6 +214,13 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   never walked again (`cleanup-worktrees` forces a new search). The search runs after the
   disk priority is lowered. Never search every snapshot at every backup, never trust a
   remembered or half-done list without `isSafeRelative` and the realpath containment check.
+  A copy is removed only when `WorktreeContents.inspect` (git, with the main repository's
+  rules, `ls-files --others --ignored`) finds nothing ignored except known caches: files git
+  ignores are in no commit and a deleted worktree's copy may be the last one (tinyMatrix
+  helpers, 2026-10-31). A copy with other ignored files, or one git cannot examine, is kept
+  and listed; the first kind is remembered in `manifest.retainedWorktreeCopies` and not
+  inspected again unless `cleanup-worktrees` runs. Untracked work that is not ignored is not
+  protected by this rule.
 - **Temporal restore (4.3):** the File tab defaults to folder/date browsing. Only complete
   snapshots are browsable; preserve the current folder when changing date. Preview then
   explicitly confirm writes, defaulting to a Desktop copy. Native temporal transitions

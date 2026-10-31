@@ -149,6 +149,14 @@ final class AppUIState: ObservableObject {
         pendingAutomatic.isEmpty ? nil : "Entreranno al prossimo backup: \(pendingAutomatic.count)"
     }
 
+    /// App data the user can still choose, as the last backup counted it. A count made by an
+    /// older rule (before 4.3.2 it included data the picker never offers) says nothing: the menu
+    /// stays quiet until the next backup counts again.
+    var appDataToChoose: Int {
+        guard let apps = status?.applications, apps.dataCountRule == AppCapture.dataCountRule else { return 0 }
+        return apps.unselectedDataPaths
+    }
+
     var pendingAutomaticDetail: String {
         let names = pendingAutomatic.map(\.path)
         let shown = names.prefix(3).joined(separator: ", ")

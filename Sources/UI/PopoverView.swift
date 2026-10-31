@@ -347,10 +347,10 @@ struct PopoverView: View {
                              detail: "Chi ha il disco può leggerli. Cifrali: poi potrai salvare anche le credenziali.",
                              primary: ("Cifra", { state.onRequestEncryption?() }), secondary: nil))
         }
-        if let apps = state.status?.applications, apps.unselectedDataPaths > 0, !state.isRunning {
+        if state.appDataToChoose > 0, !state.isRunning {
             out.append(Issue(id: "app-data", icon: "app.badge.checkmark", tint: Look.orange,
                              title: "Dati delle applicazioni da scegliere",
-                             detail: "\(apps.unselectedDataPaths) percorsi non salvati. Scegli quali includere.",
+                             detail: "\(state.appDataToChoose) percorsi non salvati. Scegli quali includere.",
                              primary: ("Scegli dati", { state.onRequestChooseSources?() }), secondary: nil))
         }
         for gap in state.visibleCoverageGaps {

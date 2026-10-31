@@ -47,6 +47,7 @@ enum CLIHandler {
                 let result = try WorktreePolicy.cleanup(at: URL(fileURLWithPath: cfg.destination.path), home: home,
                                                         scanBudget: .infinity, searchAgain: true)
                 print("Worktree obsoleti rimossi: \(result.removed.count) · spazio liberato: \(BackupEngine.formatBytes(result.freedBytes))")
+                WorktreeContents.report(result.kept).forEach { print($0) }
             case "versions": try runVersions(subArgs: subArgs, configPath: configPath)
             case "find": try runFind(subArgs: subArgs, configPath: configPath)
             case "topics": try runTopics(configPath: configPath)
@@ -115,7 +116,7 @@ enum CLIHandler {
         Ripristino e sicurezza (3.0):
           snapshots                     Elenco snapshot: completo / incompleto / non verificato
           coverage [--days N]           Cartelle attive e database che il backup non salva
-          cleanup-worktrees             Rimuove le copie di worktree non più presenti sul Mac
+          cleanup-worktrees             Rimuove le copie di worktree non più presenti sul Mac (tiene quelle con file ignorati da git)
           versions <file>               Tutte le versioni di un file negli snapshot
           find <testo> [--snapshot S]   Cerca file in uno snapshot
           topics                        Argomenti ripristinabili (Warp, Terminale, Claude…)

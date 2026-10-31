@@ -40,6 +40,10 @@ struct SnapshotManifest: Codable, Equatable {
     var temporaryWorktreeCopies: [String]? = nil
     /// An unfinished marker search of this (older) snapshot, continued at the next backup.
     var worktreeSearch: WorktreePolicy.Search? = nil
+    /// Linked-worktree copies whose source is gone but that were kept for good: they hold files git
+    /// ignores that are not caches, possibly the only copy. Not inspected again (an explicit
+    /// `cleanup-worktrees` looks at everything anew).
+    var retainedWorktreeCopies: [String]? = nil
 
     static let directoryName = "_rustymacbackup"
     static let fileName = "manifest.json"

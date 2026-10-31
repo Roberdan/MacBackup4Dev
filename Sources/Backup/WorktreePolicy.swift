@@ -15,6 +15,17 @@ enum WorktreePolicy {
         var freedBytes: UInt64 = 0
         /// Old snapshots still to search because the time allowed for it ran out.
         var unsearched = 0
+        /// Copies whose source is gone but that stay: they hold files git ignores that nothing else
+        /// has, or git could not say what they hold. Listed, so nobody loses them unseen.
+        var kept: [KeptCopy] = []
+        /// Copies left for the next backup because the time allowed for looking at them ran out.
+        var deferred = 0
+    }
+
+    struct KeptCopy: Equatable {
+        enum Reason: Equatable { case ignoredFiles([String]), unverified(String) }
+        let path: String
+        let reason: Reason
     }
 
     static func gitDirectory(of directory: URL) -> String? {
@@ -43,25 +54,6 @@ enum WorktreePolicy {
         return false
     }
 
-    /// Snapshots made before 4.3.0 can hold saved checkouts of linked worktrees; the scanner
-    /// has refused them ever since, so later snapshots are never searched.
-    static let firstVersionWithoutCopies = "4.3.0"
-    /// Seconds a backup may spend searching old snapshots for marked copies. A search that runs
-    /// out of time stops between two folders and goes on from there at the next backup.
-    static let scanBudget: TimeInterval = 30
-
-    /// Where an unfinished search of one snapshot stands: `pending` are the folders still to enter
-    /// ("" is the snapshot itself), `found` the marked copies met so far (snapshot-relative paths).
-    struct Search: Codable, Equatable {
-        var found: [String] = []
-        var pending: [String] = [""]
-    }
-
-    enum SearchOutcome: Equatable {
-        case finished([String])
-        case unfinished(Search)
-    }
-
     static func cleanup(at destination: URL,
                         home: String = FileManager.default.homeDirectoryForCurrentUser.path,
                         scanBudget: TimeInterval = WorktreePolicy.scanBudget, searchAgain: Bool = false,
@@ -74,7 +66,7 @@ enum WorktreePolicy {
         }
     }
 
-    private enum CopyState { case vanished, keep, obsolete }
+    private enum CopyState { case vanished, keep, obsolete(repository: URL) }
 
     /// Only disposable linked checkouts are removed, never repository history or live data.
     /// `searchAgain` (an explicit request) ignores what earlier searches remembered.
@@ -132,6 +124,8 @@ enum WorktreePolicy {
                 continue
             }
             var remaining = known
+            if searched { manifest.retainedWorktreeCopies = nil }
+            var retained = manifest.retainedWorktreeCopies ?? []
             let snapshotRoot = FileScanner.realPath(backup.url.path)
             for relative in known {
                 guard isSafeRelative(relative) else {
@@ -143,7 +137,26 @@ enum WorktreePolicy {
                 switch assess(candidate, relative: relative, in: snapshotRoot, home: home, reportUnverified: searched) {
                 case .keep: continue
                 case .vanished: remaining.removeAll { $0 == relative }
-                case .obsolete:
+                case .obsolete(let repository):
+                    guard Date() < deadline, !cancelled() else { result.deferred += 1; continue }
+                    let allowed = max(5, min(60, deadline.timeIntervalSinceNow))
+                    switch WorktreeContents.inspect(copy: candidate, repository: repository, timeout: allowed, cancelled: cancelled) {
+                    case .disposable:
+                        break
+                    case .holdsIgnoredFiles(let sample):
+                        // Not a cache: possibly the only copy of files that are in no commit. Kept for
+                        // good (not looked at again) and listed.
+                        remaining.removeAll { $0 == relative }
+                        retained.append(relative)
+                        manifest.retainedWorktreeCopies = retained
+                        result.kept.append(.init(path: backup.name + "/" + relative, reason: .ignoredFiles(sample)))
+                        Log.warn("Worktree copy kept: \(backup.name)/\(relative) holds files git ignores that may exist nowhere else: \(sample.joined(separator: ", "))")
+                        continue
+                    case .unverified(let why):
+                        result.kept.append(.init(path: backup.name + "/" + relative, reason: .unverified(why)))
+                        Log.warn("Worktree copy kept: \(backup.name)/\(relative) cannot be examined: \(why)")
+                        continue
+                    }
                     let record = Removal(path: relative, bytes: try allocatedBytes(in: candidate),
                         reason: "Linked git worktree: exact live source is absent (ENOENT).",
                         removedAt: ISO8601DateFormatter().string(from: Date()),
@@ -181,63 +194,9 @@ enum WorktreePolicy {
         }
         let after = BackupEngine.diskFreeSpace(at: destination.path)
         result.freedBytes = after > before ? after - before : 0
+        if result.deferred > 0 { Log.info("Worktree cleanup: \(result.deferred) copies left for the next backup (time ran out)") }
         if !result.removed.isEmpty { EncryptedStore.markSpaceFreed(destination: destination) }
         return result
-    }
-
-    static func mayHoldCopies(_ manifest: SnapshotManifest) -> Bool {
-        AutoUpdater.isNewer(firstVersionWithoutCopies, than: manifest.appVersion)
-    }
-
-    /// Top-level folders of a snapshot that are not the user's files (the app's own data, other volumes).
-    private static let reservedTopLevel: Set<String> = [SnapshotManifest.directoryName, "_environment", "Volumes"]
-
-    /// Remembered paths come from a file: only plain paths inside the snapshot are ever acted on.
-    static func isSafeRelative(_ relative: String) -> Bool {
-        let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
-        return !relative.isEmpty && !relative.hasPrefix("/") && !relative.contains("\0")
-            && !parts.contains { $0.isEmpty || $0 == "." || $0 == ".." }
-            && !reservedTopLevel.contains(String(parts[0]))
-    }
-
-    /// Looks for saved checkouts of linked worktrees, found by their marker wherever they sit in a
-    /// snapshot. Stops between two folders when time, `maxFolders` or `cancelled` say so, handing
-    /// back where it stands. Repository stores, links, the app's own folders and other volumes are
-    /// not entered. What `prior` says is read from a file, so it is checked like any other path.
-    static func search(_ snapshot: URL, from prior: Search? = nil, until deadline: Date = .distantFuture,
-                       maxFolders: Int = .max, cancelled: () -> Bool = { false }) -> SearchOutcome {
-        var found = (prior?.found ?? []).filter(isSafeRelative)
-        var pending = prior.map { $0.pending.filter { $0.isEmpty || isSafeRelative($0) } } ?? [""]
-        var visited = 0
-        while let relative = pending.popLast() {
-            let directory = relative.isEmpty ? snapshot : snapshot.appendingPathComponent(relative)
-            let children: [URL]
-            do {
-                children = try FileManager.default.contentsOfDirectory(
-                    at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            } catch {
-                Log.warn("Worktree search skipped an unreadable folder \(directory.path): \(error.localizedDescription)")
-                children = []
-            }
-            if !relative.isEmpty, children.contains(where: { $0.lastPathComponent == ".git" }),
-               gitDirectory(of: directory) != nil {
-                found.append(relative)
-            } else {
-                for child in children {
-                    let name = child.lastPathComponent
-                    if name == ".git" || (relative.isEmpty && reservedTopLevel.contains(name)) { continue }
-                    guard let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-                          values.isDirectory == true, values.isSymbolicLink != true else { continue }
-                    pending.append(relative.isEmpty ? name : relative + "/" + name)
-                }
-            }
-            visited += 1
-            // At least one folder per call, so every call makes progress.
-            if !pending.isEmpty, visited >= maxFolders || cancelled() || Date() >= deadline {
-                return .unfinished(Search(found: found.sorted(), pending: pending))
-            }
-        }
-        return .finished(found.sorted())
     }
 
     private static func assess(_ copy: URL, relative: String, in snapshotRoot: String, home: String,
@@ -254,7 +213,7 @@ enum WorktreePolicy {
         // A snapshot path is relative to the home folder, or to / for sources outside it:
         // the copy is obsolete only when neither place exists.
         return isMissing(URL(fileURLWithPath: home + "/" + relative))
-            && isMissing(URL(fileURLWithPath: "/" + relative)) ? .obsolete : .keep
+            && isMissing(URL(fileURLWithPath: "/" + relative)) ? .obsolete(repository: main) : .keep
     }
 
     private static func isRealDirectory(_ url: URL) -> Bool {

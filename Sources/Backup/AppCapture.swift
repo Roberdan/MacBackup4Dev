@@ -15,7 +15,14 @@ enum AppCapture {
         var needsInstaller: Int
         var failed: Int
         var unselectedDataPaths: Int
+        /// The rule `unselectedDataPaths` was counted by; absent in files written before 4.3.2.
+        var dataCountRule: Int? = nil
     }
+
+    /// Before 4.3.2 the count included data of excluded apps (this app itself) that the picker never
+    /// offers, so the menu asked to choose what could not be chosen. A count made by that rule
+    /// must not be trusted: it carries no number here.
+    static let dataCountRule = 2
 
     struct Report {
         var catalog: Catalog
@@ -24,7 +31,8 @@ enum AppCapture {
             Summary(saved: catalog.entries.filter { $0.state == .saved }.count,
                     needsInstaller: catalog.entries.filter { $0.state == .installer }.count,
                     failed: catalog.failures.count,
-                    unselectedDataPaths: AppCapture.dataToChoose(in: catalog.entries).count)
+                    unselectedDataPaths: AppCapture.dataToChoose(in: catalog.entries).count,
+                    dataCountRule: AppCapture.dataCountRule)
         }
     }
 

@@ -44,6 +44,7 @@ struct TestRunner {
         let config = ConfigParserTests()
         let automatic = AutomaticCoverageTests()
         let worktrees = WorktreePolicyTests()
+        let worktreeContents = WorktreeContentsTests()
         let backup = BackupEngineTests()
         let hardLinker = HardLinkerTests()
         let protection = RightsManagementTests()
@@ -72,6 +73,7 @@ struct TestRunner {
         let recovery = RecoveryCopyTests()
         let loginItem = LoginItemTests()
         let appBundles = AppBundleTests()
+        let appDataCount = AppDataCountTests()
         let appRecovery = AppRecoveryTests()
         let postgres = PostgresBackupTests()
 
@@ -99,6 +101,10 @@ struct TestRunner {
             ("Worktrees.rootPath", worktrees.test_aCheckoutThatStillExistsAtTheRootIsKept),
             ("Worktrees.searchResumes", worktrees.test_aSearchThatRunsOutOfTimeContinuesWhereItStopped),
             ("Worktrees.tamperedProgress", worktrees.test_aTamperedSearchProgressIsCheckedLikeAnyOtherPath),
+            ("Worktrees.keepsIgnoredFiles", worktreeContents.test_aCopyHoldingIgnoredFilesThatAreNotCachesIsKeptAndListed),
+            ("Worktrees.removesCachesOnly", worktreeContents.test_aCopyWithOnlyCachesIsStillRemoved),
+            ("Worktrees.unverifiableKept", worktreeContents.test_aCopyGitCannotExamineIsKeptAndListed),
+            ("Worktrees.knownCaches", worktreeContents.test_onlyKnownCachesAreRegenerable),
             ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),
             ("Applications.symlinkPermissionsUmask", appBundles.test_symlinkPermissionsDoNotDependOnUmask),
             ("Applications.discoveryDedupAndSourceSafety", appBundles.test_newAppsAndDedupNeverChangeSources),
@@ -106,6 +112,8 @@ struct TestRunner {
             ("Applications.externalLauncher", appBundles.test_externalMainExecutableIsListedAsNotSelfContainedNotAnError),
             ("Applications.excludedAppData", appBundles.test_dataOfExcludedAppsIsNotARequestThePickerCannotMeet),
             ("Applications.dataToChoose", appBundles.test_onlyDataThatCanStillBeChosenIsCounted),
+            ("Applications.oldCountIgnored", appDataCount.test_anOldCountOfOneWithNothingLeftToChooseIsNotShown),
+            ("Applications.realCountAsked", appDataCount.test_dataThatCanReallyBeChosenIsStillAsked),
             ("Applications.signatureStaysStrict", appBundles.test_signatureChecksOfOrdinaryAppsStayStrict),
             ("Applications.failuresAndCancel", appBundles.test_copyMutationSpaceAndCancellationFailHonestly),
             ("Applications.explicitDataChoice", appBundles.test_appDataIsAnExplicitChoiceAndConfigPersists),
