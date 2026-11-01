@@ -53,6 +53,7 @@ struct TestRunner {
         let hidden = HiddenDiscoveryTests()
         let tree = TreeSelectionTests()
         let cleanup = SnapshotCleanupTests()
+        let staleRemoval = StaleRemovalTests()
         let safety = SafetyTests()
         let restore = RestoreTests()
         let protectionSummary = ProtectionSummaryTests()
@@ -116,6 +117,7 @@ struct TestRunner {
             ("Worktrees.unverifiableKept", worktreeContents.test_aCopyGitCannotExamineIsKeptAndListed),
             ("Worktrees.knownCaches", worktreeContents.test_onlyKnownCachesAreRegenerable),
             ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),
+            ("Applications.unchangedReused", appBundles.test_unchangedAppIsReusedWithoutReadingOrVerifyingIt),
             ("Applications.symlinkPermissionsUmask", appBundles.test_symlinkPermissionsDoNotDependOnUmask),
             ("Applications.discoveryDedupAndSourceSafety", appBundles.test_newAppsAndDedupNeverChangeSources),
             ("Applications.nonPortableAndLinks", appBundles.test_nonPortableAppsAreExplicitAndLinksAreNotFollowed),
@@ -286,6 +288,9 @@ struct TestRunner {
             ("Cleanup.failures", cleanup.test_changedPreviewAndDeletionFailure),
             ("Cleanup.emptyAndSingle", cleanup.test_emptyAndSingleBackup),
             ("Cleanup.cliOptions", cleanup.test_cliOptions),
+            ("Cleanup.staleRunsRemoved", staleRemoval.test_lockedInterruptedRunsAreRemovedAndGoodSnapshotUntouched),
+            ("Cleanup.sharedLockKept", staleRemoval.test_sharedLockedFileIsNeverUnlockedAndFailureIsReported),
+            ("Cleanup.retentionProtected", staleRemoval.test_retentionRemovesProtectedSnapshot),
             ("ExcludeFilter.mandatoryCaches", exclude.test_mandatoryCachesWithOldConfig),
             ("ExcludeFilter.nestedPaths", exclude.test_nestedMultiComponentPatterns),
             ("FileScanner.explicitExclusions", scanner.test_explicitSourcesCannotBypassExclusions),

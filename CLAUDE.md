@@ -40,7 +40,7 @@ Version is set in one place: `VERSION` default in `build.sh`. `build-pkg.sh` rea
 Sources/
   App/          AppDelegate, AppIdentity, main, StatusManager, AutoUpdater, UpdateSignature, IconManager, LoginItemManager
   Backup/       BackupEngine(+Helpers), EncryptedStore, HomeRewrite, HardLinker, FileScanner, RestoreEngine,
-                RetentionManager, SnapshotCleanup, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
+                RetentionManager, SnapshotCleanup, SnapshotRemoval, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
                 AppInventory, AppBundleCopy, AppCapture, AppInstallers, AppRestore, WorktreePolicy, SnapshotBrowsing,
                 SelectiveRestore (+Topics, FileVersions), NewMacRestore, NewMacStages, ToolInventory, ProtectionSummary, Shell
@@ -87,6 +87,11 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   Undo checks the recorded installation's device/inode and contents before moving it aside;
   cleanup makes only staging directories writable,
   never regular files that may be linked to older snapshots.
+  An app whose source stamp (every entry's identity, change time, size, mode, flags) equals
+  `sourceStamp` in the previous catalog and whose previous copy still matches is hard-linked
+  from that copy by `reuseUnchanged`, with no content read and no signature check (scar
+  2026-11-01: Outlook took 40+ minutes per backup). Keep the change time in the stamp: it is
+  what catches a same-size edit with a restored mtime. Catalogs without a stamp get one full copy.
   A launcher whose main executable is a link leaving the bundle (Claude Code's URL handler)
   is classified `installer` — "non autonoma, ricreata dalla sua app" — before any signature
   check or copy (macOS rejects such a bundle's signature); never weaken `isSigned` for it.
@@ -141,6 +146,11 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   bounded by the `QUEUE_LIMIT` semaphore. `bufferingNewest`/`bufferingOldest` drop silently.
 - **Never fall back to the bare file name for a relative path** (`FileScanner`): use
   `realPath` (realpath(3)); `resolvingSymlinksInPath` strips `/private` and breaks prefixes.
+- **Interrupted runs and pruned snapshots go through `SnapshotRemoval`** (scar 2026-11-01:
+  13 `in-progress-*` left because `try? removeItem` stopped at one protected entry). After a
+  refused removal it unlocks directories (ACL, user flags, owner rwx) and only single-link
+  files; a file with more links belongs to a good snapshot too and is never unlocked.
+  Leftovers are logged and thrown, never ignored.
 - **Retention never deletes the 3 newest complete snapshots** and does nothing when the newest
   snapshot has a `shrinkWarning` (new or emptied Mac).
 - **Restore writes beside the target and renames into place; undo.json lists replaced AND

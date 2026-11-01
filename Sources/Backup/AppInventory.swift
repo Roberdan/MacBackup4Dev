@@ -32,6 +32,8 @@ enum AppInventory {
         var data: [DataPath] = []
         var warnings: [String] = []
         var fingerprint: AppBundleCopy.Fingerprint?
+        /// Source identity when the copy was verified (absent before 4.3.3: one full copy).
+        var sourceStamp: String?
         var signed = false
         var packageID: String?
 
