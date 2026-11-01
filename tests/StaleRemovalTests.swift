@@ -101,6 +101,21 @@ final class StaleRemovalTests {
         try expect(fm.fileExists(atPath: other.path), "a run another live process may own is kept")
     }
 
+    func test_stopEndsTheCleanupBetweenRuns() throws {
+        let root = try destination()
+        defer { release(root) }
+        let first = root.appendingPathComponent("in-progress-2026-10-12_100003")
+        let second = root.appendingPathComponent("in-progress-2026-10-18_050005")
+        for run in [first, second] {
+            try fm.createDirectory(at: run.appendingPathComponent("data"), withIntermediateDirectories: true)
+            try age(run, hours: 3)
+        }
+        var checks = 0
+        BackupEngine.cleanStaleInProgress(at: root, isCancelled: { checks += 1; return checks > 1 })
+        let left = [first, second].filter { fm.fileExists(atPath: $0.path) }
+        try expectEqual(left.count, 1, "a stop after the first run leaves the rest for the next backup")
+    }
+
     func test_sharedLockedFileIsNeverUnlockedAndFailureIsReported() throws {
         let root = try destination()
         defer { release(root) }

@@ -33,7 +33,7 @@ extension BackupEngine {
 
     // F-01: Check age (>2h) and active lock before removing — avoids deleting dirs
     // that belong to a concurrent backup that hasn't yet acquired the lock.
-    static func cleanStaleInProgress(at destURL: URL) {
+    static func cleanStaleInProgress(at destURL: URL, isCancelled: () -> Bool = { false }) {
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: destURL,
             includingPropertiesForKeys: [.creationDateKey],
@@ -51,6 +51,8 @@ extension BackupEngine {
             let values = try? url.resourceValues(forKeys: [.creationDateKey])
             let age = Date().timeIntervalSince(values?.creationDate ?? .distantPast)
             guard age > staleThreshold else { continue }
+            // A stop ends the cleanup between two runs; the rest goes at the next backup.
+            if isCancelled() { return }
             // The marker holds this very backup's PID (it is written just before): only another
             // live process means the run may still be in use. Checking our own PID skipped every
             // stale run since the marker moved before the cleanup (14 left on 2026-11-01).

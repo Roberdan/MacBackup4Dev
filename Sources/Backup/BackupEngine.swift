@@ -213,10 +213,19 @@ enum BackupEngine {
         let inProgressURL = destURL.appendingPathComponent("in-progress-\(timestamp)")
         try FileManager.default.createDirectory(at: inProgressURL, withIntermediateDirectories: true)
 
-        // F-01: clean stale dirs only AFTER acquiring the lock
-        cleanStaleInProgress(at: destURL)
-
         var status = statusWriter.read() ?? BackupStatusFile()
+        // The menu must show a running backup while old runs are removed: on a slow encrypted
+        // disk that took minutes each (2026-11-01: the menu said "Backup interrotto" meanwhile).
+        status.state = "running"
+        status.phase = "scanning"
+        status.startedAt = ISO8601DateFormatter().string(from: startTime)
+        status.scanFinished = false
+        status.currentFile = "Elimino i backup interrotti…"
+        do { try statusWriter.write(status: status) } catch { Log.error("Status write failed at start: \(error)") }
+
+        // F-01: clean stale dirs only AFTER acquiring the lock
+        cleanStaleInProgress(at: destURL, isCancelled: { token.isCancelled || Task.isCancelled })
+
         status.state = "running"
         status.phase = "scanning"
         status.startedAt = ISO8601DateFormatter().string(from: startTime)

@@ -289,6 +289,7 @@ struct TestRunner {
             ("Cleanup.emptyAndSingle", cleanup.test_emptyAndSingleBackup),
             ("Cleanup.cliOptions", cleanup.test_cliOptions),
             ("Cleanup.staleRunsRemoved", staleRemoval.test_lockedInterruptedRunsAreRemovedAndGoodSnapshotUntouched),
+            ("Cleanup.stopEndsCleanup", staleRemoval.test_stopEndsTheCleanupBetweenRuns),
             ("Cleanup.sharedLockKept", staleRemoval.test_sharedLockedFileIsNeverUnlockedAndFailureIsReported),
             ("Cleanup.retentionProtected", staleRemoval.test_retentionRemovesProtectedSnapshot),
             ("ExcludeFilter.mandatoryCaches", exclude.test_mandatoryCachesWithOldConfig),
