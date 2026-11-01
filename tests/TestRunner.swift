@@ -52,6 +52,7 @@ struct TestRunner {
         let hidden = HiddenDiscoveryTests()
         let tree = TreeSelectionTests()
         let cleanup = SnapshotCleanupTests()
+        let staleRemoval = StaleRemovalTests()
         let safety = SafetyTests()
         let restore = RestoreTests()
         let protectionSummary = ProtectionSummaryTests()
@@ -277,6 +278,9 @@ struct TestRunner {
             ("Cleanup.failures", cleanup.test_changedPreviewAndDeletionFailure),
             ("Cleanup.emptyAndSingle", cleanup.test_emptyAndSingleBackup),
             ("Cleanup.cliOptions", cleanup.test_cliOptions),
+            ("Cleanup.staleRunsRemoved", staleRemoval.test_lockedInterruptedRunsAreRemovedAndGoodSnapshotUntouched),
+            ("Cleanup.sharedLockKept", staleRemoval.test_sharedLockedFileIsNeverUnlockedAndFailureIsReported),
+            ("Cleanup.retentionProtected", staleRemoval.test_retentionRemovesProtectedSnapshot),
             ("ExcludeFilter.mandatoryCaches", exclude.test_mandatoryCachesWithOldConfig),
             ("ExcludeFilter.nestedPaths", exclude.test_nestedMultiComponentPatterns),
             ("FileScanner.explicitExclusions", scanner.test_explicitSourcesCannotBypassExclusions),

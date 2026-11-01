@@ -45,13 +45,20 @@ extension BackupEngine {
             let first = content.split(separator: "\n").first.map(String.init) ?? content
             return Int32(first.trimmingCharacters(in: .whitespaces))
         }()
-        for url in contents where url.lastPathComponent.hasPrefix("in-progress-") {
+        // `.deleting-*` are snapshots retention already renamed away, then failed to remove.
+        for url in contents where url.lastPathComponent.hasPrefix("in-progress-")
+            || url.lastPathComponent.hasPrefix(".deleting-") {
             let values = try? url.resourceValues(forKeys: [.creationDateKey])
             let age = Date().timeIntervalSince(values?.creationDate ?? .distantPast)
             guard age > staleThreshold else { continue }
             if let pid = activePID, Darwin.kill(pid, 0) == 0 { continue }
-            try? FileManager.default.removeItem(at: url)
-            Log.info("Cleaned stale in-progress dir: \(url.lastPathComponent)")
+            do {
+                try SnapshotRemoval.remove(url)
+                Log.info("Cleaned stale in-progress dir: \(url.lastPathComponent)")
+                EncryptedStore.markSpaceFreed(destination: destURL)
+            } catch {
+                Log.error("Cannot remove stale \(url.lastPathComponent): \(error.localizedDescription)")
+            }
         }
     }
 
