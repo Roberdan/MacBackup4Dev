@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.5] - 2026-11-01
+
+### Fixed
+- While a backup removes old interrupted runs (minutes each on an encrypted disk), the menu
+  shows a backup in progress ("Elimino i backup interrotti…") instead of the previous result,
+  and "Interrompi" also ends the cleanup; what is left goes at the next backup.
+
 ## [4.3.4] - 2026-11-01
 
 ### Changed
