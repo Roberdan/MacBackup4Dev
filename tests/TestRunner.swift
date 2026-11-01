@@ -43,6 +43,7 @@ struct TestRunner {
         let retention = RetentionTests()
         let config = ConfigParserTests()
         let automatic = AutomaticCoverageTests()
+        let preparation = PreparationSpeedTests()
         let worktrees = WorktreePolicyTests()
         let worktreeContents = WorktreeContentsTests()
         let backup = BackupEngineTests()
@@ -89,6 +90,14 @@ struct TestRunner {
             ("Automatic.rejectedFolderStaysRejected", automatic.test_aFolderWithNothingChosenStaysRejected),
             ("Automatic.previewIsReadOnly", automatic.test_nextBackupPreviewIsReadOnlyAndMatchesWhatTheBackupAdds),
             ("Automatic.previewIsQuick", automatic.test_menuPreviewReadsDatabasesFromTheLastAuditInsteadOfWalkingEverySource),
+            ("Automatic.noSavedFolderWalk", preparation.test_aBackupDoesNotWalkTheSavedFoldersForDatabases),
+            ("Automatic.auditFeedsNextPreparation", preparation.test_theAuditOfAFinishedBackupFeedsTheNextPreparation),
+            ("Automatic.newDatabaseSameBackup", preparation.test_aNewDatabaseInASavedFolderIsSavedByTheSameBackup),
+            ("Automatic.savedByItselfAnnouncedOnce", preparation.test_whatABackupSavedByItselfIsAnnouncedOnceAndEntersTheSettingsNext),
+            ("Automatic.savedByItselfSameRule", preparation.test_theBackupSavesByItselfOnlyWhatAPreparationWouldAdd),
+            ("Automatic.staleAuditEntries", preparation.test_aDatabaseTheAuditListedButThatChangedIsNotAdded),
+            ("Automatic.parentPartsNeverHang", preparation.test_aPathWithParentPartsNeverHangsTheSearchForLinks),
+            ("Worktrees.cleanupAfterTheCopy", preparation.test_theCleanupOfOldWorktreeCopiesWaitsForTheCopy),
             ("Automatic.additionsRecorded", automatic.test_automaticAdditionsAreRecordedAfterEveryBackup),
             ("Automatic.additionsOwed", automatic.test_additionsOfARunThatCouldNotStartAreReportedByTheNextOne),
             ("Automatic.menuAnnouncements", automatic.test_menuAnnouncesWhatWasAddedAndWhatComesNext),

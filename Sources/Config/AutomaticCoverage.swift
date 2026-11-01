@@ -16,15 +16,19 @@ enum AutomaticCoverage {
                              includeRightsManagedFiles: includeRightsManagedFiles, home: home).config
     }
 
+    /// `alreadyRecorded`: databases the last backup saved by itself and recorded in its snapshot. They
+    /// enter the settings like any addition but are not announced a second time.
     static func prepareReporting(from url: URL = Config.defaultPath, selectedPaths: [String]? = nil,
                                  includeRightsManagedFiles: Bool? = nil,
-                                 home: String = FileManager.default.homeDirectoryForCurrentUser.path) throws -> Preparation {
+                                 home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                                 knownDatabaseGaps: [CoverageGap]? = nil,
+                                 alreadyRecorded: [String] = []) throws -> Preparation {
         let initialBytes = try Data(contentsOf: url)
         let original = try Config.load(from: url)
         var config = try Config.forBackup(from: url, selectedPaths: selectedPaths,
                                           includeRightsManagedFiles: includeRightsManagedFiles)
         let candidates = config.coverage.autoInclude || selectedPaths != nil
-            ? discover(config: config, home: home) : []
+            ? discover(config: config, home: home, databaseGaps: knownDatabaseGaps) : []
         func expanded(_ path: String) -> String { ConfigDiscovery.expand(path, home: home) }
         func contains(_ parent: String, _ path: String) -> Bool {
             path == parent || path.hasPrefix(parent + "/")
@@ -46,14 +50,19 @@ enum AutomaticCoverage {
                 if !config.coverage.ignore.contains(path) { config.coverage.ignore.append(path) }
             }
         } else if config.coverage.autoInclude {
+            let recorded = Set(alreadyRecorded.map(expanded))
             for addition in plan(config: config, candidates: candidates, home: home) {
                 switch addition.kind {
                 case .folder: config.source.paths.append(addition.path)
                 case .database: config.databases.sqlite.append(addition.path)
                 }
-                included.append(addition.path)
                 changed = true
-                Log.info("Automatically included in backup: \(addition.path)")
+                if addition.kind == .database && recorded.contains(expanded(addition.path)) {
+                    Log.info("Added to the settings, already saved by the last backup: \(addition.path)")
+                } else {
+                    included.append(addition.path)
+                    Log.info("Automatically included in backup: \(addition.path)")
+                }
             }
         }
         if changed {
@@ -99,9 +108,9 @@ enum AutomaticCoverage {
 
     /// What the next backup would add by itself, from the settings as saved now. Read-only:
     /// nothing is saved and no inclusion is logged until a backup actually runs.
-    /// Without `knownDatabaseGaps` this is the full discovery a backup runs (slow on a large
-    /// configuration); the menu passes the databases the last audit found instead of walking
-    /// every source again, so databases that appeared since may only show up at the backup.
+    /// Without `knownDatabaseGaps` this walks every saved folder for databases (slow on a large
+    /// configuration); the menu passes the databases the last check found instead, so databases
+    /// that appeared since show up when the next backup's own check finds and saves them.
     static func pending(config: Config, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
                         knownDatabaseGaps: [CoverageGap]? = nil) -> [CoverageGap] {
         guard config.coverage.autoInclude else { return [] }
@@ -111,13 +120,21 @@ enum AutomaticCoverage {
 
     /// The one path every backup takes, from the menu or from the schedule: prepare the settings,
     /// then run with the automatic additions recorded in the status and in the snapshot.
+    /// The preparation never walks the saved folders for databases (it took minutes before each
+    /// backup): the backup's own check does, once, right before the databases are saved, and saves
+    /// what it finds in the same run. Its file (`coverage.json`) brings those databases here, into
+    /// the settings. Folders and what is inside a newly added one are still looked for right now.
     static func prepareAndRun(from url: URL = Config.defaultPath, selectedPaths: [String]? = nil,
                               includeRightsManagedFiles: Bool? = nil,
                               statusWriter: StatusWriter = StatusWriter(),
                               options: BackupRunOptions = BackupRunOptions(),
                               onPrepared: (Config) async -> Void = { _ in }) async throws -> BackupRunResult? {
+        let lastCheck = statusWriter.readCoverage()
+        let savedByLastBackup = lastCheck?.addedByBackup ?? []
         let preparation = try prepareReporting(from: url, selectedPaths: selectedPaths,
-                                               includeRightsManagedFiles: includeRightsManagedFiles, home: options.home)
+                                               includeRightsManagedFiles: includeRightsManagedFiles, home: options.home,
+                                               knownDatabaseGaps: (lastCheck?.gaps ?? []) + savedByLastBackup,
+                                               alreadyRecorded: savedByLastBackup.map(\.path))
         await onPrepared(preparation.config)
         var runOptions = options
         runOptions.automaticallyIncluded = preparation.added
@@ -125,12 +142,11 @@ enum AutomaticCoverage {
     }
 
     /// `databaseGaps` replaces the walk over every source for uncopied databases, which takes
-    /// minutes on a large configuration: the menu passes what the last backup's audit found.
-    static func discover(config: Config, home: String, databaseGaps: [CoverageGap]? = nil) -> [CoverageGap] {
-        let filter = ExcludeFilter(patterns: config.exclude.patterns)
-        let databaseFilter = ExcludeFilter(patterns: config.exclude.patterns.filter { !sqliteFileExcludePatterns.contains($0) })
-        let privateRoots = [".config/secrets", ".roberdan-os", ".gbrain", ".copilot",
-                            ".codex", ".gemini", ".pi", ".claude/projects"]
+    /// minutes on a large configuration: the menu and every backup pass what the last backup's
+    /// check found, and `knownDatabases` keeps only what is still a plain, recent database there.
+    static func discover(config: Config, home: String, databaseGaps knownGaps: [CoverageGap]? = nil) -> [CoverageGap] {
+        let databaseGaps = knownGaps.map { knownDatabases($0, config: config, home: home) }
+        let admission = Admission(config: config, home: home)
         let scan = DevEnvironment.scan(home: home, includingInventory: false)
         let proposed = scan.allItems.filter { !$0.sensitive && $0.proposed }.flatMap(\.paths)
         let gaps = CoverageAuditor.audit(config: config, home: home, measuringSizes: false,
@@ -141,17 +157,9 @@ enum AutomaticCoverage {
         }
         func eligible(_ candidate: CoverageGap) -> Bool {
             let path = ConfigDiscovery.expand(candidate.path, home: home)
-            guard path.hasPrefix(home + "/"), seen.insert(path).inserted else { return false }
-            let relative = String(path.dropFirst(home.count + 1))
-            guard !ConfigDiscovery.isForbidden(candidate.path, home: home),
-                  !privateRoots.contains(where: {
-                      relative == $0 || relative.hasPrefix($0 + "/") || $0.hasPrefix(relative + "/")
-                  }),
-                  !(candidate.kind == .database ? databaseFilter : filter).isExcluded(relativePath: relative),
-                  !relative.split(separator: "/").contains(where: { DevEnvironment.looksSecret(String($0)) }),
-                  !WorktreePolicy.isTemporarySource(path, home: home),
-                  !hasLinkedAncestor(path, home: home) else { return false }
+            guard path.hasPrefix(home + "/"), seen.insert(path).inserted, admission.admits(candidate) else { return false }
             if candidate.kind == .folder {
+                let relative = path.dropFirst(home.count + 1)
                 // Generic hidden folders must use discovery's sensitive classification.
                 if relative.hasPrefix("."), !proposed.contains(candidate.path) { return false }
                 if holdsCredentials(path) { return false }
@@ -167,7 +175,89 @@ enum AutomaticCoverage {
         return found + additionalDatabases.filter(eligible)
     }
 
-    private static func hasLinkedAncestor(_ path: String, home: String) -> Bool {
+    /// Private agent data: never added by itself, whatever folder holds it.
+    static let privateRoots = [".config/secrets", ".roberdan-os", ".gbrain", ".copilot",
+                               ".codex", ".gemini", ".pi", ".claude/projects"]
+
+    /// The rule every item must pass to enter the backup by itself, the same for the preparation
+    /// and for the backup's own check: under the home, not forbidden, not private agent data, not
+    /// excluded (the database file patterns aside, for a database), no part that looks like a
+    /// secret, not a temporary worktree, not reached through a link. Folders have two more rules
+    /// of their own in `discover`. Built once per configuration: the filters are not free.
+    struct Admission {
+        let home: String
+        private let filter: ExcludeFilter
+        private let databaseFilter: ExcludeFilter
+
+        init(config: Config, home: String) {
+            self.home = home
+            filter = ExcludeFilter(patterns: config.exclude.patterns)
+            databaseFilter = ExcludeFilter(patterns: config.exclude.patterns.filter { !sqliteFileExcludePatterns.contains($0) })
+        }
+
+        func admits(_ candidate: CoverageGap) -> Bool {
+            let path = ConfigDiscovery.expand(candidate.path, home: home)
+            guard path.hasPrefix(home + "/") else { return false }
+            let relative = String(path.dropFirst(home.count + 1))
+            return !ConfigDiscovery.isForbidden(candidate.path, home: home)
+                && !AutomaticCoverage.privateRoots.contains(where: {
+                    relative == $0 || relative.hasPrefix($0 + "/") || $0.hasPrefix(relative + "/")
+                })
+                && !(candidate.kind == .database ? databaseFilter : filter).isExcluded(relativePath: relative)
+                && !relative.split(separator: "/").contains(where: { DevEnvironment.looksSecret(String($0)) })
+                && !WorktreePolicy.isTemporarySource(path, home: home)
+                && !AutomaticCoverage.hasLinkedAncestor(path, home: home)
+        }
+    }
+
+    /// Databases named by a check's file that may still be added: still plain recent databases
+    /// (`stillThere`), inside a folder these settings save (the check only walks those).
+    static func knownDatabases(_ gaps: [CoverageGap], config: Config, home: String) -> [CoverageGap] {
+        let savedFolders = config.source.paths.map { ConfigDiscovery.expand($0, home: home) }
+        return stillThere(gaps, home: home).filter { gap in
+            let path = ConfigDiscovery.expand(gap.path, home: home)
+            return savedFolders.contains { path.hasPrefix($0 + "/") }
+        }
+    }
+
+    /// What the backup saves by itself from what its own check found: exactly the databases the
+    /// next preparation would add to these settings (Roberto, 2026-11-01). Database files are left
+    /// out of the plain copy, so leaving them to that preparation kept them out of one more
+    /// snapshot. The settings are not touched during the backup: the next preparation writes these
+    /// in from the check's file. Nothing when automatic additions are switched off.
+    static func databasesToSave(found: [CoverageGap], config: Config, home: String) -> [CoverageGap] {
+        guard config.coverage.autoInclude else { return [] }
+        let admission = Admission(config: config, home: home)
+        let candidates = knownDatabases(found, config: config, home: home).filter(admission.admits)
+        return plan(config: config, candidates: candidates, home: home)
+    }
+
+    /// What the last audit listed may be gone, replaced by a link, emptied or untouched for a month
+    /// by now: only a plain database with a size the audit accepts and a recent change is kept.
+    /// Same rule as the walk, so a backup adds exactly what a fresh walk would have found there.
+    /// The path comes out of a file: only an absolute one with no `.`, `..` or empty part is
+    /// trusted, so the later string checks (saved folder, private roots) mean what they say.
+    static func stillThere(_ gaps: [CoverageGap], home: String, now: Date = Date()) -> [CoverageGap] {
+        let cutoff = now.addingTimeInterval(-30 * 86_400)
+        return gaps.filter { gap in
+            guard gap.kind == .database else { return false }
+            let path = ConfigDiscovery.expand(gap.path, home: home)
+            let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+            guard path.hasPrefix("/"),
+                  !parts.dropFirst().contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return false }
+            let url = URL(fileURLWithPath: path)
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
+                                                                 .contentModificationDateKey]),
+                  values.isRegularFile == true, values.isSymbolicLink != true,
+                  let size = values.fileSize, size > 0, size < 2_147_483_648,
+                  let modified = values.contentModificationDate, modified > cutoff else { return false }
+            return true
+        }
+    }
+
+    /// True when the path or one of its folders under `home` is a link, or cannot be inspected, or
+    /// cannot be climbed (a `..` part never shortens it: the loop used to turn there for ever).
+    static func hasLinkedAncestor(_ path: String, home: String) -> Bool {
         var url = URL(fileURLWithPath: path)
         while url.path.hasPrefix(home + "/") {
             do {
@@ -176,7 +266,9 @@ enum AutomaticCoverage {
                 Log.warn("Automatic inclusion skipped: cannot inspect \(url.path): \(error.localizedDescription)")
                 return true
             }
-            url.deleteLastPathComponent()
+            let parent = url.deletingLastPathComponent()
+            guard parent.path.count < url.path.count else { return true }
+            url = parent
         }
         return false
     }

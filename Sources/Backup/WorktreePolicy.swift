@@ -71,9 +71,11 @@ enum WorktreePolicy {
     /// Only disposable linked checkouts are removed, never repository history or live data.
     /// `searchAgain` (an explicit request) ignores what earlier searches remembered.
     /// `maxFolders` bounds a search the way the time does, for tests that need a small step.
+    /// `skipping` names snapshots to leave alone: the backup that has just made one passes it.
     static func cleanupLocked(at destination: URL, home liveHome: String,
                               scanBudget: TimeInterval = WorktreePolicy.scanBudget, searchAgain: Bool = false,
-                              maxFolders: Int = .max, cancelled: () -> Bool = { false }) throws -> CleanupResult {
+                              maxFolders: Int = .max, skipping: Set<String> = [],
+                              cancelled: () -> Bool = { false }) throws -> CleanupResult {
         let fm = FileManager.default
         let home = liveHome.count > 1 && liveHome.hasSuffix("/") ? String(liveHome.dropLast()) : liveHome
         guard isRealDirectory(URL(fileURLWithPath: home)) else { return CleanupResult() }
@@ -88,6 +90,7 @@ enum WorktreePolicy {
         var result = CleanupResult()
         snapshots: for backup in backups {
             if cancelled() { break snapshots }
+            if skipping.contains(backup.name) { continue }
             guard var manifest = SnapshotManifest.read(from: backup.url), manifest.host == host else { continue }
             let metadata = backup.url.appendingPathComponent(SnapshotManifest.directoryName)
             guard isRealDirectory(metadata) else { continue }

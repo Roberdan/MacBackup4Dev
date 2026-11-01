@@ -39,10 +39,10 @@ enum CoverageAuditor {
     /// Folders whose children are projects: each child is judged on its own.
     static let projectContainers: [String] = ["GitHub", "Developer", "Projects", "Code", "src"]
 
-    /// The check at the end of a backup gets at most this long. On the real configuration
-    /// (171 sources) it takes about a minute (57 s and 73 s, 2026-10-31 and 11-01): ten minutes
-    /// leave room for a slow or throttled disk, and a check that hangs (2026-11-01: 35 minutes
-    /// in open()) no longer keeps the backup "in progress".
+    /// The check a backup makes right before saving its databases gets at most this long. On the
+    /// real configuration (171 sources) it takes about a minute (57 s and 73 s, 2026-10-31 and 11-01):
+    /// ten minutes leave room for a slow or throttled disk, and a check that hangs (2026-11-01: 35
+    /// minutes in open()) no longer keeps the backup "in progress".
     static let timeLimit: TimeInterval = 600
 
     /// What a check found so far. The walks add to it as they go, so a check that runs out of
@@ -93,9 +93,10 @@ enum CoverageAuditor {
     typealias Walk = @Sendable (Config, String, Findings) -> Void
     static let fullWalk: Walk = { config, home, findings in _ = audit(config: config, home: home, findings: findings) }
 
-    /// The check at the end of a backup, bounded. Past `timeLimit`, or when the backup is
-    /// stopped, the backup goes on with what was found so far and the report says why it is
-    /// incomplete, keeping what the previous check found and this one could not check again.
+    /// The check a backup makes right before saving its databases, bounded. Past `timeLimit` the
+    /// backup goes on with what was found so far; when the backup is stopped it returns at once.
+    /// Either way the report says why it is incomplete and keeps what the previous check found and
+    /// this one could not check again.
     /// The walk runs on a thread of its own: one stuck in the kernel is left behind instead of
     /// holding the backup, its status and its locks.
     static func boundedReport(config: Config, home: String, previous: CoverageReport?,
@@ -127,7 +128,7 @@ enum CoverageAuditor {
         guard let reason else {
             return CoverageReport(checkedAt: checkedAt, gaps: gaps, complete: true, unchecked: unchecked)
         }
-        Log.warn("Coverage check incomplete (\(reason)): \(gaps.count) found so far; the backup goes on")
+        Log.warn("Coverage check incomplete (\(reason)): \(gaps.count) found so far; the backup does not wait for it")
         let fresh = Set(gaps.map { "\($0.kind.rawValue)|\($0.path)" })
         let carried = (previous?.gaps ?? []).filter { !fresh.contains("\($0.kind.rawValue)|\($0.path)") }
         return CoverageReport(checkedAt: checkedAt, gaps: gaps + carried, complete: false,

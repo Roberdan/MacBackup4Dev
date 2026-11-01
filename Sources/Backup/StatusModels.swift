@@ -118,6 +118,10 @@ struct CoverageReport: Codable {
     var incompleteReason: String? = nil
     /// Folders and files left out because they are only in the cloud or could not be opened.
     var unchecked: Int? = nil
+    /// Databases outside the settings that the backup which wrote this report found and saved by
+    /// itself, recorded in its snapshot: no longer gaps. The next preparation writes them into the
+    /// settings without announcing them again. Nil before 4.3.3 and when there were none.
+    var addedByBackup: [CoverageGap]? = nil
 }
 
 struct BackupErrorFile: Codable {

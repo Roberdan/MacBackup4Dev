@@ -34,6 +34,15 @@ final class BackupEndTests {
     /// Runs the real engine in the sandbox and gives up waiting after `seconds`.
     func run(_ cfg: Config, _ box: SafetyTests.Sandbox, within seconds: TimeInterval = 120,
              configure: (inout BackupRunOptions) -> Void = { _ in }) throws -> BackupRunResult {
+        guard let finished = try runAllowingStop(cfg, box, within: seconds, configure: configure) else {
+            throw TestFailure.failed("backup cancelled")
+        }
+        return finished
+    }
+
+    /// The same, for a backup the test stops: nil when the engine abandoned it.
+    func runAllowingStop(_ cfg: Config, _ box: SafetyTests.Sandbox, within seconds: TimeInterval = 120,
+                         configure: (inout BackupRunOptions) -> Void = { _ in }) throws -> BackupRunResult? {
         var options = BackupRunOptions(home: box.home, captureEnvironment: false, captureGit: false,
                                        captureDatabases: false, auditCoverage: false, captureApplications: false)
         configure(&options)
@@ -49,8 +58,7 @@ final class BackupEndTests {
         guard done.wait(timeout: .now() + seconds) == .success else {
             throw TestFailure.failed("the backup was still running after \(Int(seconds)) s")
         }
-        guard let finished = try result.value!.get() else { throw TestFailure.failed("backup cancelled") }
-        return finished
+        return try result.value!.get()
     }
 
     /// Every git, sqlite3 or brew run left its two output pipes open until the backup ended:
@@ -100,6 +108,9 @@ final class BackupEndTests {
     func test_aCoverageCheckThatNeverAnswersDoesNotHoldTheBackup() throws {
         let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
         try safety.write("x", to: box.home + "/project/a.txt")
+        // The previous check listed a database outside the folders saved now: it stays in the report but is
+        // never saved on that word alone (only a check of the saved folders decides what a backup adds).
+        try safety.write("data", to: box.home + "/app/runtime/history.db")
         let cfg = safety.config(box, sources: ["project"])
         let writer = StatusWriter(directory: box.state)
         let known = CoverageGap(kind: .database, path: "~/app/runtime/history.db",
@@ -111,6 +122,7 @@ final class BackupEndTests {
         let started = Date()
         let result = try run(cfg, box, within: 20) { options in
             options.auditCoverage = true
+            options.captureDatabases = true
             options.coverageTimeLimit = 1
             options.coverageWalk = { _, _, findings in
                 findings.add(CoverageGap(kind: .folder, path: "~/Found", lastModified: "2026-11-01T10:00:00Z",
@@ -136,6 +148,8 @@ final class BackupEndTests {
         let paths = Set(report.gaps.map(\.path))
         try expect(paths.contains("~/Found"), "what the check found before it stopped answering is kept: \(paths)")
         try expect(paths.contains(known.path), "what the previous check found is not lost: \(paths)")
+        try expect(result.manifest.databases.isEmpty && report.addedByBackup == nil,
+                   "and a database it listed outside the saved folders is not saved: \(result.manifest.databases.map(\.source))")
     }
 
     /// The check never downloads what is only in the cloud: it switches downloads off on the
@@ -186,7 +200,9 @@ final class BackupEndTests {
                    "a stopped check walks no further")
     }
 
-    /// "Interrompi" during the check (SIGTERM for a scheduled backup) used to wait for the walk.
+    /// "Interrompi" during the check (SIGTERM for a scheduled backup) used to wait for the walk. The check
+    /// now runs before the databases are saved, so a stop there ends the backup at once like a stop during
+    /// the copy: the unfinished snapshot is not kept (F-02: without its databases it must not look valid).
     func test_stoppingTheBackupDuringTheCheckEndsItAtOnce() throws {
         let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
         try safety.write("x", to: box.home + "/project/a.txt")
@@ -194,7 +210,7 @@ final class BackupEndTests {
         let answer = DispatchSemaphore(value: 0)
         defer { answer.signal() }
         let started = Date()
-        let result = try run(cfg, box, within: 20) { options in
+        let result = try runAllowingStop(cfg, box, within: 20) { options in
             options.auditCoverage = true
             options.coverageTimeLimit = 60
             options.coverageWalk = { _, _, _ in
@@ -204,9 +220,12 @@ final class BackupEndTests {
         }
         let elapsed = Date().timeIntervalSince(started)
         try expect(elapsed < 15, "the backup ended \(Int(elapsed)) s after being stopped during the check")
+        try expect(result == nil, "the stopped backup is abandoned")
         let writer = StatusWriter(directory: box.state)
-        try expectEqual(writer.read()?.state, "idle", "the backup is over")
-        try expectEqual(writer.read()?.lastSnapshot, result.snapshot.lastPathComponent, "the snapshot made before the stop is recorded")
+        try expectEqual(writer.read()?.state, "cancelled", "the status says so")
+        let left = (try? FileManager.default.contentsOfDirectory(atPath: box.dest)) ?? []
+        try expect(!left.contains { $0.hasPrefix("20") || $0.hasPrefix("in-progress-") || $0 == "rustymacbackup.lock" },
+                   "no snapshot, no unfinished copy and no lock are left: \(left)")
         try expectEqual(writer.readCoverage()?.complete, false, "the check is marked incomplete")
         try expect(writer.readCoverage()?.incompleteReason?.contains("fermato") == true,
                    "because the backup was stopped: \(writer.readCoverage()?.incompleteReason ?? "nil")")

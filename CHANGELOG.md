@@ -1,6 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## [4.3.4] - 2026-11-01
+
+### Changed
+- The preparation before every backup no longer walks all the saved folders looking for new
+  databases (it took one to five minutes with 171 folders before the copy even started): it
+  takes them from the check made by the previous backup, like the menu's preview, and checks
+  that each one is still a plain recent file. New folders and what they hold are still found
+  right now.
+- The coverage check now runs inside the backup, right before the databases are saved, instead
+  of at the very end: still one walk per backup. A database it finds in a saved folder (created
+  since the last backup) is saved by that same backup, under the same rule the automatic
+  additions follow; database files are left out of the plain copy, so it would otherwise have
+  missed one more snapshot. The menu counts it in "Aggiunte da sole", and the next backup writes
+  it into the settings without announcing it again. Stopping the backup during the check now
+  discards the unfinished snapshot, like a stop at any point before the databases are saved.
+- The cleanup of old saved worktree copies (up to 30 s of searching per backup while old
+  snapshots are still being searched) runs at the end of a backup, after the copy, instead of
+  before it, so the copy no longer waits for it.
 
 ### Fixed
 - The real reason the interrupted backups stayed: the cleanup skipped every one of them while
