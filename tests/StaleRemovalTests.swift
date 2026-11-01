@@ -81,6 +81,8 @@ final class StaleRemovalTests {
         let fresh = root.appendingPathComponent("in-progress-2026-11-01_150000")
         try fm.createDirectory(at: fresh, withIntermediateDirectories: true)
 
+        // The running backup writes its own PID in the marker before cleaning.
+        try BackupEngine.acquireLock(at: root.appendingPathComponent("rustymacbackup.lock").path)
         BackupEngine.cleanStaleInProgress(at: root)
 
         try expect(!fm.fileExists(atPath: stale.path), "a protected interrupted run must be removed completely")
@@ -88,6 +90,15 @@ final class StaleRemovalTests {
         try expect(fm.fileExists(atPath: fresh.path), "a run younger than 2 hours may still be live")
         try expectEqual(try String(contentsOf: shared, encoding: .utf8), "kept", "the good snapshot keeps its file")
         try expect(hasACL(shared.path), "the good snapshot's file keeps its own protection")
+
+        // Another live process in the marker: its run may still be in use.
+        let other = root.appendingPathComponent("in-progress-2026-10-20_181842")
+        try fm.createDirectory(at: other, withIntermediateDirectories: true)
+        try age(other, hours: 3)
+        try "\(getppid())\n2026-11-01T00:00:00Z\nX".write(to: root.appendingPathComponent("rustymacbackup.lock"),
+                                              atomically: true, encoding: .utf8)
+        BackupEngine.cleanStaleInProgress(at: root)
+        try expect(fm.fileExists(atPath: other.path), "a run another live process may own is kept")
     }
 
     func test_sharedLockedFileIsNeverUnlockedAndFailureIsReported() throws {

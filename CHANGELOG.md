@@ -19,6 +19,11 @@
   snapshots are still being searched) runs at the end of a backup, after the copy, instead of
   before it, so the copy no longer waits for it.
 
+### Fixed
+- The real reason the interrupted backups stayed: the cleanup skipped every one of them while
+  a backup was running, because it mistook the running backup's own marker for another
+  backup still in use. Only another live process now keeps an old run.
+
 ## [4.3.3] - 2026-11-01
 
 ### Fixed
