@@ -77,6 +77,56 @@ struct AppBundleTests {
         try expectEqual(try AppBundleCopy.fingerprint(source), expected, "source contents and modes are unchanged")
     }
 
+    /// 2026-11-01: every backup re-read and re-verified every app (Outlook: over 40 minutes).
+    func test_unchangedAppIsReusedWithoutReadingOrVerifyingIt() throws {
+        let f = try AppTestFixture(); defer { f.cleanup() }
+        let app = try f.app(signed: true)
+        let relative = "_rustymacbackup/applications/system/Shoji.app"
+        final class Counter: @unchecked Sendable { var copies = 0; var signatures = 0 }
+        let counter = Counter()
+        let counting: (inout BackupRunOptions) -> Void = { options in
+            options.applicationCopyOptions.copyFile = { from, to in
+                counter.copies += 1
+                try AppBundleCopy.copyRegularFile(from: from, to: to)
+            }
+            options.applicationCopyOptions.verifySignature = { url in
+                counter.signatures += 1
+                return try AppBundleCopy.isSigned(url)
+            }
+        }
+        let first = try f.backup(configure: counting)
+        try expect(counter.signatures > 0 && counter.copies > 0, "a new app gets the full copy and checks")
+        try expect(try AppCapture.read(from: first.snapshot)!.entries[0].sourceStamp != nil,
+                   "a verified copy records what its source was")
+
+        counter.copies = 0; counter.signatures = 0
+        let second = try f.backup(configure: counting)
+        let entry = try AppCapture.read(from: second.snapshot)!.entries[0]
+        try expect(second.manifest.complete, "reused app keeps the snapshot complete")
+        try expectEqual(entry.state, .saved, "unchanged app is saved")
+        try expect(entry.signed, "its signature result is carried over")
+        try expectEqual(counter.signatures, 0, "an unchanged app is not verified again")
+        try expectEqual(counter.copies, 0, "an unchanged app is not read and copied again")
+        let saved = second.snapshot.appendingPathComponent(relative)
+        try expectEqual(try AppBundleCopy.fingerprint(saved), try AppBundleCopy.fingerprint(app), "the reused copy is the whole app")
+        try expect(try AppBundleCopy.isSigned(saved), "the reused copy is still a valid signed app")
+        let executable = "/Contents/MacOS/Shoji"
+        try expectEqual(try AppInventory.metadata(URL(fileURLWithPath: saved.path + executable)).st_ino,
+                        try AppInventory.metadata(first.snapshot.appendingPathComponent(relative + executable)).st_ino,
+                        "files are shared with the previous verified copy")
+
+        counter.copies = 0; counter.signatures = 0
+        let plist = app.appendingPathComponent("Contents/Info.plist")
+        let before = try AppInventory.metadata(plist)
+        let text = try String(contentsOf: plist, encoding: .utf8)
+        try text.replacingOccurrences(of: "1.2.2", with: "1.2.3").write(to: plist, atomically: false, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970:
+            Double(before.st_mtimespec.tv_sec) + Double(before.st_mtimespec.tv_nsec) / 1_000_000_000)], ofItemAtPath: plist.path)
+        let third = try f.run(configure: counting)
+        try expect(counter.signatures > 0, "a change with the same size and time still gets the full checks")
+        try expect(third?.manifest.complete == false, "and the edited signed app is not passed off as the verified one")
+    }
+
     func test_newAppsAndDedupNeverChangeSources() throws {
         let f = try AppTestFixture(); defer { f.cleanup() }
         let app = try f.app()
@@ -258,10 +308,10 @@ struct AppBundleTests {
             let f = try AppTestFixture(); defer { f.cleanup() }
             let source = try f.app()
             let first = try f.backup()
-            if scenario != "space" {
-                try f.write("#!/bin/sh\nexit 1\n", source.path + "/Contents/MacOS/Shoji")
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: source.path + "/Contents/MacOS/Shoji")
-            }
+            // Changed for every scenario: an unchanged app is reused from the first copy and
+            // needs neither space nor copying.
+            try f.write("#!/bin/sh\nexit 1\n", source.path + "/Contents/MacOS/Shoji")
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: source.path + "/Contents/MacOS/Shoji")
             let result = try f.run { options in
                 if scenario == "space" {
                     options.applicationCopyOptions.availableBytes = { _ in 1 }
