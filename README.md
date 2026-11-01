@@ -645,12 +645,12 @@ ignore = ["~/Scratch"]          # never auto-add or suggest this folder
   remembered, so a new project created later under the same folder is still added.
   The menu says what happened: after every backup **Aggiunte da sole: N**, and, read-only,
   **Entreranno al prossimo backup** with what the next one will add (the same rule decides
-  both and nothing is saved until a backup runs). Both, like the preparation before every
-  backup, take the databases of folders you already save from the audit made at the end of
-  the previous backup instead of walking them again (that took minutes before each backup):
-  a database created inside a saved folder is added by the backup after the next one, while
-  new folders and the databases inside them are added right away.
-  `MacBackup4Dev coverage` lists the same items.
+  both and nothing is saved until a backup runs). Neither the menu nor the preparation before
+  a backup walks the folders you already save (that took minutes before each backup): the
+  backup's own check does it once, right before it saves the databases, and a database created
+  in a saved folder since the last backup is saved by that same backup and counted in
+  **Aggiunte da sole**; the next backup writes it into the configuration. New folders and the
+  databases inside them are added right away. `MacBackup4Dev coverage` lists the same items.
 - **Coverage audit**: remaining unprotected items are shown in the menu.
 - **Temporary worktrees**: linked checkouts and `worktrees` / `.worktrees` containers are
   excluded even with an older config. Saved copies of checkouts are recognised by their `.git`

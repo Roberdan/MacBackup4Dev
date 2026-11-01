@@ -4,15 +4,28 @@
 
 ### Changed
 - The preparation before every backup no longer walks all the saved folders looking for new
-  databases (it took one to five minutes with 171 folders before the copy even started). It
-  reuses the audit made at the end of the previous backup, like the menu's preview, and checks
-  that each database it lists is still a plain recent file. New folders and what they hold are
-  still found right now. A database created inside a folder that is already saved enters the
-  backup after the next one, at most one interval later; with no earlier audit the folders are
-  walked once, as before.
+  databases (it took one to five minutes with 171 folders before the copy even started): it
+  takes them from the check made by the previous backup, like the menu's preview, and checks
+  that each one is still a plain recent file. New folders and what they hold are still found
+  right now.
+- The coverage check now runs inside the backup, right before the databases are saved, instead
+  of at the very end: still one walk per backup. A database it finds in a saved folder (created
+  since the last backup) is saved by that same backup, under the same rule the automatic
+  additions follow; database files are left out of the plain copy, so it would otherwise have
+  missed one more snapshot. The menu counts it in "Aggiunte da sole", and the next backup writes
+  it into the settings without announcing it again. Stopping the backup during the check now
+  discards the unfinished snapshot, like a stop at any point before the databases are saved.
 - The cleanup of old saved worktree copies (up to 30 s of searching per backup while old
   snapshots are still being searched) runs at the end of a backup, after the copy, instead of
   before it, so the copy no longer waits for it.
+
+### Fixed
+- The coverage check never downloads what is only in iCloud and never holds the backup: after
+  at most 10 minutes (it normally takes about one) the backup goes on and the report says the
+  check is incomplete. On 2026-11-01 a backup stayed "in progress" 35 minutes after a complete
+  copy.
+- A backup no longer keeps two open pipes for every git, sqlite3 or brew command it ran (972 in
+  one backup).
 
 ## [4.3.2] - 2026-10-31
 

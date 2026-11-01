@@ -196,14 +196,33 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   can end the run.
   Discovery walks every source for databases (measured 1–2 minutes on a 171-source
   configuration, 5 minutes on a loaded Mac): neither the menu preview nor the preparation
-  before a backup may do it. Both pass `knownDatabaseGaps` (the audit at the end of the last
-  backup, `coverage.json`), and `AutomaticCoverage.stillThere` revalidates each entry (still a
-  plain, non-empty, recent, non-linked file, its path absolute with no `.`/`..`/empty part:
-  the file is read back, so it is never trusted blindly). Folders and what a newly added folder holds are
-  still discovered right now. A database created inside an already saved folder after the last
-  audit therefore enters the backup after the next one (at most one interval later); without
-  any audit the sources are walked once. The audit at the end of each backup is what feeds
-  the next preparation: keep it.
+  before a backup may do it, not even without an earlier check. Both pass `knownDatabaseGaps`
+  (`coverage.json`, written by the last backup's own check), and
+  `AutomaticCoverage.knownDatabases` keeps only entries inside a saved folder that
+  `stillThere` revalidates (still a plain, non-empty, recent, non-linked file, its path
+  absolute with no `.`/`..`/empty part: the file is read back, so it is never trusted
+  blindly). Folders and what a newly added folder holds are still discovered right now.
+  **Databases in saved folders (4.3.3, Roberto 2026-11-01):** database files are excluded from
+  the plain copy, so a database not in `[databases] sqlite` is in no snapshot. The coverage
+  check runs inside the backup right before `DatabaseDumps.captureAll` (one walk per backup);
+  `AutomaticCoverage.databasesToSave` (`knownDatabases` + `Admission` + `plan`, nothing with
+  `auto_include = false`) picks what it found that a preparation would add, and the same
+  backup saves it. Never write the settings mid-run: those databases are recorded in the
+  status (`auto_included`), the manifest (`automaticallyIncluded`) and `coverage.json`
+  (`addedByBackup`, no longer in `gaps`); the next `prepareAndRun` writes them in from there
+  and passes them as `alreadyRecorded`, so they are announced once. `AutomaticCoverage.Admission`
+  is the one admission rule for the preparation and the backup: change it there only.
+- **Coverage check (4.3.3):** the check runs on a thread of its own and gets at most
+  `CoverageAuditor.timeLimit` (10 minutes; about a minute on the real 171-source
+  configuration). Past it the backup goes on with what was found and `coverage.json` says
+  `complete: false` with the reason, keeping the gaps found plus the previous report's gaps it
+  could not check again. The report is written as soon as the check ends; a stop during it
+  abandons the unfinished snapshot (F-02: its databases are not saved yet). Every audit walk
+  switches cloud downloads off for its own thread (`IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES`,
+  thread scope, OFF; the process default is ON) and never lists or opens an entry flagged
+  `SF_DATALESS`; such entries and folders that cannot be opened are counted in `unchecked`.
+  `Shell.run` closes its pipes itself: never leave a `Pipe`'s handles to the autorelease pool
+  (2026-11-01: 972 open pipes in one finalization).
 - **Temporary worktrees (4.3):** file scanning never copies linked git worktrees or
   `worktrees` / `.worktrees` containers, including with old configs. Cleanup only unlinks
   historical linked-checkout copies whose exact live path is ENOENT, whose main `.git`
