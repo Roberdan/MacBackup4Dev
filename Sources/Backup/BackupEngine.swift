@@ -9,6 +9,10 @@ struct BackupRunOptions {
     var captureGit = true
     var captureDatabases = true
     var auditCoverage = true
+    /// The coverage check at the end stops waiting after this long; tests shorten it.
+    var coverageTimeLimit: TimeInterval = CoverageAuditor.timeLimit
+    /// Tests replace the coverage walk to stand in for a folder that never answers.
+    var coverageWalk: CoverageAuditor.Walk = CoverageAuditor.fullWalk
     var databaseEnvironment: [String: String]? = nil
     var now: () -> Date = { Date() }
     var environmentCapture: (URL) -> Void = EnvironmentSnapshot.capture
@@ -514,9 +518,9 @@ enum BackupEngine {
 
         if options.auditCoverage {
             reportFinalization("Controllo la copertura del backup…")
-            let gaps = CoverageAuditor.audit(config: config, home: home)
-            try? statusWriter.writeCoverage(CoverageReport(
-                checkedAt: ISO8601DateFormatter().string(from: Date()), gaps: gaps))
+            try? statusWriter.writeCoverage(CoverageAuditor.boundedReport(
+                config: config, home: home, previous: statusWriter.readCoverage(), timeLimit: options.coverageTimeLimit,
+                walk: options.coverageWalk, cancelled: { token.isCancelled || Task.isCancelled }))
         }
 
         let duration = options.now().timeIntervalSince(startTime)
