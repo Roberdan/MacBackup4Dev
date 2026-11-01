@@ -51,7 +51,11 @@ extension BackupEngine {
             let values = try? url.resourceValues(forKeys: [.creationDateKey])
             let age = Date().timeIntervalSince(values?.creationDate ?? .distantPast)
             guard age > staleThreshold else { continue }
-            if let pid = activePID, Darwin.kill(pid, 0) == 0 { continue }
+            // The marker holds this very backup's PID (it is written just before): only another
+            // live process means the run may still be in use. Checking our own PID skipped every
+            // stale run since the marker moved before the cleanup (14 left on 2026-11-01).
+            if let pid = activePID, pid != ProcessInfo.processInfo.processIdentifier,
+               Darwin.kill(pid, 0) == 0 { continue }
             do {
                 try SnapshotRemoval.remove(url)
                 Log.info("Cleaned stale in-progress dir: \(url.lastPathComponent)")
