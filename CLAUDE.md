@@ -212,7 +212,7 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   `stillThere` revalidates (still a plain, non-empty, recent, non-linked file, its path
   absolute with no `.`/`..`/empty part: the file is read back, so it is never trusted
   blindly). Folders and what a newly added folder holds are still discovered right now.
-  **Databases in saved folders (4.3.3, Roberto 2026-11-01):** database files are excluded from
+  **Databases in saved folders (4.3.4, Roberto 2026-11-01):** database files are excluded from
   the plain copy, so a database not in `[databases] sqlite` is in no snapshot. The coverage
   check runs inside the backup right before `DatabaseDumps.captureAll` (one walk per backup);
   `AutomaticCoverage.databasesToSave` (`knownDatabases` + `Admission` + `plan`, nothing with
@@ -222,7 +222,7 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   (`addedByBackup`, no longer in `gaps`); the next `prepareAndRun` writes them in from there
   and passes them as `alreadyRecorded`, so they are announced once. `AutomaticCoverage.Admission`
   is the one admission rule for the preparation and the backup: change it there only.
-- **Coverage check (4.3.3):** the check runs on a thread of its own and gets at most
+- **Coverage check (4.3.4):** the check runs on a thread of its own and gets at most
   `CoverageAuditor.timeLimit` (10 minutes; about a minute on the real 171-source
   configuration). Past it the backup goes on with what was found and `coverage.json` says
   `complete: false` with the reason, keeping the gaps found plus the previous report's gaps it
