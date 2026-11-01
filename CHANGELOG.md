@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Interrupted backups are really deleted. Each backup was supposed to remove runs left
+  unfinished for more than two hours, but one protected item (a folder macOS guards against
+  deletion, a read-only or locked entry) stopped the removal silently and the run stayed on
+  the disk forever (13 on 2026-11-01). Now such folders are unlocked and removed; a file
+  still shared with a good backup is never changed, and anything that cannot go is written
+  to the log. Snapshots that a cleanup renamed away and failed to remove are removed too.
+
 ## [4.3.2] - 2026-10-31
 
 ### Added

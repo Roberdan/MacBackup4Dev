@@ -149,7 +149,7 @@ enum RetentionManager {
                 }
                 // A failed/partial deletion must never remain a restorable snapshot.
                 try FileManager.default.moveItem(at: backup.url, to: staged)
-                try FileManager.default.removeItem(at: staged)
+                try SnapshotRemoval.remove(staged)
                 removed.append(backup.name)
                 Log.info("Pruned: \(backup.name)")
                 // Inside an encrypted store the freed space returns to the disk only after a
