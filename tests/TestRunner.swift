@@ -76,6 +76,7 @@ struct TestRunner {
         let appDataCount = AppDataCountTests()
         let appRecovery = AppRecoveryTests()
         let postgres = PostgresBackupTests()
+        let backupEnd = BackupEndTests()
 
         var suites: [(String, TestClosure)] = [
             ("Automatic.newSourcesCopied", automatic.test_newFoldersAndToolsEnterTheNextBackup),
@@ -319,6 +320,7 @@ struct TestRunner {
             ("BackupEngine.naming", backup.test_snapshotNaming),
             ("BackupEngine.inProgress", backup.test_inProgressPrefix),
             ("BackupEngine.statusFormat", backup.test_statusFileFormat),
+            ("BackupEnd.noOpenDescriptors", backupEnd.test_aBackupLeavesNoOpenDescriptorBehind),
             ("HardLinker.sameFile", hardLinker.test_sameFileSameSizeMtime),
             ("HardLinker.diffSize", hardLinker.test_differentSize),
             ("HardLinker.hardLink", hardLinker.test_hardLinkCreation),
