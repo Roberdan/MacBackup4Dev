@@ -111,6 +111,13 @@ struct BackupStatusFile: Codable {
 struct CoverageReport: Codable {
     var checkedAt: String
     var gaps: [CoverageGap]
+    /// False when the check ran out of time or the backup was stopped: `gaps` then holds what
+    /// it found plus what the previous check found and this one could not check again.
+    /// Nil in reports written before 4.3.3 and by `coverage` on the command line.
+    var complete: Bool? = nil
+    var incompleteReason: String? = nil
+    /// Folders and files left out because they are only in the cloud or could not be opened.
+    var unchecked: Int? = nil
 }
 
 struct BackupErrorFile: Codable {

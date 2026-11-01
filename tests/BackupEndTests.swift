@@ -94,4 +94,132 @@ final class BackupEndTests {
         try expectEqual(after.all, before.all, "open descriptors after a backup (pipes before \(before.pipes), after \(after.pipes))")
         try expectEqual(after.pipes, before.pipes, "open pipes after a backup")
     }
+
+    /// 2026-11-01: the check waited 35 minutes in open() after a complete copy; the status said
+    /// "in progress", Restore was disabled and the next scheduled backup would have found it running.
+    func test_aCoverageCheckThatNeverAnswersDoesNotHoldTheBackup() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        try safety.write("x", to: box.home + "/project/a.txt")
+        let cfg = safety.config(box, sources: ["project"])
+        let writer = StatusWriter(directory: box.state)
+        let known = CoverageGap(kind: .database, path: "~/app/runtime/history.db",
+                                lastModified: "2026-10-31T23:00:00Z", approximateBytes: 4096)
+        try writer.writeCoverage(CoverageReport(checkedAt: "2026-11-01T00:00:00Z", gaps: [known]))
+        let walking = DispatchSemaphore(value: 0)
+        let answer = DispatchSemaphore(value: 0)
+        defer { answer.signal() }   // let the stuck walk end with the test
+        let started = Date()
+        let result = try run(cfg, box, within: 20) { options in
+            options.auditCoverage = true
+            options.coverageTimeLimit = 1
+            options.coverageWalk = { _, _, findings in
+                findings.add(CoverageGap(kind: .folder, path: "~/Found", lastModified: "2026-11-01T10:00:00Z",
+                                         approximateBytes: 1))
+                walking.signal()
+                _ = answer.wait(timeout: .now() + 30)   // a folder that never answers
+            }
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        try expect(walking.wait(timeout: .now()) == .success, "the coverage check started")
+        try expect(elapsed < 15, "the backup ended \(Int(elapsed)) s after a check that never answered")
+        guard let status = writer.read() else { throw TestFailure.failed("no status written") }
+        try expectEqual(status.state, "idle", "the backup is over")
+        try expectEqual(status.lastSnapshot, result.snapshot.lastPathComponent, "the new snapshot is recorded")
+        try expect(result.manifest.complete, "the copy itself was complete")
+        try expectEqual(status.lastResult, "complete", "last result")
+        try expectEqual(status.lastCompleteAt, status.lastCompleted, "the new snapshot is the newest complete one")
+        try expect(!FileManager.default.fileExists(atPath: box.dest + "/rustymacbackup.lock"),
+                   "the destination is free for the next backup")
+        guard let report = writer.readCoverage() else { throw TestFailure.failed("no coverage report") }
+        try expectEqual(report.complete, false, "the report says the check is incomplete")
+        try expect(report.incompleteReason?.contains("tempo scaduto") == true, "and why: \(report.incompleteReason ?? "nil")")
+        let paths = Set(report.gaps.map(\.path))
+        try expect(paths.contains("~/Found"), "what the check found before it stopped answering is kept: \(paths)")
+        try expect(paths.contains(known.path), "what the previous check found is not lost: \(paths)")
+    }
+
+    /// The check never downloads what is only in the cloud: it switches downloads off on the
+    /// thread that walks, and leaves cloud-only folders and files out, counted as not checked.
+    func test_theCoverageCheckNeverDownloadsWhatIsOnlyInTheCloud() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        for path in ["project/app/runtime/history.db", "project/cloud/runtime/remote.db", "project/cloud.db",
+                     "Local/notes.md", "Local/cloud/notes.md", "Remote/notes.md", "GitHub/local/a.txt",
+                     "GitHub/remote/a.txt"] {
+            try safety.write("data", to: box.home + "/" + path)
+        }
+        let cfg = safety.config(box, sources: ["project"])
+        let cloudOnly = ["/project/cloud", "/project/cloud.db", "/Local/cloud", "/Remote", "/GitHub/remote"]
+        let policies = ResultBox<[Int32]>()
+        let lock = NSLock()
+        func findings() -> CoverageAuditor.Findings {
+            CoverageAuditor.Findings { path in
+                let policy = getiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD)
+                lock.withLock { policies.value = (policies.value ?? []) + [policy] }
+                return cloudOnly.contains { path.hasSuffix($0) }
+            }
+        }
+        let own = getiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD)
+        let audit = findings()
+        let paths = Set(CoverageAuditor.audit(config: cfg, home: box.home, findings: audit).map(\.path))
+        try expect(paths.contains("~/project/app/runtime/history.db"), "a database in an ordinary folder is found: \(paths)")
+        try expect(paths.contains("~/Local") && paths.contains("~/GitHub/local"), "ordinary folders are found: \(paths)")
+        for skipped in ["remote.db", "cloud.db", "~/Remote", "~/GitHub/remote"] {
+            try expect(!paths.contains { $0.hasSuffix(skipped) }, "\(skipped) is only in the cloud and never opened: \(paths)")
+        }
+        try expectEqual(audit.found.unchecked, cloudOnly.count, "what was left out is counted as not checked")
+        // The preparation before a backup calls the database walk on its own.
+        let preparation = findings()
+        let databases = CoverageAuditor.uncopiedDatabases(config: cfg, sources: [box.home + "/project"], home: box.home,
+                                                          cutoff: Date().addingTimeInterval(-86_400), findings: preparation)
+        try expectEqual(databases.map(\.path), ["~/project/app/runtime/history.db"], "the database walk skips the cloud too")
+        try expectEqual(preparation.found.unchecked, 2, "the database walk counts what it left out")
+        let seen = policies.value ?? []
+        try expect(!seen.isEmpty && seen.allSatisfy { $0 == IOPOL_MATERIALIZE_DATALESS_FILES_OFF },
+                   "downloads are off on the walking thread every time (\(seen))")
+        try expectEqual(getiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD), own,
+                        "the thread gets its own setting back")
+        try expect(!CoverageAuditor.isCloudOnly(box.home + "/project/app"), "an ordinary folder is not cloud-only")
+        // Past the time limit a walk still running ends at its next entry instead of going on.
+        let stopped = CoverageAuditor.Findings()
+        stopped.stop()
+        try expect(CoverageAuditor.audit(config: cfg, home: box.home, findings: stopped).isEmpty,
+                   "a stopped check walks no further")
+    }
+
+    /// "Interrompi" during the check (SIGTERM for a scheduled backup) used to wait for the walk.
+    func test_stoppingTheBackupDuringTheCheckEndsItAtOnce() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        try safety.write("x", to: box.home + "/project/a.txt")
+        let cfg = safety.config(box, sources: ["project"])
+        let answer = DispatchSemaphore(value: 0)
+        defer { answer.signal() }
+        let started = Date()
+        let result = try run(cfg, box, within: 20) { options in
+            options.auditCoverage = true
+            options.coverageTimeLimit = 60
+            options.coverageWalk = { _, _, _ in
+                BackupEngine.stop()
+                _ = answer.wait(timeout: .now() + 30)
+            }
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        try expect(elapsed < 15, "the backup ended \(Int(elapsed)) s after being stopped during the check")
+        let writer = StatusWriter(directory: box.state)
+        try expectEqual(writer.read()?.state, "idle", "the backup is over")
+        try expectEqual(writer.read()?.lastSnapshot, result.snapshot.lastPathComponent, "the snapshot made before the stop is recorded")
+        try expectEqual(writer.readCoverage()?.complete, false, "the check is marked incomplete")
+        try expect(writer.readCoverage()?.incompleteReason?.contains("fermato") == true,
+                   "because the backup was stopped: \(writer.readCoverage()?.incompleteReason ?? "nil")")
+    }
+
+    /// A command that cannot even start must not leave its pipes behind either.
+    func test_aCommandThatCannotStartLeavesNoPipe() throws {
+        let before = Self.openDescriptors()
+        for _ in 0..<3 {
+            let result = Shell.run("/nonexistent/macbackup4dev-tool", [], stdin: "secret")
+            try expect(!result.ok, "the command cannot start")
+        }
+        let after = Self.descriptors { $0.pipes <= before.pipes }
+        try expectEqual(after.pipes, before.pipes, "open pipes after commands that could not start")
+    }
 }
