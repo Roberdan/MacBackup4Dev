@@ -108,6 +108,9 @@ final class BackupEndTests {
     func test_aCoverageCheckThatNeverAnswersDoesNotHoldTheBackup() throws {
         let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
         try safety.write("x", to: box.home + "/project/a.txt")
+        // The previous check listed a database outside the folders saved now: it stays in the report but is
+        // never saved on that word alone (only a check of the saved folders decides what a backup adds).
+        try safety.write("data", to: box.home + "/app/runtime/history.db")
         let cfg = safety.config(box, sources: ["project"])
         let writer = StatusWriter(directory: box.state)
         let known = CoverageGap(kind: .database, path: "~/app/runtime/history.db",
@@ -119,6 +122,7 @@ final class BackupEndTests {
         let started = Date()
         let result = try run(cfg, box, within: 20) { options in
             options.auditCoverage = true
+            options.captureDatabases = true
             options.coverageTimeLimit = 1
             options.coverageWalk = { _, _, findings in
                 findings.add(CoverageGap(kind: .folder, path: "~/Found", lastModified: "2026-11-01T10:00:00Z",
@@ -144,6 +148,8 @@ final class BackupEndTests {
         let paths = Set(report.gaps.map(\.path))
         try expect(paths.contains("~/Found"), "what the check found before it stopped answering is kept: \(paths)")
         try expect(paths.contains(known.path), "what the previous check found is not lost: \(paths)")
+        try expect(result.manifest.databases.isEmpty && report.addedByBackup == nil,
+                   "and a database it listed outside the saved folders is not saved: \(result.manifest.databases.map(\.source))")
     }
 
     /// The check never downloads what is only in the cloud: it switches downloads off on the
