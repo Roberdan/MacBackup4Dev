@@ -77,6 +77,10 @@ enum Shell {
         } catch {
             outPipe.fileHandleForReading.readabilityHandler = nil
             errPipe.fileHandleForReading.readabilityHandler = nil
+            for pipe in [outPipe, errPipe] + (inPipe.map { [$0] } ?? []) {
+                try? pipe.fileHandleForReading.close()
+                try? pipe.fileHandleForWriting.close()
+            }
             return Result(status: -1, stdout: "", stderr: "\(executable): \(error.localizedDescription)")
         }
         let deadline = Date().addingTimeInterval(timeout)
@@ -101,6 +105,10 @@ enum Shell {
         usleep(30_000)
         drainNonBlocking(outPipe.fileHandleForReading.fileDescriptor, into: out.append)
         drainNonBlocking(errPipe.fileHandleForReading.fileDescriptor, into: err.append)
+        // Close now: left to the autorelease pool, the two pipes stayed open until the backup
+        // ended (2026-11-01: 972 open pipes during one finalization).
+        try? outPipe.fileHandleForReading.close()
+        try? errPipe.fileHandleForReading.close()
         let stderr = String(decoding: err.snapshot().0, as: UTF8.self)
         return Result(status: wasCancelled ? -3 : (timedOut ? -2 : process.terminationStatus),
                       stdout: String(decoding: out.snapshot().0, as: UTF8.self),
