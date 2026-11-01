@@ -87,6 +87,11 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   Undo checks the recorded installation's device/inode and contents before moving it aside;
   cleanup makes only staging directories writable,
   never regular files that may be linked to older snapshots.
+  An app whose source stamp (every entry's identity, change time, size, mode, flags) equals
+  `sourceStamp` in the previous catalog and whose previous copy still matches is hard-linked
+  from that copy by `reuseUnchanged`, with no content read and no signature check (scar
+  2026-11-01: Outlook took 40+ minutes per backup). Keep the change time in the stamp: it is
+  what catches a same-size edit with a restored mtime. Catalogs without a stamp get one full copy.
   A launcher whose main executable is a link leaving the bundle (Claude Code's URL handler)
   is classified `installer` — "non autonoma, ricreata dalla sua app" — before any signature
   check or copy (macOS rejects such a bundle's signature); never weaken `isSigned` for it.

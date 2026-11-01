@@ -17,6 +17,7 @@ enum AppBundleCopy {
     struct Options {
         var isCancelled: () -> Bool = { Task.isCancelled }
         var copyFile: (String, String) throws -> Void = copyRegularFile
+        var verifySignature: (URL) throws -> Bool = isSigned
         var reserveBytes: UInt64 = 100 * 1_048_576
         var availableBytes: (URL) throws -> UInt64 = { url in
             let attributes = try FileManager.default.attributesOfFileSystem(forPath: url.path)
@@ -99,13 +100,101 @@ enum AppBundleCopy {
         throw NeedsInstaller(errorDescription: notSelfContainedReason(link))
     }
 
+    /// An app unchanged since the previous snapshot (every entry with the same identity,
+    /// change time, size and mode as when that snapshot verified its copy, and that copy still
+    /// matching) is linked from
+    /// that copy without reading its contents again or repeating the signature checks: on
+    /// 2026-11-01 the full checks kept a backup on Outlook alone for over 40 minutes.
+    /// Returns nil when anything differs or goes wrong; the caller then makes a full copy.
+    static func reuseUnchanged(from source: URL, to destination: URL, previous: URL,
+                               recorded: Fingerprint, recordedSource: String,
+                               options: Options = Options()) throws -> Fingerprint? {
+        try check(options)
+        guard !AppInventory.exists(destination), AppInventory.exists(previous) else { return nil }
+        let before: [Node]
+        let old: [Node]
+        do {
+            before = try scan(source, hashing: false, options: options)
+            old = try scan(previous, hashing: false, options: options)
+        } catch is CancellationError { throw CancellationError() } catch { return nil }
+        let files = before.filter { $0.kind == S_IFREG }
+        // The change time moves with every write, even one that restores size and mtime.
+        guard sourceStamp(before) == recordedSource, before.count == old.count, zip(before, old).allSatisfy(sameContent),
+              files.count == recorded.files,
+              files.reduce(UInt64(0), { $0 + UInt64($1.metadata.st_size) }) == recorded.bytes else { return nil }
+        do {
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false)
+        } catch { return nil }
+        do {
+            for node in before {
+                try check(options)
+                let to = node.relative.isEmpty ? destination : destination.appendingPathComponent(node.relative)
+                switch node.kind {
+                case S_IFDIR:
+                    if !node.relative.isEmpty { try FileManager.default.createDirectory(at: to, withIntermediateDirectories: false) }
+                case S_IFLNK:
+                    guard let target = node.target else { throw AppInventory.failure("Collegamento non leggibile.") }
+                    try copySymbolicLink(target: target, to: to, mode: node.metadata.st_mode)
+                default:
+                    try HardLinker.hardLink(from: previous.appendingPathComponent(node.relative).path, to: to.path)
+                }
+            }
+            for node in before.reversed() where node.kind == S_IFDIR {
+                let from = node.relative.isEmpty ? source : source.appendingPathComponent(node.relative)
+                let to = node.relative.isEmpty ? destination : destination.appendingPathComponent(node.relative)
+                // Metadata only; never request COPYFILE_CLONE.
+                guard copyfile(from.path, to.path, nil, copyfile_flags_t(UInt32(0x07))) == 0 else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                }
+            }
+            let after = try scan(source, hashing: false, options: options)
+            guard before.map(\.stamp) == after.map(\.stamp) else {
+                throw AppInventory.failure("L'app è cambiata durante la copia.")
+            }
+            return recorded
+        } catch {
+            do { try removePartial(at: destination) }
+            catch { Log.error("Cannot remove partial app \(destination.path): \(error)") }
+            if error is CancellationError { throw error }
+            Log.warn("Unchanged app not reused, copying it in full: \(source.lastPathComponent): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func sameContent(_ new: Node, _ old: Node) -> Bool {
+        guard new.relative == old.relative, new.kind == old.kind, new.target == old.target,
+              new.metadata.st_mode & 0o777 == old.metadata.st_mode & 0o777 else { return false }
+        guard new.kind == S_IFREG else { return true }
+        let a = Double(new.metadata.st_mtimespec.tv_sec) + Double(new.metadata.st_mtimespec.tv_nsec) / 1_000_000_000
+        let b = Double(old.metadata.st_mtimespec.tv_sec) + Double(old.metadata.st_mtimespec.tv_nsec) / 1_000_000_000
+        return new.metadata.st_size == old.metadata.st_size && abs(a - b) < 0.001
+    }
+
+    /// Identity of every entry of the source, change time included: recorded with a verified
+    /// copy so the next backup can tell, without reading contents, that nothing changed.
+    private static func sourceStamp(_ nodes: [Node]) -> String {
+        var digest = SHA256()
+        for node in nodes {
+            let m = node.metadata
+            let part = "\(node.stamp)|\(m.st_dev)|\(m.st_flags)|\(m.st_ctimespec.tv_sec):\(m.st_ctimespec.tv_nsec)\0"
+            digest.update(data: Data(part.utf8))
+        }
+        return hex(digest.finalize())
+    }
+
     @discardableResult
     static func copy(from source: URL, to destination: URL, previous: URL? = nil,
                      options: Options = Options()) throws -> Fingerprint {
+        try copyRecordingSource(from: source, to: destination, previous: previous, options: options).fingerprint
+    }
+
+    /// A full, verified copy; also returns the source's stamp for `reuseUnchanged`.
+    static func copyRecordingSource(from source: URL, to destination: URL, previous: URL? = nil,
+                                    options: Options = Options()) throws -> (fingerprint: Fingerprint, source: String) {
         try check(options)
         guard !AppInventory.exists(destination) else { throw AppInventory.failure("La destinazione esiste già.") }
         try requireSelfContainedExecutable(source)
-        let signed = try isSigned(source)
+        let signed = try options.verifySignature(source)
         let before = try scan(source, hashing: true, options: options)
         let expected = fingerprint(before)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false)
@@ -168,9 +257,9 @@ enum AppBundleCopy {
                 throw AppInventory.failure("L'app è cambiata durante la copia o la copia non è integra.")
             }
             if signed {
-                guard try isSigned(destination) else { throw AppInventory.failure("La copia ha perso la firma.") }
+                guard try options.verifySignature(destination) else { throw AppInventory.failure("La copia ha perso la firma.") }
             }
-            return expected
+            return (expected, sourceStamp(after))
         } catch {
             do { try removePartial(at: destination) }
             catch { Log.error("Cannot remove partial app \(destination.path): \(error)") }
