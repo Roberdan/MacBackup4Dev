@@ -71,6 +71,15 @@ enum AppCapture {
         let discovery = AppInventory.discover(roots: roots, home: home, config: config)
         var report = Report(catalog: Catalog(entries: discovery.entries, failures: discovery.failures))
         let directory = snapshot.appendingPathComponent(directoryName)
+        // Verified copies of the previous snapshot, reused when an app has not changed.
+        var verified: [String: AppInventory.Entry] = [:]
+        if let previous {
+            do {
+                for old in try read(from: previous)?.entries ?? [] where old.state == .saved && old.fingerprint != nil {
+                    verified[old.id] = old
+                }
+            } catch { Log.warn("Previous app catalog unreadable, every app is copied in full: \(error.localizedDescription)") }
+        }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let total = report.catalog.entries.count
@@ -96,9 +105,26 @@ enum AppCapture {
                     let target = directory.appendingPathComponent(entry.storagePath)
                     try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try AppBundleCopy.requireSelfContainedExecutable(source)
-                    entry.signed = try AppBundleCopy.isSigned(source)
-                    entry.fingerprint = try AppBundleCopy.copy(from: source, to: target,
+                    if let previous, let old = verified[entry.id], let recorded = old.fingerprint,
+                       let recordedSource = old.sourceStamp,
+                       !SelectiveRestore.crossesLink(directoryName + "/" + entry.storagePath + "/Contents", root: previous.path),
+                       old.bundleID == entry.bundleID, old.version == entry.version, old.build == entry.build,
+                       let reused = try AppBundleCopy.reuseUnchanged(from: source, to: target,
+                           previous: previous.appendingPathComponent(directoryName + "/" + entry.storagePath),
+                           recorded: recorded, recordedSource: recordedSource, options: options) {
+                        entry.signed = old.signed
+                        entry.fingerprint = reused
+                        entry.sourceStamp = recordedSource
+                        entry.state = .saved
+                        entry.reason = "Copia integra; l'app non viene avviata durante il ripristino."
+                        report.catalog.entries[index] = entry
+                        continue
+                    }
+                    entry.signed = try options.verifySignature(source)
+                    let copied = try AppBundleCopy.copyRecordingSource(from: source, to: target,
                         previous: previous?.appendingPathComponent(directoryName + "/" + entry.storagePath), options: options)
+                    entry.fingerprint = copied.fingerprint
+                    entry.sourceStamp = copied.source
                     entry.state = .saved
                     entry.reason = "Copia integra; l'app non viene avviata durante il ripristino."
                 } catch is CancellationError {

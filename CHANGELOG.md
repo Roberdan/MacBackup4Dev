@@ -3,12 +3,28 @@
 ## [Unreleased]
 
 ### Fixed
+- The real reason the interrupted backups stayed: the cleanup skipped every one of them while
+  a backup was running, because it mistook the running backup's own marker for another
+  backup still in use. Only another live process now keeps an old run.
+
+## [4.3.3] - 2026-11-01
+
+### Fixed
+- Saving applications no longer reads and checks every app again at every backup. An app
+  unchanged since the last backup (every file with the same identity, change time, size and
+  permissions as when its copy was verified) now shares that verified copy, without reading
+  its contents or checking its signature again. Before, each backup read every app about
+  three times and checked its signature three times: Microsoft Outlook alone kept a backup
+  busy for over 40 minutes. New or changed apps keep every check.
 - Interrupted backups are really deleted. Each backup was supposed to remove runs left
   unfinished for more than two hours, but one protected item (a folder macOS guards against
   deletion, a read-only or locked entry) stopped the removal silently and the run stayed on
   the disk forever (13 on 2026-11-01). Now such folders are unlocked and removed; a file
   still shared with a good backup is never changed, and anything that cannot go is written
   to the log. Snapshots that a cleanup renamed away and failed to remove are removed too.
+- The coverage check after a backup never downloads files that are only in iCloud and never
+  holds the backup: on 2026-11-01 it waited 35 minutes on such a folder. Each command's output
+  is also closed as soon as it ends.
 
 ## [4.3.2] - 2026-10-31
 
