@@ -29,6 +29,129 @@ final class PreparationSpeedTests {
         return (box, url)
     }
 
+    /// The path every backup takes (preparation, then the real engine), in the sandbox; databases saved.
+    private func prepareAndBackUp(_ url: URL, _ writer: StatusWriter, _ box: SafetyTests.Sandbox,
+                                  captureDatabases: Bool = true) throws -> (result: BackupRunResult, config: Config) {
+        let options = BackupRunOptions(home: box.home, captureEnvironment: false, captureGit: false,
+                                       captureDatabases: captureDatabases, auditCoverage: true, captureApplications: false)
+        let outcome = ResultBox<Result<BackupRunResult?, Error>>()
+        let published = ResultBox<Config>()
+        let done = DispatchSemaphore(value: 0)
+        Task {
+            do {
+                outcome.value = .success(try await AutomaticCoverage.prepareAndRun(
+                    from: url, statusWriter: writer, options: options, onPrepared: { published.value = $0 }))
+            } catch { outcome.value = .failure(error) }
+            done.signal()
+        }
+        done.wait()
+        guard let result = try outcome.value!.get(), let config = published.value else {
+            throw TestFailure.failed("backup cancelled")
+        }
+        return (result, config)
+    }
+
+    /// Roberto's choice of 2026-11-01 (card 261031-212344): database files are left out of the plain copy, so a
+    /// database created inside a saved folder after the last check, which the preparation no longer looks for,
+    /// stayed out of every snapshot for one more run. The backup's own search, made right before the databases
+    /// are saved, saves it in the same run.
+    func test_aNewDatabaseInASavedFolderIsSavedByTheSameBackup() throws {
+        let (box, url) = try fixture()
+        defer { safety.cleanup(box) }
+        let fm = FileManager.default
+        let writer = StatusWriter(directory: box.state)
+        // The last check found nothing new: the database below appears after it.
+        try writer.writeCoverage(CoverageReport(checkedAt: ISO8601DateFormatter().string(from: Date()), gaps: []))
+        let created = "existing/app/data/brand-new.db"
+        try database(box.home + "/" + created)
+
+        let (result, _) = try prepareAndBackUp(url, writer, box)
+        let snapshot = result.snapshot
+        try expect(!fm.fileExists(atPath: snapshot.appendingPathComponent(created).path),
+                   "fixture: database files stay out of the plain copy, as in the real settings")
+        let dump = snapshot.appendingPathComponent(SnapshotManifest.directoryName)
+            .appendingPathComponent(DatabaseDumps.directoryName).appendingPathComponent("sqlite").appendingPathComponent(created)
+        try expect(fm.fileExists(atPath: dump.path), "the new database is in the backup that ran after its creation: \(dump.path)")
+        let read = Shell.run("/usr/bin/sqlite3", [dump.path, "SELECT count(*) FROM t;"])
+        try expectEqual(read.stdout.trimmingCharacters(in: .whitespacesAndNewlines), "1", "and its copy is a readable database")
+        let record = result.manifest.databases.first { $0.source == "~/" + created }
+        try expect(record != nil && record?.error == nil && record?.file != nil,
+                   "the snapshot lists it as saved: \(result.manifest.databases.map(\.source))")
+        for older in ["existing/runtime/known.db", "existing/runtime/fresh.db"] {
+            try expect(result.manifest.databases.contains { $0.source == "~/" + older && $0.error == nil },
+                       "so are the databases of the saved folder that the last check did not list: \(older)")
+        }
+        try expect(result.manifest.complete, "the snapshot is complete: \(result.manifest.incompleteReasons)")
+    }
+
+    /// What a backup saved by itself is announced once, by that backup: its snapshot, its status and the check's
+    /// file say so, the settings are not touched while it runs, and the next preparation writes it in from the
+    /// file, without a walk and without announcing it a second time.
+    func test_whatABackupSavedByItselfIsAnnouncedOnceAndEntersTheSettingsNext() throws {
+        let (box, url) = try fixture()
+        defer { safety.cleanup(box) }
+        let writer = StatusWriter(directory: box.state)
+        try writer.writeCoverage(CoverageReport(checkedAt: ISO8601DateFormatter().string(from: Date()), gaps: []))
+        let created = "~/existing/app/data/brand-new.db"
+        try database(ConfigDiscovery.expand(created, home: box.home))
+
+        let first = try prepareAndBackUp(url, writer, box)
+        try expect(!first.config.databases.sqlite.contains(created), "fixture: the preparation did not know it")
+        try expect(!(try Config.load(from: url)).databases.sqlite.contains(created), "the settings are not touched during the backup")
+        try expect(first.result.manifest.automaticallyIncluded?.contains(created) == true,
+                   "the snapshot records it as added by itself: \(first.result.manifest.automaticallyIncluded ?? [])")
+        try expect(writer.read()?.autoIncluded?.contains(created) == true,
+                   "so does the status, for the menu's \"Aggiunte da sole\": \(writer.read()?.autoIncluded ?? [])")
+        guard let report = writer.readCoverage() else { throw TestFailure.failed("no coverage report") }
+        try expect(report.addedByBackup?.contains { $0.path == created } == true, "the check's file says this backup saved it")
+        try expect(!report.gaps.contains { $0.path == created }, "and no longer lists it as a gap: \(report.gaps.map(\.path))")
+        let coming = AutomaticCoverage.pending(config: try Config.load(from: url), home: box.home, knownDatabaseGaps: report.gaps)
+        try expect(!coming.contains { $0.path == created }, "the menu does not announce it as still to come: \(coming.map(\.path))")
+
+        let second = try prepareAndBackUp(url, writer, box)
+        try expect(second.config.databases.sqlite.contains(created) && (try Config.load(from: url)).databases.sqlite.contains(created),
+                   "the next preparation writes it into the settings: \(second.config.databases.sqlite)")
+        try expect(!(writer.read()?.autoIncluded ?? []).contains(created) && !(second.result.manifest.automaticallyIncluded ?? []).contains(created),
+                   "without announcing it again: \(writer.read()?.autoIncluded ?? [])")
+        try expect(second.result.manifest.databases.contains { $0.source == created && $0.error == nil },
+                   "and the backup saves it from the settings: \(second.result.manifest.databases.map(\.source))")
+        try expect(writer.readCoverage()?.addedByBackup == nil, "nothing was left to save by itself")
+    }
+
+    /// The backup saves by itself only what a preparation would add: never a database the user left out or one in a
+    /// folder named like a secret, and nothing when automatic additions are switched off. The check still lists them.
+    func test_theBackupSavesByItselfOnlyWhatAPreparationWouldAdd() throws {
+        let box = try safety.makeSandbox()
+        defer { safety.cleanup(box) }
+        try safety.write("notes", to: box.home + "/existing/notes.txt")
+        for name in ["app/data/kept.db", "credentials/app.db", "ignored/app.db"] {
+            try database(box.home + "/existing/" + name)
+        }
+        var config = safety.config(box, sources: ["existing"])
+        config.coverage.ignore = ["~/existing/ignored"]
+        let url = box.root.appendingPathComponent("config.toml")
+        try config.save(to: url)
+        let writer = StatusWriter(directory: box.state)
+
+        // No earlier check at all (first backup, or its file was removed): the preparation does not walk the saved
+        // folders either; the backup's own check finds what they hold.
+        let first = try prepareAndBackUp(url, writer, box)
+        try expect(first.config.databases.sqlite.isEmpty, "the preparation did not walk: \(first.config.databases.sqlite)")
+        let saved = first.result.manifest.databases.map(\.source)
+        try expectEqual(saved, ["~/existing/app/data/kept.db"], "only what a preparation would add is saved by itself")
+
+        config.coverage.autoInclude = false
+        try config.save(to: url)
+        try writer.writeCoverage(CoverageReport(checkedAt: ISO8601DateFormatter().string(from: Date()), gaps: []))
+        let off = try prepareAndBackUp(url, writer, box).result.manifest
+        try expect(off.databases.isEmpty && off.automaticallyIncluded == nil,
+                   "with automatic additions off nothing is saved by itself: \(off.databases.map(\.source))")
+        let listed = writer.readCoverage()?.gaps.map(\.path) ?? []
+        for name in ["app/data/kept.db", "credentials/app.db", "ignored/app.db"] {
+            try expect(listed.contains("~/existing/" + name), "the check still lists \(name): \(listed)")
+        }
+    }
+
     func test_aBackupDoesNotWalkTheSavedFoldersForDatabases() throws {
         let (box, url) = try fixture()
         defer { safety.cleanup(box) }
@@ -80,7 +203,7 @@ final class PreparationSpeedTests {
                    "the first backup prepares from the audit it finds: \(first.databases.sqlite)")
         let audited = writer.readCoverage()?.gaps.filter { $0.kind == .database }.map(\.path) ?? []
         try expect(audited.contains("~/existing/runtime/fresh.db"),
-                   "its own audit, at the end, looks at the saved folders: \(audited)")
+                   "its own check looks at the saved folders: \(audited)")
         let second = try backup()
         try expect(second.databases.sqlite.contains("~/existing/runtime/fresh.db"),
                    "and the next backup adds the database it found, without walking: \(second.databases.sqlite)")

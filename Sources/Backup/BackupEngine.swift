@@ -9,7 +9,7 @@ struct BackupRunOptions {
     var captureGit = true
     var captureDatabases = true
     var auditCoverage = true
-    /// The coverage check at the end stops waiting after this long; tests shorten it.
+    /// The coverage check, right before the databases are saved, stops waiting after this long; tests shorten it.
     var coverageTimeLimit: TimeInterval = CoverageAuditor.timeLimit
     /// Tests replace the coverage walk to stand in for a folder that never answers.
     var coverageWalk: CoverageAuditor.Walk = CoverageAuditor.fullWalk
@@ -412,9 +412,40 @@ enum BackupEngine {
                                        reportFinalization("Salvo i commit: repository \(index) di \(total)")
                                    })
             : []
+        // The coverage check walks the saved folders once per backup, right before the databases are
+        // saved (Roberto, 2026-11-01): database files are left out of the plain copy, so a database it
+        // finds there that a preparation would add is saved in this run instead of missing one more
+        // snapshot. The settings are not touched mid-run: the next preparation writes it in from the
+        // check's file. Bounded and on a thread of its own: it never holds the backup.
+        var coverage: CoverageReport?
+        var savedByItself: [CoverageGap] = []
+        if options.auditCoverage {
+            reportFinalization("Controllo la copertura del backup…")
+            let report = CoverageAuditor.boundedReport(
+                config: config, home: home, previous: statusWriter.readCoverage(), timeLimit: options.coverageTimeLimit,
+                walk: options.coverageWalk, cancelled: { token.isCancelled || Task.isCancelled })
+            // At once: a run that stops from here on still leaves what the check found for the next one.
+            do { try statusWriter.writeCoverage(report) }
+            catch { Log.error("Cannot write the coverage report: \(error.localizedDescription)") }
+            coverage = report
+            if options.captureDatabases {
+                savedByItself = AutomaticCoverage.databasesToSave(found: report.gaps, config: config, home: home)
+            }
+        }
+        if token.isCancelled || Task.isCancelled {
+            abandonCancelledBackup()
+            return nil
+        }
+        let additions = reportedAdditions + savedByItself.map(\.path).filter { !reportedAdditions.contains($0) }
+        status.autoIncluded = additions
+        var databases = config.databases
+        for database in savedByItself {
+            databases.sqlite.append(database.path)
+            Log.info("Saved by this backup, added to the settings by the next one: \(database.path)")
+        }
         reportFinalization("Preparo le copie dei database…")
         let dbRecords = options.captureDatabases
-            ? DatabaseDumps.captureAll(config: config.databases, home: home, into: inProgressURL,
+            ? DatabaseDumps.captureAll(config: databases, home: home, into: inProgressURL,
                                      previousSnapshot: previousComplete?.url, now: options.now(),
                                      postgresEnvironment: options.databaseEnvironment,
                                      cancelled: { token.isCancelled || Task.isCancelled },
@@ -471,7 +502,7 @@ enum BackupEngine {
             errorCount: copyErrors, traversalErrorCount: traversalCount,
             git: gitRecords, databases: dbRecords, shrinkWarning: shrink,
             complete: complete, incompleteReasons: reasons, applications: applicationReport?.summary,
-            automaticallyIncluded: reportedAdditions.isEmpty ? nil : reportedAdditions)
+            automaticallyIncluded: additions.isEmpty ? nil : additions)
         try manifest.write(to: inProgressURL)
 
         let finalURL = destURL.appendingPathComponent(timestamp)
@@ -479,6 +510,15 @@ enum BackupEngine {
         // The snapshot is on disk with the additions in its manifest: nothing is owed any more.
         do { try statusWriter.writePendingAdditions([]) }
         catch { Log.error("Cannot clear the owed automatic additions: \(error.localizedDescription)") }
+        // What this backup saved by itself is in the snapshot now: no longer a gap in the check's file,
+        // where the next preparation finds it and writes it into the settings without announcing it again.
+        if var coverage, !savedByItself.isEmpty {
+            let saved = Set(savedByItself.map(\.path))
+            coverage.gaps.removeAll { $0.kind == .database && saved.contains($0.path) }
+            coverage.addedByBackup = savedByItself
+            do { try statusWriter.writeCoverage(coverage) }
+            catch { Log.error("Cannot record the databases saved by this backup: \(error.localizedDescription)") }
+        }
         if complete {
             Log.info("Snapshot \(timestamp) complete: \(processedCount) files")
         } else {
@@ -514,13 +554,6 @@ enum BackupEngine {
 
         if !skipList.isEmpty {
             Log.info("\(skipList.count) file(s) excluded by protection preference -- see errors.json")
-        }
-
-        if options.auditCoverage {
-            reportFinalization("Controllo la copertura del backup…")
-            try? statusWriter.writeCoverage(CoverageAuditor.boundedReport(
-                config: config, home: home, previous: statusWriter.readCoverage(), timeLimit: options.coverageTimeLimit,
-                walk: options.coverageWalk, cancelled: { token.isCancelled || Task.isCancelled }))
         }
 
         let duration = options.now().timeIntervalSince(startTime)
