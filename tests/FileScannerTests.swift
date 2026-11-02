@@ -18,7 +18,7 @@ final class FileScannerTests {
             FileScanner.walk(sources: [root], basePaths: [root.path],
                              excludeFilter: ExcludeFilter(patterns: []),
                              powerReader: { powerReads += 1; return onBattery },
-                             pause: { delays.append($0) }) { entry in
+                             pause: { delays.append($0) }, clock: { 0 }) { entry in
                 seen.insert(entry.relativePath)
                 return true
             }
@@ -27,6 +27,28 @@ final class FileScannerTests {
                             "Each walk uses its current power source, not the first backup's")
         }
         try expectEqual(powerReads, 4, "Read power once per walk, never once per process or per file")
+    }
+
+    func test_aBatchThatTookLongerThanThePauseIsNotPausedAgain() throws {
+        let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let total = FileScanner.BIRD_SAFE_BATCH_SIZE * 3
+        for index in 0..<total {
+            try "keep".write(to: root.appendingPathComponent("file-\(index).txt"), atomically: true, encoding: .utf8)
+        }
+        // The clock moves by `step` per file: a batch of 50 files lasts 50 * step.
+        for (step, expected) in [(UInt64(0), [UInt32](repeating: 5_000, count: 3)),
+                                 (UInt64(50_000), [UInt32](repeating: 2_500, count: 3)),
+                                 (UInt64(10_000_000), [UInt32]())] {
+            var delays: [UInt32] = []
+            var seen = 0
+            var ticks: UInt64 = 0
+            FileScanner.walk(sources: [root], basePaths: [root.path], excludeFilter: ExcludeFilter(patterns: []),
+                             powerReader: { false }, pause: { delays.append($0) },
+                             clock: { ticks }) { _ in seen += 1; ticks += step; return true }
+            try expectEqual(seen, total, "pacing never drops entries")
+            try expectEqual(delays, expected, "a batch waits only for the rest of the minimum time, if any")
+        }
     }
 
     func test_onlyMissingChildrenAreTolerated() throws {
