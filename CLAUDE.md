@@ -283,7 +283,8 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   public key in a release signed with the OLD key first. Never install during a backup,
   never downgrade, never rsync over the running bundle. An update put off by a backup is
   retried by `UpdateRetryGate` at the first status poll after the disk falls quiet (4.3.7:
-  the hourly tick kept meeting the next hourly backup), once per quiet spell; the app's own
+  the hourly tick kept meeting the next hourly backup), once per quiet spell; an install put off
+  as busy also arms it (`deferred`: a backup shorter than a poll is never seen); the app's own
   update never counts as busy there, or a failed download would retry every 30 s.
   Busy is `DiskActivity`: the polled state reads idle during in-app restores, so tree
   restores/undos count in `restoresInFlight` and the "Ripristina" window through its models'

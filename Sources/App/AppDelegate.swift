@@ -1175,6 +1175,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let byHand = userInitiated || updateRequestedByHand
         if isBusyForUpdate {
             // Automatic: `updateRetry` tries again as soon as the disk is quiet. Asked by hand: say why not now.
+            updateRetry.deferred()
             if userInitiated {
                 updateRequestedByHand = true
                 sendNotification(title: "Aggiornamento rimandato",

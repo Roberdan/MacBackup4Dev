@@ -16,6 +16,12 @@ final class UpdateRetryGate {
         self.install = install
     }
 
+    /// An install was just put off because the disk was busy. A short backup can start and end
+    /// between two polls and never be seen busy: the next quiet poll retries anyway.
+    func deferred() {
+        wasBusy = true
+    }
+
     func observe(busy: Bool, pending: String?, allowed: Bool, rejected: String?) {
         defer { wasBusy = busy }
         guard wasBusy, !busy, allowed, let pending, pending != rejected else { return }

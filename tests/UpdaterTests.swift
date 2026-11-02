@@ -185,6 +185,15 @@ struct UpdaterTests {
         try expectEqual(installed.count, 2, "a version that failed verification is never retried by itself")
         poll(busy: false)
         try expectEqual(installed.count, 2, "already quiet: the hourly tick, not this, handles it")
+
+        // A backup that starts and ends between two polls is never seen busy: the install put off
+        // during it still happens at the next quiet poll, once.
+        poll(busy: false)
+        gate.deferred()
+        poll(busy: false)
+        try expectEqual(installed.count, 3, "an install put off by an unseen short backup is retried at the next poll")
+        poll(busy: false)
+        try expectEqual(installed.count, 3, "and only once")
     }
 
     /// Reviews of 4.3.7: an in-app restore leaves no lock file and the polled state reads idle;
