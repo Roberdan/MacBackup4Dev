@@ -127,6 +127,49 @@ struct AppBundleTests {
         try expect(third?.manifest.complete == false, "and the edited signed app is not passed off as the verified one")
     }
 
+    /// Roberto 2026-11-02: apps once a day; in between, snapshots refer to the last capture.
+    func test_appsAreCapturedOnceADayAndStayRestorable() throws {
+        let f = try AppTestFixture(); defer { f.cleanup() }
+        let app = try f.app()
+        final class Counter: @unchecked Sendable { var copies = 0 }
+        let counter = Counter()
+        func daily(_ hoursLater: Double) -> (inout BackupRunOptions) -> Void {
+            { options in
+                options.applicationCaptureInterval = AppCapture.captureInterval
+                options.now = { Date().addingTimeInterval(hoursLater * 3600) }
+                options.applicationCopyOptions.copyFile = { from, to in
+                    counter.copies += 1
+                    try AppBundleCopy.copyRegularFile(from: from, to: to)
+                }
+            }
+        }
+        let first = try f.backup()
+        let second = try f.backup(configure: daily(1))
+        try expect(second.manifest.complete, "a snapshot that refers to the apps is complete")
+        try expect(!AppInventory.exists(AppCapture.catalogURL(in: second.snapshot)), "no second copy of the apps")
+        try expectEqual(AppCapture.referencedName(in: second.snapshot), first.snapshot.lastPathComponent,
+                        "it names the snapshot that holds them")
+        try expectEqual(counter.copies, 0, "nothing is copied")
+        try expectEqual(second.manifest.applications?.saved, 1, "the summary still counts the saved app")
+        let entry = try AppCapture.read(from: second.snapshot)!.entries[0]
+        try expectEqual(entry.state, .saved, "the catalog is read through the reference")
+        _ = try AppRestore.restore(entry, snapshot: second.snapshot, roots: f.restoreRoots, home: f.restoreHome,
+                                   running: { _ in false })
+        try expectEqual(try AppBundleCopy.fingerprint(f.restoreRoots[0].url.appendingPathComponent("Shoji.app")),
+                        try AppBundleCopy.fingerprint(app), "an app restored from the referring snapshot is whole")
+        let entries = try RetentionManager.readBackups(at: URL(fileURLWithPath: f.box.dest))
+        try expect(RetentionManager.protectedNames(entries, keepComplete: 1).contains(first.snapshot.lastPathComponent),
+                   "the snapshot holding the apps is never pruned while another refers to it")
+
+        let later = try f.backup(configure: daily(25))
+        try expect(AppInventory.exists(AppCapture.catalogURL(in: later.snapshot)), "a day later the apps are captured again")
+        let executable = "_rustymacbackup/applications/system/Shoji.app/Contents/MacOS/Shoji"
+        try expectEqual(try AppInventory.metadata(later.snapshot.appendingPathComponent(executable)).st_ino,
+                        try AppInventory.metadata(first.snapshot.appendingPathComponent(executable)).st_ino,
+                        "and reuse the copy of the snapshot that holds them, not the reference")
+        try expectEqual(counter.copies, 0, "an unchanged app is still not copied")
+    }
+
     func test_newAppsAndDedupNeverChangeSources() throws {
         let f = try AppTestFixture(); defer { f.cleanup() }
         let app = try f.app()

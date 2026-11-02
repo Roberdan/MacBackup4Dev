@@ -20,6 +20,8 @@ struct BackupRunOptions {
     var applicationRoots: [AppInventory.Root]? = nil
     var applicationCopyOptions = AppBundleCopy.Options()
     var applicationInstallers: [String: AppInstallers.Hint]? = nil
+    /// Applications are captured at most this often; snapshots in between refer to the last capture.
+    var applicationCaptureInterval: TimeInterval = AppCapture.captureInterval
     /// Items `AutomaticCoverage` added to the settings just before this run (`~/` form).
     var automaticallyIncluded: [String] = []
 }
@@ -472,13 +474,29 @@ enum BackupEngine {
             var copyOptions = options.applicationCopyOptions
             let externallyCancelled = copyOptions.isCancelled
             copyOptions.isCancelled = { token.isCancelled || Task.isCancelled || externallyCancelled() }
-            reportFinalization("Cerco le applicazioni da salvare…")
-            applicationReport = AppCapture.capture(config: config, home: home,
-                roots: options.applicationRoots ?? AppInventory.Root.standard(home: home),
-                into: inProgressURL, previous: latestBackup, options: copyOptions,
-                installers: options.applicationInstallers ?? AppInstallers.hints(),
-                onProgress: { index, total in reportFinalization("Salvo l'applicazione \(index) di \(total)…") })
-            sourceReasons.append(contentsOf: (applicationReport?.catalog.failures ?? []).map { "App non salvata: \($0)" })
+            let holder = SnapshotCatalog.latestComplete(at: destURL).flatMap { AppCapture.holder(of: $0.url) }
+            let capturedAt = holder.flatMap { RetentionManager.parseBackupName($0.lastPathComponent) }
+            let age = capturedAt.map { options.now().timeIntervalSince($0) } ?? -1
+            // A clock that moved back (or a name bumped past "now") never counts as recent.
+            if let holder, age >= 0, age < options.applicationCaptureInterval,
+               let catalog = try? AppCapture.read(from: holder), catalog.failures.isEmpty {
+                do {
+                    try AppCapture.refer(inProgressURL, to: holder)
+                    applicationReport = AppCapture.Report(catalog: catalog)
+                    Log.info("Applications: same as \(holder.lastPathComponent) (captured less than a day ago)")
+                } catch {
+                    sourceReasons.append("App non salvate: riferimento alla copia di \(holder.lastPathComponent) non scritto: \(error.localizedDescription)")
+                }
+            } else {
+                reportFinalization("Cerco le applicazioni da salvare…")
+                // The reuse needs the snapshot that really holds the copies, not a reference.
+                applicationReport = AppCapture.capture(config: config, home: home,
+                    roots: options.applicationRoots ?? AppInventory.Root.standard(home: home),
+                    into: inProgressURL, previous: holder ?? latestBackup, options: copyOptions,
+                    installers: options.applicationInstallers ?? AppInstallers.hints(),
+                    onProgress: { index, total in reportFinalization("Salvo l'applicazione \(index) di \(total)…") })
+                sourceReasons.append(contentsOf: (applicationReport?.catalog.failures ?? []).map { "App non salvata: \($0)" })
+            }
         }
         if token.isCancelled || Task.isCancelled || applicationReport?.cancelled == true {
             abandonCancelledBackup()

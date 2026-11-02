@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.3.6] - 2026-11-02
+
+### Changed
+- Applications are saved once a day instead of at every backup. The snapshots made in
+  between point to the last saved copy (restore, new-Mac setup and the menu read it from
+  there, and cleanup never deletes the snapshot that holds it while another points to it).
+  App copies were more than half of every backup (248,000 of 470,000 entries) and about half
+  of its hour. An app installed or updated during the day is saved by the next daily capture.
+
+### Fixed
+- When the encrypted disk cannot be compacted because something keeps it busy, the log now
+  says what refused it.
+
 ## [4.3.5] - 2026-11-01
 
 ### Fixed

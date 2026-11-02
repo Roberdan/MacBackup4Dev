@@ -125,7 +125,9 @@ enum RetentionManager {
         if fillWithUnverified, names.count < keepComplete {
             names += unverified.prefix(keepComplete - names.count)
         }
-        return Set(names)
+        // A snapshot whose applications another snapshot refers to keeps them for it.
+        let referenced = backups.compactMap { AppCapture.referencedName(in: $0.url) }
+        return Set(names).union(referenced)
     }
 
     static func validateDestination(_ destination: URL) throws {

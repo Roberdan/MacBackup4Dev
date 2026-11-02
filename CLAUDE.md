@@ -92,6 +92,11 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   from that copy by `reuseUnchanged`, with no content read and no signature check (scar
   2026-11-01: Outlook took 40+ minutes per backup). Keep the change time in the stamp: it is
   what catches a same-size edit with a restored mtime. Catalogs without a stamp get one full copy.
+  Apps are captured at most once per `applicationCaptureInterval` (24 h): a snapshot in
+  between holds only `_rustymacbackup/applications/same-as` naming the complete snapshot with
+  the copies. `AppCapture.read`, `AppRestore` and new-Mac stages resolve it through
+  `AppCapture.holder`; capture reuses from the holder, never from a reference; retention
+  (`protectedNames`) keeps every referenced snapshot. Tests capture every run unless they ask.
   A launcher whose main executable is a link leaving the bundle (Claude Code's URL handler)
   is classified `installer` — "non autonoma, ricreata dalla sua app" — before any signature
   check or copy (macOS rejects such a bundle's signature); never weaken `isSigned` for it.

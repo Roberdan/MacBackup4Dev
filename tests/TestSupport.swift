@@ -98,6 +98,8 @@ struct AppTestFixture {
         var options = BackupRunOptions(home: box.home, captureEnvironment: false, captureGit: false,
                                        captureDatabases: false, auditCoverage: false,
                                        applicationRoots: roots, applicationInstallers: [:])
+        // Every run captures unless a test asks for the once-a-day reference.
+        options.applicationCaptureInterval = 0
         configure(&options)
         let runOptions = options
         let configuration = config ?? self.config
