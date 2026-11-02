@@ -34,6 +34,11 @@ enum AutomaticCoverage {
             path == parent || path.hasPrefix(parent + "/")
         }
         var changed = selectedPaths != nil || includeRightsManagedFiles != nil
+        let kept = config.databases.sqlite.filter { !EngineInternalDatabases.isInternal(expanded($0)) }
+        if kept.count != config.databases.sqlite.count {
+            config.databases.sqlite = kept
+            changed = true
+        }
         var included: [String] = []
 
         if let selectedPaths {
@@ -198,6 +203,7 @@ enum AutomaticCoverage {
         func admits(_ candidate: CoverageGap) -> Bool {
             let path = ConfigDiscovery.expand(candidate.path, home: home)
             guard path.hasPrefix(home + "/") else { return false }
+            if candidate.kind == .database, EngineInternalDatabases.isInternal(path) { return false }
             let relative = String(path.dropFirst(home.count + 1))
             return !ConfigDiscovery.isForbidden(candidate.path, home: home)
                 && !AutomaticCoverage.privateRoots.contains(where: {

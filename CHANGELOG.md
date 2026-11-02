@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.3.9] - 2026-11-02
+
+### Fixed
+- A backup is no longer marked incomplete because a browser engine (Copilot, Edge, other
+  Chromium/Electron apps) keeps its own telemetry database locked while it runs
+  (`declarative_performance_observer.db`, `load_statistics.db` and similar). The automatic
+  discovery no longer proposes these known internal databases, ones already in the settings are
+  skipped at capture and removed from the settings at the next preparation. Any other database
+  that cannot be copied, locked ones included, is still reported as an error.
+
 ## [4.3.7] - 2026-11-02
 
 ### Fixed

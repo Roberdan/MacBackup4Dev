@@ -268,7 +268,8 @@ enum CoverageAuditor {
                     findings.skip()
                     continue
                 }
-                guard extensions.contains(url.pathExtension.lowercased()), !listed.contains(url.path) else { continue }
+                guard extensions.contains(url.pathExtension.lowercased()), !listed.contains(url.path),
+                      !EngineInternalDatabases.isInternal(url.path) else { continue }
                 if findings.isCloudOnly(url.path) { findings.skip(); continue }
                 // Only project data: a database inside a tool's own hidden folder (~/.codex,
                 // ~/.local/share/atuin, a browser profile) is that tool's state, not yours.

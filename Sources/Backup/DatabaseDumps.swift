@@ -52,8 +52,9 @@ enum DatabaseDumps {
         let root = snapshot.appendingPathComponent(SnapshotManifest.directoryName)
             .appendingPathComponent(directoryName)
         var records: [DatabaseRecord] = []
-        let total = config.sqlite.count + (config.postgresClusterIncremental ? 1 : config.postgres.count)
-        for path in config.sqlite {
+        let sqlite = config.sqlite.filter { !EngineInternalDatabases.isInternal(ConfigDiscovery.expand($0, home: home)) }
+        let total = sqlite.count + (config.postgresClusterIncremental ? 1 : config.postgres.count)
+        for path in sqlite {
             onProgress(records.count + 1, total)
             records.append(captureSQLite(path: path, home: home, root: root, snapshot: snapshot))
         }

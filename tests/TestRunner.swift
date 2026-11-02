@@ -43,6 +43,7 @@ struct TestRunner {
         let retention = RetentionTests()
         let config = ConfigParserTests()
         let automatic = AutomaticCoverageTests()
+        let engineDatabases = EngineDatabaseTests()
         let preparation = PreparationSpeedTests()
         let worktrees = WorktreePolicyTests()
         let worktreeContents = WorktreeContentsTests()
@@ -81,6 +82,10 @@ struct TestRunner {
         let backupEnd = BackupEndTests()
 
         var suites: [(String, TestClosure)] = [
+            ("EngineDatabases.recognised", engineDatabases.test_recognisesOnlyKnownEngineDatabasesInsideAProfile),
+            ("EngineDatabases.notProposed", engineDatabases.test_discoveryNeverProposesEngineDatabases),
+            ("EngineDatabases.ignoredAndCleaned", engineDatabases.test_savedEngineDatabasesAreIgnoredAndCleanedFromTheSettings),
+            ("EngineDatabases.lockedUserDatabaseIsAnError", engineDatabases.test_aLockedUserDatabaseStaysAnError),
             ("Automatic.newSourcesCopied", automatic.test_newFoldersAndToolsEnterTheNextBackup),
             ("Automatic.noUnsafeSources", automatic.test_secretsExclusionsAndLinksAreNeverAutomatic),
             ("Automatic.pickerOptOut", automatic.test_pickerOptOutAndAutoIncludeSwitchPersist),
