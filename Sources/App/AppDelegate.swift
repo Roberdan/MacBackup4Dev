@@ -1200,6 +1200,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         self.uiState.updatePhase = .installing
                         return true
                     }
+                }, relaunchFailed: { [weak self] in
+                    // Installed but not restarted (2026-10-07): never leave everything refused.
+                    DispatchQueue.main.async { [weak self] in
+                        AppReplacement.inProgress = false
+                        self?.uiState.isUpdating = false
+                        self?.uiState.updatePhase = nil
+                        self?.sendNotification(title: "Aggiornamento installato, app non ripartita",
+                                               body: "Chiudi \(AppIdentity.name) e riaprilo per usare la nuova versione.")
+                    }
                 })
             } catch AutoUpdater.UpdateError.needsInstaller(let pkg) {
                 DispatchQueue.main.async {
