@@ -30,6 +30,9 @@ final class SnapshotBrowserModel: ObservableObject {
     @Published private(set) var plan: RestorePlan?
     @Published private(set) var skippedLoginSensitive = 0
     @Published private(set) var busy = false
+    /// Restores and undos still writing. `busy` also covers folder loads and is cleared when one
+    /// ends, even mid-restore: updates and compaction wait on this instead.
+    @Published private(set) var writesInFlight = 0
     @Published private(set) var message = ""
     @Published private(set) var messageIsError = false
     @Published private(set) var undoDir: URL?
@@ -211,14 +214,16 @@ final class SnapshotBrowserModel: ObservableObject {
     }
 
     func restore() {
-        guard let plan, !busy else { return }
+        guard let plan, !busy, !AppReplacement.inProgress else { return }
         let undoRoot = self.undoRoot
         busy = true
+        writesInFlight += 1
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let outcome = Result { try SelectiveRestore.apply(plan, undoRoot: undoRoot) }
             DispatchQueue.main.async { [weak self, outcome] in
                 guard let self else { return }
                 self.busy = false
+                self.writesInFlight -= 1
                 switch outcome {
                 case .success(let (r, undo)):
                     self.plan = nil
@@ -236,13 +241,15 @@ final class SnapshotBrowserModel: ObservableObject {
     }
 
     func undo() {
-        guard let dir = undoDir, !busy else { return }
+        guard let dir = undoDir, !busy, !AppReplacement.inProgress else { return }
         busy = true
+        writesInFlight += 1
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let outcome = Result { try SelectiveRestore.undoDetailed(dir) }
             DispatchQueue.main.async { [weak self, outcome] in
                 guard let self else { return }
                 self.busy = false
+                self.writesInFlight -= 1
                 switch outcome {
                 case .success(let o):
                     let problems = o.failed + o.keptBecauseChanged.count

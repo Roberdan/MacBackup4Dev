@@ -12,6 +12,8 @@ final class EncryptionSetupModel: ObservableObject {
     @Published var error = ""
     @Published var credentials: [DevItem] = []
     @Published var chosenCredentials: Set<String> = []
+    /// The store is being created: goes on with the window closed, and an update must wait.
+    @Published private(set) var creating = false
 
     let disk: URL
     /// (new config) — called once the encrypted store exists and is open.
@@ -30,15 +32,16 @@ final class EncryptionSetupModel: ObservableObject {
     var problem: String? { EncryptedStore.passwordProblem(password, confirm: confirm) }
 
     func create() {
-        guard problem == nil else { return }
+        guard problem == nil, !AppReplacement.inProgress else { return }
         step = .working
+        creating = true
         let disk = self.disk, password = self.password
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let setup = try EncryptedStore.createOrAdopt(on: disk, password: password)
-                DispatchQueue.main.async { self.finish(setup) }
+                DispatchQueue.main.async { self.creating = false; self.finish(setup) }
             } catch {
-                DispatchQueue.main.async { self.error = error.localizedDescription; self.step = .failed }
+                DispatchQueue.main.async { self.creating = false; self.error = error.localizedDescription; self.step = .failed }
             }
         }
     }

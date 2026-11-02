@@ -149,4 +149,85 @@ struct UpdaterTests {
         try fm.createDirectory(at: volume.appendingPathComponent("RustyMacBackup"), withIntermediateDirectories: true)
         try expectEqual(AppIdentity.backupFolder(on: volume).lastPathComponent, "RustyMacBackup", "existing 3.x folder reused")
     }
+
+    /// 4.3.7: an update put off by a backup installs at the first poll after the backup ends,
+    /// not at the next hourly tick (which kept finding the next backup running).
+    func test_pendingUpdateInstallsWhenTheBackupEnds() throws {
+        var installed: [String] = []
+        let gate = UpdateRetryGate { installed.append($0) }
+        func poll(busy: Bool, pending: String? = "4.3.7", allowed: Bool = true, rejected: String? = nil) {
+            gate.observe(busy: busy, pending: pending, allowed: allowed, rejected: rejected)
+        }
+
+        poll(busy: false, pending: nil)
+        poll(busy: true, pending: nil)
+        poll(busy: true)
+        poll(busy: true)
+        try expect(installed.isEmpty, "never during a backup, even with an update waiting")
+        poll(busy: false)
+        try expectEqual(installed, ["4.3.7"], "installed at the first poll after the backup ends")
+        poll(busy: false)
+        poll(busy: false)
+        try expectEqual(installed.count, 1, "once per quiet spell: a failed download is not retried every 30 s")
+
+        poll(busy: true)
+        poll(busy: false)
+        try expectEqual(installed.count, 2, "a backup stopped halfway also ends: tried again right after")
+
+        poll(busy: true, pending: nil)
+        poll(busy: false, pending: nil)
+        try expectEqual(installed.count, 2, "no update waiting: nothing to install")
+        poll(busy: true)
+        poll(busy: false, allowed: false)
+        try expectEqual(installed.count, 2, "automatic install off and nobody asked: only the banner")
+        poll(busy: true)
+        poll(busy: false, rejected: "4.3.7")
+        try expectEqual(installed.count, 2, "a version that failed verification is never retried by itself")
+        poll(busy: false)
+        try expectEqual(installed.count, 2, "already quiet: the hourly tick, not this, handles it")
+
+        // A backup that starts and ends between two polls is never seen busy: the install put off
+        // during it still happens at the next quiet poll, once.
+        poll(busy: false)
+        gate.deferred()
+        poll(busy: false)
+        try expectEqual(installed.count, 3, "an install put off by an unseen short backup is retried at the next poll")
+        poll(busy: false)
+        try expectEqual(installed.count, 3, "and only once")
+    }
+
+    /// Reviews of 4.3.7: an in-app restore leaves no lock file and the polled state reads idle;
+    /// a compaction or scheduled backup ending meanwhile must not let the update quit the app.
+    func test_restoresKeepTheDiskBusy() throws {
+        var installed: [String] = []
+        let gate = UpdateRetryGate { installed.append($0) }
+        func poll(_ activity: DiskActivity) {
+            gate.observe(busy: activity.isBusy, pending: "4.3.7", allowed: true, rejected: nil)
+        }
+        try expect(!DiskActivity().isBusy, "nothing running: quiet")
+
+        var restoring = DiskActivity()
+        restoring.restoresInFlight = 1
+        var compacting = restoring
+        compacting.maintenance = true
+        poll(compacting)
+        poll(restoring)
+        try expect(installed.isEmpty, "a tree restore or undo still running keeps the update waiting")
+
+        var window = DiskActivity()
+        window.restoreWindowBusy = true
+        var backupEnding = window
+        backupEnding.lockHolderAlive = true
+        poll(backupEnding)
+        poll(window)
+        try expect(installed.isEmpty, "a restore from the Ripristina window keeps the update waiting")
+
+        var setup = DiskActivity()
+        setup.setupWindowOpen = true
+        poll(setup)
+        try expect(installed.isEmpty, "an encryption migration or first-launch window keeps it waiting")
+
+        poll(DiskActivity())
+        try expectEqual(installed, ["4.3.7"], "installed only once everything has finished")
+    }
 }

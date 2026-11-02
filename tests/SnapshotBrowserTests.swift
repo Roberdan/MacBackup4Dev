@@ -107,6 +107,30 @@ final class SnapshotBrowserTests {
         try expect(model.messageIsError, "and it is said plainly, not reported as success")
     }
 
+    /// 4.3.7 review: opening a folder while a restore writes clears `busy`; the pending update
+    /// must keep seeing the restore through `writesInFlight` until it really ends.
+    func test_navigatingDuringARestoreKeepsItCountedAsWriting() throws {
+        let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
+        let dest = URL(fileURLWithPath: box.dest)
+        try safety.makeSnapshot(dest, newest, complete: true)
+        try safety.write("saved", to: dest.path + "/\(newest)/proj/a.txt")
+        try FileManager.default.createDirectory(atPath: dest.path + "/\(newest)/proj/sub", withIntermediateDirectories: true)
+
+        let model = try makeModel(box, dest)
+        model.open("proj"); try wait(model)
+        model.restoreToFolder = false
+        model.preview(); try wait(model)
+        try expectEqual(model.writesInFlight, 0, "a preview writes nothing")
+        model.restore()
+        try expectEqual(model.writesInFlight, 1, "the restore counts as writing from the start")
+        model.open("proj/sub")
+        try wait(model)
+        let deadline = Date().addingTimeInterval(5)
+        while model.writesInFlight > 0 && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+        try expectEqual(model.writesInFlight, 0, "and stops counting only when the restore has ended")
+        try expectEqual(try String(contentsOfFile: box.home + "/proj/a.txt", encoding: .utf8), "saved", "the file was restored")
+    }
+
     func test_linksAndTraversalNeverLeaveTheSnapshot() throws {
         let box = try safety.makeSandbox(); defer { safety.cleanup(box) }
         let dest = URL(fileURLWithPath: box.dest)

@@ -38,7 +38,7 @@ Version is set in one place: `VERSION` default in `build.sh`. `build-pkg.sh` rea
 
 ```
 Sources/
-  App/          AppDelegate, AppIdentity, main, StatusManager, AutoUpdater, UpdateSignature, IconManager, LoginItemManager
+  App/          AppDelegate, AppIdentity, main, StatusManager, AutoUpdater, UpdateSignature, UpdateRetryGate, IconManager, LoginItemManager
   Backup/       BackupEngine(+Helpers), EncryptedStore, HomeRewrite, HardLinker, FileScanner, RestoreEngine,
                 RetentionManager, SnapshotCleanup, SnapshotRemoval, DestinationLock, ExcludeFilter, EnvironmentSnapshot, StatusModels, BackupTypes,
                 SnapshotManifest (+SnapshotCatalog), GitSafety, DatabaseDumps, CoverageAuditor,
@@ -281,7 +281,18 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   private key = GitHub secret `UPDATE_SIGNING_KEY`, backup in the maintainer's Keychain as
   "RustyMacBackup update signing key (Ed25519)"). Rotating the key means shipping the new
   public key in a release signed with the OLD key first. Never install during a backup,
-  never downgrade, never rsync over the running bundle.
+  never downgrade, never rsync over the running bundle. An update put off by a backup is
+  retried by `UpdateRetryGate` at the first status poll after the disk falls quiet (4.3.7:
+  the hourly tick kept meeting the next hourly backup), once per quiet spell; an install put off
+  as busy also arms it (`deferred`: a backup shorter than a poll is never seen); the app's own
+  update never counts as busy there, or a failed download would retry every 30 s.
+  Busy is `DiskActivity`: the polled state reads idle during in-app restores, so tree
+  restores/undos count in `restoresInFlight` and the "Ripristina" window through its models'
+  `writesInFlight` (`isWriting`), never `busy` (cleared by any folder load, even mid-restore).
+  `AutoUpdater.install` asks `readyToSwap` (disk still quiet, no scheduled job) after the
+  download and throws `.postponed` otherwise; once it says yes, `AppReplacement.inProgress`
+  refuses new backups, restores, cleanups and window writes (restore, stages, undo, store
+  creation) for the seconds before the relaunch quits the app.
 - **The coverage audit never suggests credentials, `_parked` folders, caches/profiles or
   databases inside a tool's hidden folder** (`CoverageAuditor.isNoise`).
 

@@ -174,7 +174,12 @@ enum AutoUpdater {
 
     /// Downloads, verifies and installs `version`, then relaunches the app.
     /// Throws `.needsInstaller(pkg)` when the app is not ours to replace: the caller opens it.
-    static func install(version: String, onPhase: ((UpdatePhase) -> Void)? = nil) async throws {
+    /// `readyToSwap` is asked after the download, right before the app is replaced: relaunching
+    /// quits the app, so a backup or restore started meanwhile throws `.postponed` instead.
+    /// `relaunchFailed` is called (any thread) when the new copy did not start: this one stays open.
+    static func install(version: String, onPhase: ((UpdatePhase) -> Void)? = nil,
+                        readyToSwap: () async -> Bool = { true },
+                        relaunchFailed: (@Sendable () -> Void)? = nil) async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(AppIdentity.name)-update-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -188,12 +193,13 @@ enum AutoUpdater {
             throw UpdateError.needsInstaller(pkg)
         }
         let newApp = try await prepare(version: version, in: dir, onPhase: onPhase)
+        guard await readyToSwap() else { throw UpdateError.postponed }
         onPhase?(.installing)
         Log.info("Installing \(version) over \(Bundle.main.bundleURL.path)…")
         let target = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("\(AppIdentity.name).app")
         try swap(newApp: newApp, into: Bundle.main.bundleURL, as: target)
         Log.info("Update installed — relaunching")
-        relaunch(target)
+        relaunch(target, onFailure: relaunchFailed)
     }
 
     /// 4.0 rename: a 3.x updater installs 4.x under the old name "RustyMacBackup.app".
@@ -227,13 +233,14 @@ enum AutoUpdater {
     /// process: a child of the app dies with it, which is why 3.3.0 never came back after
     /// installing 4.0.0 (2026-10-07). The new copy asks this one to quit as it starts; this
     /// one quits only if the new one really started, otherwise it keeps running.
-    static func relaunch(_ appURL: URL = Bundle.main.bundleURL) {
+    static func relaunch(_ appURL: URL = Bundle.main.bundleURL, onFailure: (@Sendable () -> Void)? = nil) {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
         configuration.activates = false
         NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { app, error in
             if let error {
                 Log.error("Relaunch of \(appURL.path) failed: \(error.localizedDescription) — staying open")
+                onFailure?()
                 return
             }
             Log.info("Relaunched as pid \(app?.processIdentifier ?? 0)")
@@ -259,7 +266,7 @@ enum AutoUpdater {
         var isPermanent: Bool {
             switch self {
             case .unsigned, .signatureInvalid, .codeSignatureInvalid, .bundleIdentityMismatch, .versionMismatch, .badZip: return true
-            case .downloadFailed, .needsInstaller: return false
+            case .downloadFailed, .needsInstaller, .postponed: return false
             }
         }
 
@@ -271,6 +278,7 @@ enum AutoUpdater {
         case bundleIdentityMismatch(String, String)
         case versionMismatch(String)
         case needsInstaller(URL)
+        case postponed
         var errorDescription: String? {
             switch self {
             case .badZip: return "Il file di aggiornamento non è valido"
@@ -281,6 +289,7 @@ enum AutoUpdater {
             case .bundleIdentityMismatch(let new, let cur): return "App diversa (\(new) invece di \(cur)): non la installo"
             case .versionMismatch(let v): return "Versione inattesa nell'aggiornamento (\(v.isEmpty ? "?" : v)): non la installo"
             case .needsInstaller: return "Serve l'Installer di macOS"
+            case .postponed: return "C'è un'operazione sul disco in corso: aggiorno appena finisce"
             }
         }
     }
