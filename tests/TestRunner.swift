@@ -82,7 +82,7 @@ struct TestRunner {
         let backupEnd = BackupEndTests()
 
         var suites: [(String, TestClosure)] = [
-            ("EngineDatabases.recognised", engineDatabases.test_recognisesOnlyKnownEngineDatabasesInsideAProfile),
+            ("EngineDatabases.recognised", engineDatabases.test_recognisesOnlyKnownEngineDatabasesInsideAChromiumProfile),
             ("EngineDatabases.notProposed", engineDatabases.test_discoveryNeverProposesEngineDatabases),
             ("EngineDatabases.ignoredAndCleaned", engineDatabases.test_savedEngineDatabasesAreIgnoredAndCleanedFromTheSettings),
             ("EngineDatabases.lockedUserDatabaseIsAnError", engineDatabases.test_aLockedUserDatabaseStaysAnError),

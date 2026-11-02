@@ -52,7 +52,11 @@ enum DatabaseDumps {
         let root = snapshot.appendingPathComponent(SnapshotManifest.directoryName)
             .appendingPathComponent(directoryName)
         var records: [DatabaseRecord] = []
-        let sqlite = config.sqlite.filter { !EngineInternalDatabases.isInternal(ConfigDiscovery.expand($0, home: home)) }
+        let sqlite = config.sqlite.filter { path in
+            guard EngineInternalDatabases.isInternal(ConfigDiscovery.expand(path, home: home)) else { return true }
+            Log.info("Skipped, a browser engine's own database: \(path)")
+            return false
+        }
         let total = sqlite.count + (config.postgresClusterIncremental ? 1 : config.postgres.count)
         for path in sqlite {
             onProgress(records.count + 1, total)

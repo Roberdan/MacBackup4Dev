@@ -34,10 +34,15 @@ enum AutomaticCoverage {
             path == parent || path.hasPrefix(parent + "/")
         }
         var changed = selectedPaths != nil || includeRightsManagedFiles != nil
-        let kept = config.databases.sqlite.filter { !EngineInternalDatabases.isInternal(expanded($0)) }
-        if kept.count != config.databases.sqlite.count {
-            config.databases.sqlite = kept
-            changed = true
+        if config.coverage.autoInclude {
+            let kept = config.databases.sqlite.filter { !EngineInternalDatabases.isInternal(expanded($0)) }
+            for removed in config.databases.sqlite where !kept.contains(removed) {
+                Log.info("Removed from the settings, a browser engine's own database: \(removed)")
+            }
+            if kept.count != config.databases.sqlite.count {
+                config.databases.sqlite = kept
+                changed = true
+            }
         }
         var included: [String] = []
 
