@@ -394,6 +394,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         popover.performClose(nil)
+        // Still creating the store with its window closed: show that one, never a second creation.
+        if encryptionModel?.creating == true, let wc = encryptionWC {
+            wc.showWindow(nil)
+            wc.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         let model = EncryptionSetupModel(disk: config.diskURL, baseConfig: { [weak self] in self?.freshConfig() })
         encryptionModel = model
         model.onDone = { [weak self] newConfig in
@@ -1204,6 +1211,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // Installed but not restarted (2026-10-07): never leave everything refused.
                     DispatchQueue.main.async { [weak self] in
                         AppReplacement.inProgress = false
+                        // This copy still reads as the old version: do not reinstall it at every pause.
+                        self?.rejectedUpdate = version
                         self?.uiState.isUpdating = false
                         self?.uiState.updatePhase = nil
                         self?.sendNotification(title: "Aggiornamento installato, app non ripartita",
