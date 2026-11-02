@@ -12,10 +12,11 @@
   notification promises, even with automatic install switched off.
 - An update (or a disk compaction) no longer starts while the encrypted disk is being
   compacted or opened, while a restore or an undo runs (from the menu or from the "Ripristina"
-  window, which until now did not count as busy), or while the encryption or first-launch
-  window is open.
+  window, which until now did not count as busy), while the encrypted disk is being created,
+  or while the encryption or first-launch window is open.
 - Right before replacing the app, after the download, the updater checks again that no backup
   or restore has started meanwhile (a scheduled one included); if one has, it waits for it to end.
+  From then until it restarts (a few seconds) no backup, restore or cleanup can start.
 
 ## [4.3.6] - 2026-11-02
 

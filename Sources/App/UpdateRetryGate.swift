@@ -24,6 +24,12 @@ final class UpdateRetryGate {
     }
 }
 
+/// Set (main thread) once the last check before replacing the app has passed: the relaunch
+/// quits the app in seconds, so no window may start writing in between.
+enum AppReplacement {
+    static var inProgress = false
+}
+
 /// What keeps the disk or the user's files busy, for updates and compaction. The polled backup
 /// state alone is not enough: it reads idle during an in-app restore (no lock file), and the
 /// "Ripristina" window restores on its own.

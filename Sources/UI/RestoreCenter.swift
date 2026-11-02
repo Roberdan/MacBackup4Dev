@@ -128,7 +128,7 @@ final class RestoreCenterModel: ObservableObject {
     }
 
     func applyPlan() {
-        guard let plan else { return }
+        guard let plan, !AppReplacement.inProgress else { return }
         busy = true
         writesInFlight += 1
         let undoRoot = self.undoRoot
@@ -296,7 +296,7 @@ final class RestoreCenterModel: ObservableObject {
     }
 
     func runStage(_ stage: NewMacRestore.Stage, dryRun: Bool) {
-        guard let snap = snapshotURL else { return }
+        guard let snap = snapshotURL, dryRun || !AppReplacement.inProgress else { return }
         let home = self.home, services = chosenServices, packages = chosenPackages
         let applications = chosenApplications, archivedApplications = self.applications
         let applicationRoots = self.applicationRoots
@@ -341,6 +341,7 @@ final class RestoreCenterModel: ObservableObject {
     }
 
     func undo(_ id: String) {
+        guard !AppReplacement.inProgress else { return }
         let home = self.home, applicationRoots = self.applicationRoots
         let applications = self.applications
         busy = true

@@ -214,7 +214,7 @@ final class SnapshotBrowserModel: ObservableObject {
     }
 
     func restore() {
-        guard let plan, !busy else { return }
+        guard let plan, !busy, !AppReplacement.inProgress else { return }
         let undoRoot = self.undoRoot
         busy = true
         writesInFlight += 1
@@ -241,7 +241,7 @@ final class SnapshotBrowserModel: ObservableObject {
     }
 
     func undo() {
-        guard let dir = undoDir, !busy else { return }
+        guard let dir = undoDir, !busy, !AppReplacement.inProgress else { return }
         busy = true
         writesInFlight += 1
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

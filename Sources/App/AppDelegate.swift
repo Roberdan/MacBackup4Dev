@@ -103,6 +103,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var restoresInFlight = 0
     /// The "Ripristina" window's model, kept while it works even if the window is closed.
     private var restoreCenterModel: RestoreCenterModel?
+    private var encryptionModel: EncryptionSetupModel?
     private let popover = NSPopover()
     private var outsideClickMonitor: Any?
     private var uiState: AppUIState!
@@ -394,6 +395,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         popover.performClose(nil)
         let model = EncryptionSetupModel(disk: config.diskURL, baseConfig: { [weak self] in self?.freshConfig() })
+        encryptionModel = model
         model.onDone = { [weak self] newConfig in
             guard let self else { return }
             do {
@@ -1126,7 +1128,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The checked update is replacing the app and will quit it in seconds: start nothing new.
-    private var isReplacingApp: Bool { uiState.updatePhase == .installing }
+    private var isReplacingApp: Bool { AppReplacement.inProgress }
 
     /// Something is writing to the disk or the app: an update would interrupt it.
     private var isBusyForUpdate: Bool {
@@ -1144,6 +1146,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         activity.restoresInFlight = restoresInFlight
         activity.restoreWindowBusy = restoreCenterModel?.isWriting == true
         activity.setupWindowOpen = encryptionWC?.window?.isVisible == true || onboardingWC?.window?.isVisible == true
+            || encryptionModel?.creating == true  // creating the store goes on with its window closed
         if !activity.isBusy, let config {
             let lockPath = config.destination.path + "/rustymacbackup.lock"
             if let content = try? String(contentsOfFile: lockPath, encoding: .utf8),
@@ -1193,7 +1196,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     if scheduled { return false }
                     return await MainActor.run { [weak self] in
                         guard let self, !self.isDiskBusy else { return false }
-                        self.uiState.updatePhase = .installing  // from here `isReplacingApp`
+                        AppReplacement.inProgress = true  // nothing new starts from here (`isReplacingApp`)
+                        self.uiState.updatePhase = .installing
                         return true
                     }
                 })
@@ -1220,6 +1224,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 Log.error("Update failed: \(error.localizedDescription)")
                 let permanent = (error as? AutoUpdater.UpdateError)?.isPermanent ?? false
                 DispatchQueue.main.async {
+                    AppReplacement.inProgress = false
                     self?.uiState.isUpdating = false
                     self?.uiState.updatePhase = nil
                     if permanent { self?.rejectedUpdate = version }

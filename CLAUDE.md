@@ -289,8 +289,9 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   restores/undos count in `restoresInFlight` and the "Ripristina" window through its models'
   `writesInFlight` (`isWriting`), never `busy` (cleared by any folder load, even mid-restore).
   `AutoUpdater.install` asks `readyToSwap` (disk still quiet, no scheduled job) after the
-  download and throws `.postponed` otherwise; once it says yes, `isReplacingApp` refuses new
-  backups, restores and cleanups for the seconds before the relaunch quits the app.
+  download and throws `.postponed` otherwise; once it says yes, `AppReplacement.inProgress`
+  refuses new backups, restores, cleanups and window writes (restore, stages, undo, store
+  creation) for the seconds before the relaunch quits the app.
 - **The coverage audit never suggests credentials, `_parked` folders, caches/profiles or
   databases inside a tool's hidden folder** (`CoverageAuditor.isNoise`).
 
