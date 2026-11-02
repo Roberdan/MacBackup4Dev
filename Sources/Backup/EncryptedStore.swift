@@ -189,7 +189,10 @@ enum EncryptedStore {
         try String(ProcessInfo.processInfo.processIdentifier).write(toFile: compactingLock, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(atPath: compactingLock) }
         let before = allocatedSize(setup.container)
-        guard close(setup) else { throw StoreError.tool("in uso: non lo compatto ora") }
+        // Name who keeps it busy (the refusal says "dissented by PID …"): unknown since 2026-11-01.
+        if case .failed(let reason) = closeReporting(setup) {
+            throw StoreError.tool("in uso: non lo compatto ora (\(reason.suffix(200)))")
+        }
         // Images made by `diskutil image` give freed space back by themselves when closed;
         // `hdiutil compact` does not support them ("Function not implemented") but does the
         // job on images made by hdiutil. Either way: closed, compacted if possible, reopened.

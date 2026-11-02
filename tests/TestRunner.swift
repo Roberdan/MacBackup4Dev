@@ -117,6 +117,7 @@ struct TestRunner {
             ("Worktrees.unverifiableKept", worktreeContents.test_aCopyGitCannotExamineIsKeptAndListed),
             ("Worktrees.knownCaches", worktreeContents.test_onlyKnownCachesAreRegenerable),
             ("Applications.frameworkAndSignature", appBundles.test_frameworkLinksAndSignaturesSurvive),
+            ("Applications.onceADay", appBundles.test_appsAreCapturedOnceADayAndStayRestorable),
             ("Applications.unchangedReused", appBundles.test_unchangedAppIsReusedWithoutReadingOrVerifyingIt),
             ("Applications.symlinkPermissionsUmask", appBundles.test_symlinkPermissionsDoNotDependOnUmask),
             ("Applications.discoveryDedupAndSourceSafety", appBundles.test_newAppsAndDedupNeverChangeSources),

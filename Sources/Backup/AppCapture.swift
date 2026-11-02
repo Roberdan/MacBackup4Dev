@@ -48,7 +48,56 @@ enum AppCapture {
         snapshot.appendingPathComponent(directoryName + "/catalog.json")
     }
 
+    /// A snapshot made within a day of the last application capture holds only this file, with
+    /// the name of the complete snapshot that has the apps, instead of linking every app file
+    /// again: on 2026-11-02 the copies were 248,000 of the 470,000 entries of each backup and
+    /// half of its hour (Roberto, 2026-11-02: apps once a day).
+    static let referenceName = directoryName + "/same-as"
+    static let captureInterval: TimeInterval = 24 * 3600
+
+    /// The name a snapshot's reference points to, if it has a well-formed one.
+    static func referencedName(in snapshot: URL) -> String? {
+        let url = snapshot.appendingPathComponent(referenceName)
+        guard !SelectiveRestore.crossesLink(referenceName, root: snapshot.path),
+              let metadata = try? AppInventory.metadata(url), metadata.st_mode & S_IFMT == S_IFREG,
+              metadata.st_size < 256,
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard RetentionManager.parseBackupName(name) != nil, name != snapshot.lastPathComponent else { return nil }
+        return name
+    }
+
+    /// The snapshot holding the applications of `snapshot`: itself, or the complete snapshot
+    /// its reference names, next to it. nil when there is none.
+    static func holder(of snapshot: URL) -> URL? {
+        if AppInventory.exists(catalogURL(in: snapshot)) { return snapshot }
+        guard let name = referencedName(in: snapshot) else { return nil }
+        let target = snapshot.deletingLastPathComponent().appendingPathComponent(name)
+        guard (try? AppInventory.metadata(target).st_mode & S_IFMT) == S_IFDIR,
+              AppInventory.exists(catalogURL(in: target)),
+              SnapshotManifest.read(from: target)?.complete == true else { return nil }
+        return target
+    }
+
+    /// Writes the reference of a new snapshot to the snapshot holding the apps.
+    static func refer(_ snapshot: URL, to holder: URL) throws {
+        let url = snapshot.appendingPathComponent(referenceName)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try (holder.lastPathComponent + "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// The catalog of the applications of `snapshot`, following its reference.
     static func read(from snapshot: URL) throws -> Catalog? {
+        guard let holder = holder(of: snapshot) else {
+            if referencedName(in: snapshot) != nil {
+                throw AppInventory.failure("Le applicazioni di questo snapshot sono in un altro che non è più disponibile.")
+            }
+            return nil
+        }
+        return try readOwn(from: holder)
+    }
+
+    private static func readOwn(from snapshot: URL) throws -> Catalog? {
         let url = catalogURL(in: snapshot)
         do { _ = try AppInventory.metadata(url) }
         catch let error as NSError where error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT) { return nil }

@@ -41,6 +41,8 @@ enum AppRestore {
     static func run(snapshot: URL, selected: Set<String>, home: String, roots: [AppInventory.Root]? = nil,
                     dryRun: Bool, running: (String) -> Bool = isRunning,
                     sink: (String) -> Void = { _ in }) throws -> Report {
+        // The copies live in the snapshot that captured them (see AppCapture.referenceName).
+        let snapshot = AppCapture.holder(of: snapshot) ?? snapshot
         guard let catalog = try AppCapture.read(from: snapshot) else {
             throw AppInventory.failure("Questo snapshot non contiene un archivio delle applicazioni.")
         }
@@ -105,6 +107,7 @@ enum AppRestore {
         guard !AppInventory.exists(target) else {
             throw AppInventory.failure("La destinazione è occupata: non verrà sovrascritta.")
         }
+        let snapshot = AppCapture.holder(of: snapshot) ?? snapshot
         let rel = AppCapture.directoryName + "/" + entry.storagePath
         let source = snapshot.appendingPathComponent(rel)
         guard !SelectiveRestore.crossesLink(rel, root: snapshot.path),

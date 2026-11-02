@@ -107,7 +107,7 @@ extension NewMacRestore {
                              detail: "File di strumenti senza un argomento proprio.", kind: .files, paths: rest))
         }
 
-        if AppInventory.exists(AppCapture.catalogURL(in: snapshot)) {
+        if AppCapture.holder(of: snapshot) != nil {
             out.append(Stage(id: "app", title: "Applicazioni dal backup",
                              detail: "Copie verificate, senza scaricarle né avviarle. Le app esistenti restano intatte.",
                              kind: .applications))
