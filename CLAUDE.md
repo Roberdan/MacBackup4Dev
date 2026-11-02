@@ -111,6 +111,11 @@ let flags = copyfile_flags_t(UInt32(0x0F))
   priority. Disk I/O uses the SDK constants, preserves an existing passive/throttled policy
   and restores the process policy on exit. Prepared directories are cached only within a run;
   copy failures invalidate the cache and a missing directory is recreated once.
+- **Scan pacing (4.3.8):** the scanner's bird-safe pause is a minimum time per 50-file batch
+  (`FileScanner.walk` waits only the shortfall). A fixed `usleep(5 ms)` measured ~60 ms at
+  background priority and made the scan 10x slower (30k files: 38.6 s -> 3.4 s). A local index
+  of the last snapshot was measured and rejected: `lstat` on the previous snapshot costs 0.08 ms
+  per file on the real store (~17 s for 224k files); do not revisit without a new measurement.
 - **Status file**: `~/.local/share/macbackup4dev/status.json` — updated every 500 files.
 - **Progress (4.1.4):** `scan_finished` must be true before showing a backup percentage
   or copy estimate. Discovery totals are actual counts, never padding. Finalization

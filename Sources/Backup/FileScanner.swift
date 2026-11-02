@@ -24,6 +24,7 @@ enum FileScanner {
         onTraversalError: ((String, Error) -> Void)? = nil,
         powerReader: () -> Bool = IOPriority.isOnBattery,
         pause: (UInt32) -> Void = { _ = usleep($0) },
+        clock: () -> UInt64 = { clock_gettime_nsec_np(CLOCK_UPTIME_RAW) },
         handler: (FileEntry) -> Bool
     ) {
         // A menu-bar process survives power changes between backups.
@@ -94,6 +95,7 @@ enum FileScanner {
             let resolvedBase = realPath(basePath) + "/"
             let resolvedSource = realPath(source.path) + "/"
             var batchCount = 0
+            var batchStart = clock()
             while let url = enumerator.nextObject() as? URL {
                 let fullPath = url.path
                 let relativePath: String
@@ -165,7 +167,12 @@ enum FileScanner {
                 batchCount += 1
                 if batchCount >= BIRD_SAFE_BATCH_SIZE {
                     batchCount = 0
-                    pause(pauseUS)
+                    // The pause is a minimum time per batch, not extra time on top of it: a batch that
+                    // already took longer needs none. A background-priority usleep(5 ms) was measured
+                    // at about 60 ms, which alone made the walk take ten times longer (2026-11-02).
+                    let elapsedUS = (clock() &- batchStart) / 1_000
+                    if elapsedUS < UInt64(pauseUS) { pause(pauseUS - UInt32(elapsedUS)) }
+                    batchStart = clock()
                 }
             }
         }
