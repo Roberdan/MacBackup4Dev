@@ -10,6 +10,17 @@
   skipped at capture and removed from the settings at the next preparation. Any other database
   that cannot be copied, locked ones included, is still reported as an error.
 
+## [4.3.8] - 2026-11-02
+
+### Fixed
+- The file part of a backup no longer waits needlessly while it scans. The scanner paused 5 ms
+  every 50 files to be gentle with iCloud, but at background priority each pause really lasted
+  about 60 ms, on top of the scan itself: on a 30,000-file test the scan alone fell from 38.6 s
+  to 3.4 s and a whole backup from 46 s to 7.7 s. The pause is now a minimum time per batch
+  (the shortfall is waited, nothing if the batch was already slower), so the maximum scan rate
+  is unchanged. A local index of the last backup was measured and rejected: asking the disk about
+  a previous file costs 0.08 ms (about 17 s for 224,000 files), not worth the added risk.
+
 ## [4.3.7] - 2026-11-02
 
 ### Fixed

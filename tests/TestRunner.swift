@@ -364,6 +364,7 @@ struct TestRunner {
             ("FileScanner.excludedFileKeepsSibling", scanner.test_excludedFileDoesNotSwallowSiblingDirectory),
             ("FileScanner.excludedDirPruned", scanner.test_excludedDirectoryIsStillPruned),
             ("FileScanner.multipleExcludedFiles", scanner.test_multipleExcludedFilesBeforeDirectory),
+            ("FileScanner.slowBatchNotPausedAgain", scanner.test_aBatchThatTookLongerThanThePauseIsNotPausedAgain),
             ("FileScanner.missingChildren", scanner.test_onlyMissingChildrenAreTolerated)
         ]
 
