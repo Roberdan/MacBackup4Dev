@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.3.7] - 2026-11-02
+
+### Fixed
+- An update that arrives while a backup is running now installs as soon as that backup ends
+  (finished or stopped), within about half a minute, instead of waiting for the hourly check,
+  which with hourly backups kept finding the next one already running. It still never
+  installs during a backup, restore, cleanup or disk compaction, and tries once per pause, so
+  a failed download is not retried every 30 seconds.
+- "Aggiorna" pressed during a backup now really updates when the backup ends, as the
+  notification promises, even with automatic install switched off.
+- An update no longer starts while the encrypted disk is being compacted.
+
 ## [4.3.6] - 2026-11-02
 
 ### Changed

@@ -93,6 +93,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     /// A version that failed verification: never retried automatically (no hourly alarms).
     private var rejectedUpdate: String?
+    /// "Aggiorna" was pressed during a backup: install when it ends, even with automatic install off.
+    private var updateRequestedByHand = false
+    private lazy var updateRetry = UpdateRetryGate { [weak self] version in
+        guard let self else { return }
+        self.installUpdate(version, userInitiated: self.updateRequestedByHand)
+    }
     private let popover = NSPopover()
     private var outsideClickMonitor: Any?
     private var uiState: AppUIState!
@@ -1075,7 +1081,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Auto-update
 
     /// Checks at launch (after 30 s) and then every hour tick; asks GitHub at most every
-    /// `AutoUpdater.checkInterval`. A found update installs on its own when nothing is running.
+    /// `AutoUpdater.checkInterval`. A found update installs on its own when nothing is running;
+    /// one put off by a backup installs as soon as it ends (`updateRetry`, at the status poll).
     private func startUpdateSchedule() {
         if let previous = AutoUpdater.consumeUpdatedFrom() {
             sendNotification(title: "\(AppIdentity.name) aggiornato",
@@ -1110,7 +1117,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Something is writing to the disk or the app: an update would interrupt it.
     private var isBusyForUpdate: Bool {
-        if uiState.isUpdating || uiState.isCleaning || uiState.isEjecting || recoveryCopying { return true }
+        uiState.isUpdating || isDiskBusy
+    }
+
+    /// A backup (from the menu or the schedule), restore, cleanup, ejection, compaction or
+    /// recovery copy is running. The app's own update is not counted here (`UpdateRetryGate`).
+    private var isDiskBusy: Bool {
+        if uiState.isCleaning || uiState.isEjecting || recoveryCopying || compactingStore { return true }
         if [.running, .stopping, .restoring].contains(uiState.appState) { return true }
         guard let config else { return false }
         let lockPath = config.destination.path + "/rustymacbackup.lock"
@@ -1128,13 +1141,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func installUpdate(_ version: String, userInitiated: Bool) {
         guard !uiState.isUpdating else { return }
         if isBusyForUpdate {
-            // Automatic: try again at the next tick. Asked by hand: say why not now.
+            // Automatic: `updateRetry` tries again as soon as the disk is quiet. Asked by hand: say why not now.
             if userInitiated {
+                updateRequestedByHand = true
                 sendNotification(title: "Aggiornamento rimandato",
                                  body: "C'è un'operazione sul disco in corso: aggiorno appena finisce.")
             }
             return
         }
+        updateRequestedByHand = false
         // Not ours to replace and nobody asked: keep the banner, never pop the Installer unasked.
         if !userInitiated && !AutoUpdater.canReplaceInPlace() { return }
         uiState.isUpdating = true
@@ -1267,6 +1282,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             lastPendingCompletion = completed
             if !firstLook { refreshPendingAutomatic(force: true) }
         }
+        // Before the recovery copy: the updated app makes its own copy after relaunching.
+        updateRetry.observe(busy: isDiskBusy, pending: uiState.updateAvailable,
+                            allowed: (AutoUpdater.autoInstall || updateRequestedByHand) && AutoUpdater.isInstalledCopy,
+                            rejected: rejectedUpdate)
         if let completed = uiState.status?.lastCompleted, !completed.isEmpty,
            completed != lastRecoveryCompletion {
             refreshRecoveryAppOnDisk()

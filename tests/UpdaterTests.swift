@@ -149,4 +149,41 @@ struct UpdaterTests {
         try fm.createDirectory(at: volume.appendingPathComponent("RustyMacBackup"), withIntermediateDirectories: true)
         try expectEqual(AppIdentity.backupFolder(on: volume).lastPathComponent, "RustyMacBackup", "existing 3.x folder reused")
     }
+
+    /// 4.3.7: an update put off by a backup installs at the first poll after the backup ends,
+    /// not at the next hourly tick (which kept finding the next backup running).
+    func test_pendingUpdateInstallsWhenTheBackupEnds() throws {
+        var installed: [String] = []
+        let gate = UpdateRetryGate { installed.append($0) }
+        func poll(busy: Bool, pending: String? = "4.3.7", allowed: Bool = true, rejected: String? = nil) {
+            gate.observe(busy: busy, pending: pending, allowed: allowed, rejected: rejected)
+        }
+
+        poll(busy: false, pending: nil)
+        poll(busy: true, pending: nil)
+        poll(busy: true)
+        poll(busy: true)
+        try expect(installed.isEmpty, "never during a backup, even with an update waiting")
+        poll(busy: false)
+        try expectEqual(installed, ["4.3.7"], "installed at the first poll after the backup ends")
+        poll(busy: false)
+        poll(busy: false)
+        try expectEqual(installed.count, 1, "once per quiet spell: a failed download is not retried every 30 s")
+
+        poll(busy: true)
+        poll(busy: false)
+        try expectEqual(installed.count, 2, "a backup stopped halfway also ends: tried again right after")
+
+        poll(busy: true, pending: nil)
+        poll(busy: false, pending: nil)
+        try expectEqual(installed.count, 2, "no update waiting: nothing to install")
+        poll(busy: true)
+        poll(busy: false, allowed: false)
+        try expectEqual(installed.count, 2, "automatic install off and nobody asked: only the banner")
+        poll(busy: true)
+        poll(busy: false, rejected: "4.3.7")
+        try expectEqual(installed.count, 2, "a version that failed verification is never retried by itself")
+        poll(busy: false)
+        try expectEqual(installed.count, 2, "already quiet: the hourly tick, not this, handles it")
+    }
 }

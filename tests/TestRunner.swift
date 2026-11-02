@@ -219,6 +219,7 @@ struct TestRunner {
             ("Updater.swapWhole", updater.test_swapReplacesTheAppWholeAndLeavesNothingBehind),
             ("Updater.failedSwapKeepsOld", updater.test_failedSwapKeepsTheOldApp),
             ("Updater.swapFromLegacyName", updater.test_swapFromLegacyNameLeavesOnlyTheNewApp),
+            ("Updater.pendingInstallsWhenBackupEnds", updater.test_pendingUpdateInstallsWhenTheBackupEnds),
             ("Rename.foldersMove", updater.test_foldersMoveAndOldPlacesStillWork),
             ("Power.acAllowed", power.test_acAllowsScheduled),
             ("Power.batteryBlocks", power.test_batteryBlocksScheduled),
