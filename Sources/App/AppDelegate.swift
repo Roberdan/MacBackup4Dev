@@ -594,7 +594,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleRequestCleanup(_ age: CleanupAge) {
-        guard let config, !uiState.isRunning, !uiState.isCleaning, !uiState.isEjecting else { return }
+        guard let config, !uiState.isRunning, !uiState.isCleaning, !uiState.isEjecting, !isReplacingApp else { return }
         let destination = URL(fileURLWithPath: config.destination.path)
         uiState.cleanupPhase = .reading
         popover.performClose(nil)
@@ -746,7 +746,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startBackup(selectedPaths: [String]? = nil, includeRightsManagedFiles: Bool? = nil) {
-        guard !uiState.isCleaning, !uiState.isEjecting else { return }
+        guard !uiState.isCleaning, !uiState.isEjecting, !isReplacingApp else { return }
         uiState.dismissEjection()
         let pending: Config
         do {
@@ -956,7 +956,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startRestore(snapshotURL: URL, items: [String], brewInstall: Bool, overrides: [String: String] = [:]) {
-        guard !uiState.isCleaning, !uiState.isEjecting else { return }
+        guard !uiState.isCleaning, !uiState.isEjecting, !isReplacingApp else { return }
         uiState.dismissEjection()
         // F-10: Preflight free-space check (payload × 2 to account for pre-restore backup copy)
         let estimate = RestoreEngine.estimateRestoreSize(snapshotURL: snapshotURL, items: items)
@@ -1044,7 +1044,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleUndoRestore() {
-        guard !uiState.isEjecting else { return }
+        guard !uiState.isEjecting, !isReplacingApp else { return }
         uiState.dismissEjection()
         // 3.0 restores keep an exact record (undo.json): use it, it also removes files the
         // restore created. Older pre-restore folders keep the previous behaviour.
@@ -1125,6 +1125,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The checked update is replacing the app and will quit it in seconds: start nothing new.
+    private var isReplacingApp: Bool { uiState.updatePhase == .installing }
+
     /// Something is writing to the disk or the app: an update would interrupt it.
     private var isBusyForUpdate: Bool {
         uiState.isUpdating || isDiskBusy
@@ -1139,7 +1142,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         activity.maintenance = uiState.isCleaning || uiState.isEjecting || recoveryCopying
             || compactingStore || storeOpening
         activity.restoresInFlight = restoresInFlight
-        activity.restoreWindowBusy = restoreCenterModel.map { $0.busy || $0.browser.busy } ?? false
+        activity.restoreWindowBusy = restoreCenterModel?.isWriting == true
         activity.setupWindowOpen = encryptionWC?.window?.isVisible == true || onboardingWC?.window?.isVisible == true
         if !activity.isBusy, let config {
             let lockPath = config.destination.path + "/rustymacbackup.lock"
@@ -1181,13 +1184,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }, readyToSwap: { [weak self] in
                     // The download took a while: a backup or restore may have started meanwhile,
                     // also a scheduled one still opening the store before taking its lock.
-                    let scheduled: Bool
-                    do { scheduled = try ScheduleManager.scheduleJobIsRunning() } catch {
-                        Log.warn("Update: cannot tell whether a scheduled backup runs: \(error.localizedDescription)")
-                        scheduled = true
-                    }
+                    let scheduled = await Task.detached { () -> Bool in
+                        do { return try ScheduleManager.scheduleJobIsRunning() } catch {
+                            Log.warn("Update: cannot tell whether a scheduled backup runs: \(error.localizedDescription)")
+                            return true
+                        }
+                    }.value
                     if scheduled { return false }
-                    return await MainActor.run { [weak self] in self.map { !$0.isDiskBusy } ?? false }
+                    return await MainActor.run { [weak self] in
+                        guard let self, !self.isDiskBusy else { return false }
+                        self.uiState.updatePhase = .installing  // from here `isReplacingApp`
+                        return true
+                    }
                 })
             } catch AutoUpdater.UpdateError.needsInstaller(let pkg) {
                 DispatchQueue.main.async {
@@ -1205,7 +1213,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     if byHand { self?.updateRequestedByHand = true }
                     if userInitiated {
                         self?.sendNotification(title: "Aggiornamento rimandato",
-                                               body: "È partita un'operazione sul disco: aggiorno appena finisce.")
+                                               body: "Un backup o un ripristino è in corso, o non riesco a verificarlo: aggiorno appena finisce.")
                     }
                 }
             } catch {
@@ -1399,7 +1407,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openRestoreCenter(destination: URL, tab: RestoreCenterModel.Tab) {
-        guard !uiState.isEjecting, !uiState.isCleaning, !uiState.isRunning,
+        guard !uiState.isEjecting, !uiState.isCleaning, !uiState.isRunning, !isReplacingApp,
               BackupEngine.isVolumeReallyMounted(destination.path),
               FileManager.default.fileExists(atPath: destination.path) else {
             sendNotification(title: "Ripristino non disponibile",
@@ -1409,7 +1417,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.performClose(nil)
         // Still working with its window closed: show that one again rather than a second restore beside it.
         if let wc = restoreCenterWC, wc.window?.isVisible == true
-            || restoreCenterModel.map({ $0.busy || $0.browser.busy }) == true {
+            || restoreCenterModel?.isWriting == true {
             wc.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return

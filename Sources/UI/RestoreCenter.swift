@@ -27,6 +27,10 @@ final class RestoreCenterModel: ObservableObject {
     @Published var snapshots: [SnapshotInfo] = []
     @Published var selectedSnapshot: String = "" { didSet { if oldValue != selectedSnapshot { stages = []; stageCounts = [:] } } }
     @Published var busy = false
+    /// Restores, new-Mac stages and undos still writing (`busy` also covers loads and searches,
+    /// and is cleared when one ends). Updates and compaction wait on `isWriting`.
+    @Published private(set) var writesInFlight = 0
+    var isWriting: Bool { writesInFlight > 0 || browser.writesInFlight > 0 }
     @Published var message: String = ""
     @Published var messageIsError = false
 
@@ -126,11 +130,13 @@ final class RestoreCenterModel: ObservableObject {
     func applyPlan() {
         guard let plan else { return }
         busy = true
+        writesInFlight += 1
         let undoRoot = self.undoRoot
         DispatchQueue.global(qos: .userInitiated).async {
             let outcome = Result { try SelectiveRestore.apply(plan, undoRoot: undoRoot) }
             DispatchQueue.main.async {
                 self.busy = false
+                self.writesInFlight -= 1
                 switch outcome {
                 case .success(let (r, _)):
                     self.messageIsError = r.failed > 0
@@ -296,6 +302,7 @@ final class RestoreCenterModel: ObservableObject {
         let applicationRoots = self.applicationRoots
         log = [dryRun ? "Anteprima di \"\(stage.title)\" (niente viene scritto)…" : "Ripristino di \"\(stage.title)\"…"]
         busy = true
+        if !dryRun { writesInFlight += 1 }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let out = NewMacRestore.runStage(stage, snapshot: snap, home: home, dryRun: dryRun,
                                              services: services, packages: stage.kind == .packages ? packages : [],
@@ -310,6 +317,7 @@ final class RestoreCenterModel: ObservableObject {
             DispatchQueue.main.async { [weak self, out, progress, installed, installedApplications] in
                 guard let self else { return }
                 self.busy = false
+                if !dryRun { self.writesInFlight -= 1 }
                 self.progress = progress
                 if !dryRun && stage.kind == .services { self.chosenServices = [] }
                 if let installed {
@@ -336,13 +344,14 @@ final class RestoreCenterModel: ObservableObject {
         let home = self.home, applicationRoots = self.applicationRoots
         let applications = self.applications
         busy = true
+        writesInFlight += 1
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let text = NewMacRestore.undoStage(id, home: home, applicationRoots: applicationRoots)
             let progress = NewMacRestore.progress(home: home)
             let installed = id == "app" ? AppRestore.installedIDs(applications, roots: applicationRoots, home: home) : nil
             DispatchQueue.main.async { [weak self, text, progress, installed] in
                 guard let self else { return }
-                self.busy = false; self.progress = progress
+                self.busy = false; self.writesInFlight -= 1; self.progress = progress
                 self.log = ["Annullamento: \(text)"]
                 if let installed {
                     self.chosenApplications.formUnion(self.installedApplications.subtracting(installed))

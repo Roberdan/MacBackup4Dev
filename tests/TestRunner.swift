@@ -192,6 +192,7 @@ struct TestRunner {
             ("Restore.symlinksAndDotDot", guards.test_symlinksAndDotDotAreLeftAlone),
             ("Browser.timeTravelRestoresDeleted", browser.test_timeTravelKeepsFolderAndRestoresDeletedFile),
             ("Browser.folderRestoreUndo", browser.test_folderRestoreIsRecursiveAndUndoable),
+            ("Browser.navigatingKeepsRestoreCounted", browser.test_navigatingDuringARestoreKeepsItCountedAsWriting),
             ("Browser.linksAndTraversal", browser.test_linksAndTraversalNeverLeaveTheSnapshot),
             ("Browser.onlyCompleteSnapshots", browser.test_onlyIncompleteHistoryOffersNothing),
             ("Review.H1.undoKeepsChanged", review.test_undoKeepsFilesChangedAfterRestore),
