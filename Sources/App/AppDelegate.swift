@@ -1195,15 +1195,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }, readyToSwap: { [weak self] in
                     // The download took a while: a backup or restore may have started meanwhile,
                     // also a scheduled one still opening the store before taking its lock.
-                    let scheduled = await Task.detached { () -> Bool in
+                    // Something seen running arms `updateRetry` (it may end before any poll sees it);
+                    // a failed launchd query does not, or the update would be fetched every 30 s.
+                    let scheduled = await Task.detached { () -> Bool? in
                         do { return try ScheduleManager.scheduleJobIsRunning() } catch {
                             Log.warn("Update: cannot tell whether a scheduled backup runs: \(error.localizedDescription)")
-                            return true
+                            return nil
                         }
                     }.value
-                    if scheduled { return false }
+                    guard let scheduled else { return false }
                     return await MainActor.run { [weak self] in
-                        guard let self, !self.isDiskBusy else { return false }
+                        guard let self else { return false }
+                        guard !scheduled, !self.isDiskBusy else {
+                            self.updateRetry.deferred()
+                            return false
+                        }
                         AppReplacement.inProgress = true  // nothing new starts from here (`isReplacingApp`)
                         self.uiState.updatePhase = .installing
                         return true
