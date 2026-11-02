@@ -186,4 +186,39 @@ struct UpdaterTests {
         poll(busy: false)
         try expectEqual(installed.count, 2, "already quiet: the hourly tick, not this, handles it")
     }
+
+    /// Reviews of 4.3.7: an in-app restore leaves no lock file and the polled state reads idle;
+    /// a compaction or scheduled backup ending meanwhile must not let the update quit the app.
+    func test_restoresKeepTheDiskBusy() throws {
+        var installed: [String] = []
+        let gate = UpdateRetryGate { installed.append($0) }
+        func poll(_ activity: DiskActivity) {
+            gate.observe(busy: activity.isBusy, pending: "4.3.7", allowed: true, rejected: nil)
+        }
+        try expect(!DiskActivity().isBusy, "nothing running: quiet")
+
+        var restoring = DiskActivity()
+        restoring.restoresInFlight = 1
+        var compacting = restoring
+        compacting.maintenance = true
+        poll(compacting)
+        poll(restoring)
+        try expect(installed.isEmpty, "a tree restore or undo still running keeps the update waiting")
+
+        var window = DiskActivity()
+        window.restoreWindowBusy = true
+        var backupEnding = window
+        backupEnding.lockHolderAlive = true
+        poll(backupEnding)
+        poll(window)
+        try expect(installed.isEmpty, "a restore from the Ripristina window keeps the update waiting")
+
+        var setup = DiskActivity()
+        setup.setupWindowOpen = true
+        poll(setup)
+        try expect(installed.isEmpty, "an encryption migration or first-launch window keeps it waiting")
+
+        poll(DiskActivity())
+        try expectEqual(installed, ["4.3.7"], "installed only once everything has finished")
+    }
 }

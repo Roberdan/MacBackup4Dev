@@ -174,7 +174,10 @@ enum AutoUpdater {
 
     /// Downloads, verifies and installs `version`, then relaunches the app.
     /// Throws `.needsInstaller(pkg)` when the app is not ours to replace: the caller opens it.
-    static func install(version: String, onPhase: ((UpdatePhase) -> Void)? = nil) async throws {
+    /// `readyToSwap` is asked after the download, right before the app is replaced: relaunching
+    /// quits the app, so a backup or restore started meanwhile throws `.postponed` instead.
+    static func install(version: String, onPhase: ((UpdatePhase) -> Void)? = nil,
+                        readyToSwap: () async -> Bool = { true }) async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(AppIdentity.name)-update-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -188,6 +191,7 @@ enum AutoUpdater {
             throw UpdateError.needsInstaller(pkg)
         }
         let newApp = try await prepare(version: version, in: dir, onPhase: onPhase)
+        guard await readyToSwap() else { throw UpdateError.postponed }
         onPhase?(.installing)
         Log.info("Installing \(version) over \(Bundle.main.bundleURL.path)…")
         let target = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("\(AppIdentity.name).app")
@@ -259,7 +263,7 @@ enum AutoUpdater {
         var isPermanent: Bool {
             switch self {
             case .unsigned, .signatureInvalid, .codeSignatureInvalid, .bundleIdentityMismatch, .versionMismatch, .badZip: return true
-            case .downloadFailed, .needsInstaller: return false
+            case .downloadFailed, .needsInstaller, .postponed: return false
             }
         }
 
@@ -271,6 +275,7 @@ enum AutoUpdater {
         case bundleIdentityMismatch(String, String)
         case versionMismatch(String)
         case needsInstaller(URL)
+        case postponed
         var errorDescription: String? {
             switch self {
             case .badZip: return "Il file di aggiornamento non è valido"
@@ -281,6 +286,7 @@ enum AutoUpdater {
             case .bundleIdentityMismatch(let new, let cur): return "App diversa (\(new) invece di \(cur)): non la installo"
             case .versionMismatch(let v): return "Versione inattesa nell'aggiornamento (\(v.isEmpty ? "?" : v)): non la installo"
             case .needsInstaller: return "Serve l'Installer di macOS"
+            case .postponed: return "C'è un'operazione sul disco in corso: aggiorno appena finisce"
             }
         }
     }

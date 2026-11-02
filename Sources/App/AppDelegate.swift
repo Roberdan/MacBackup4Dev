@@ -96,9 +96,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// "Aggiorna" was pressed during a backup: install when it ends, even with automatic install off.
     private var updateRequestedByHand = false
     private lazy var updateRetry = UpdateRetryGate { [weak self] version in
-        guard let self else { return }
-        self.installUpdate(version, userInitiated: self.updateRequestedByHand)
+        self?.installUpdate(version, userInitiated: false)
     }
+    /// Tree restores and undos started by the app and not finished yet: the polled state reads
+    /// idle during them (no lock file), and an update would quit the app halfway.
+    private var restoresInFlight = 0
+    /// The "Ripristina" window's model, kept while it works even if the window is closed.
+    private var restoreCenterModel: RestoreCenterModel?
     private let popover = NSPopover()
     private var outsideClickMonitor: Any?
     private var uiState: AppUIState!
@@ -970,6 +974,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         iconManager.setState(.running)
         uiState.appState = .restoring  // F-14: distinct state from backup .running
+        restoresInFlight += 1
         Log.info("Restore started: \(items.count) items from \(snapshotURL.lastPathComponent)")
         sendNotification(title: "Ripristino avviato",
                          body: "Ripristino \(items.count) elementi da \(snapshotURL.lastPathComponent)…")
@@ -1010,6 +1015,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             DispatchQueue.main.async { [weak self, brewOK] in
+                self?.restoresInFlight -= 1
                 self?.iconManager.setState(.idle)
                 let brewMsg = brewInstall ? (brewOK ? "\nProgrammi Homebrew installati." : "\nHomebrew con errori.") : ""
                 let backupMsg = result.backedUpTo.isEmpty ? "" : "\nLe versioni precedenti sono annullabili dal menu."
@@ -1044,9 +1050,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // restore created. Older pre-restore folders keep the previous behaviour.
         if let undoDir = latestUndoDir() {
             popover.performClose(nil)
+            restoresInFlight += 1
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let outcome = (try? SelectiveRestore.undoDetailed(undoDir)) ?? UndoOutcome(failed: 1)
                 DispatchQueue.main.async { [weak self] in
+                    self?.restoresInFlight -= 1
                     var body = "\(outcome.restored) file rimessi com'erano"
                     if !outcome.keptBecauseChanged.isEmpty {
                         body += ", \(outcome.keptBecauseChanged.count) lasciati perché modificati dopo il ripristino"
@@ -1064,10 +1072,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.appState = .running
         sendNotification(title: "Annullo il ripristino…", body: "Rimetto i file originali")
         Log.info("Undo restore started from \(backupDir.lastPathComponent)")
+        restoresInFlight += 1
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = RestoreEngine.undoRestore(from: backupDir)
             DispatchQueue.main.async { [weak self] in
+                self?.restoresInFlight -= 1
                 self?.iconManager.setState(.idle)
                 Log.info("Undo complete: \(result.restored) restored, \(result.failed) failed")
                 self?.sendNotification(
@@ -1120,17 +1130,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         uiState.isUpdating || isDiskBusy
     }
 
-    /// A backup (from the menu or the schedule), restore, cleanup, ejection, compaction or
-    /// recovery copy is running. The app's own update is not counted here (`UpdateRetryGate`).
+    /// A backup (from the menu or the schedule), restore, undo, cleanup, ejection, compaction,
+    /// recovery copy or store opening is running, or a setup window may be copying. The app's
+    /// own update is not counted here (`UpdateRetryGate`).
     private var isDiskBusy: Bool {
-        if uiState.isCleaning || uiState.isEjecting || recoveryCopying || compactingStore { return true }
-        if [.running, .stopping, .restoring].contains(uiState.appState) { return true }
-        guard let config else { return false }
-        let lockPath = config.destination.path + "/rustymacbackup.lock"
-        if let content = try? String(contentsOfFile: lockPath, encoding: .utf8),
-           let pid = Int32(content.split(separator: "\n").first.map(String.init) ?? ""),
-           kill(pid, 0) == 0 { return true }
-        return false
+        var activity = DiskActivity()
+        activity.polledBusy = [.running, .stopping, .restoring].contains(uiState.appState)
+        activity.maintenance = uiState.isCleaning || uiState.isEjecting || recoveryCopying
+            || compactingStore || storeOpening
+        activity.restoresInFlight = restoresInFlight
+        activity.restoreWindowBusy = restoreCenterModel.map { $0.busy || $0.browser.busy } ?? false
+        activity.setupWindowOpen = encryptionWC?.window?.isVisible == true || onboardingWC?.window?.isVisible == true
+        if !activity.isBusy, let config {
+            let lockPath = config.destination.path + "/rustymacbackup.lock"
+            if let content = try? String(contentsOfFile: lockPath, encoding: .utf8),
+               let pid = Int32(content.split(separator: "\n").first.map(String.init) ?? "") {
+                activity.lockHolderAlive = kill(pid, 0) == 0
+            }
+        }
+        return activity.isBusy
     }
 
     private func handleRequestUpdate() {
@@ -1140,6 +1158,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installUpdate(_ version: String, userInitiated: Bool) {
         guard !uiState.isUpdating else { return }
+        // "Aggiorna" pressed during a backup still counts as asked by hand when it ends.
+        let byHand = userInitiated || updateRequestedByHand
         if isBusyForUpdate {
             // Automatic: `updateRetry` tries again as soon as the disk is quiet. Asked by hand: say why not now.
             if userInitiated {
@@ -1149,16 +1169,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
-        updateRequestedByHand = false
         // Not ours to replace and nobody asked: keep the banner, never pop the Installer unasked.
-        if !userInitiated && !AutoUpdater.canReplaceInPlace() { return }
+        if !byHand && !AutoUpdater.canReplaceInPlace() { return }
+        updateRequestedByHand = false
         uiState.isUpdating = true
         uiState.updatePhase = .downloading
         Task { [weak self] in
             do {
-                try await AutoUpdater.install(version: version) { [weak self] phase in
+                try await AutoUpdater.install(version: version, onPhase: { [weak self] phase in
                     DispatchQueue.main.async { self?.uiState.updatePhase = phase }
-                }
+                }, readyToSwap: { [weak self] in
+                    // The download took a while: a backup or restore may have started meanwhile,
+                    // also a scheduled one still opening the store before taking its lock.
+                    let scheduled: Bool
+                    do { scheduled = try ScheduleManager.scheduleJobIsRunning() } catch {
+                        Log.warn("Update: cannot tell whether a scheduled backup runs: \(error.localizedDescription)")
+                        scheduled = true
+                    }
+                    if scheduled { return false }
+                    return await MainActor.run { [weak self] in self.map { !$0.isDiskBusy } ?? false }
+                })
             } catch AutoUpdater.UpdateError.needsInstaller(let pkg) {
                 DispatchQueue.main.async {
                     self?.uiState.isUpdating = false
@@ -1166,6 +1196,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     NSWorkspace.shared.open(pkg)
                     self?.sendNotification(title: "Conferma l'aggiornamento",
                                            body: "Si apre l'Installer: serve la password una volta sola. Poi gli aggiornamenti si installano da soli.")
+                }
+            } catch AutoUpdater.UpdateError.postponed {
+                Log.info("Update \(version) postponed: the disk became busy during the download")
+                DispatchQueue.main.async { [weak self] in
+                    self?.uiState.isUpdating = false
+                    self?.uiState.updatePhase = nil
+                    if byHand { self?.updateRequestedByHand = true }
+                    if userInitiated {
+                        self?.sendNotification(title: "Aggiornamento rimandato",
+                                               body: "È partita un'operazione sul disco: aggiorno appena finisce.")
+                    }
                 }
             } catch {
                 Log.error("Update failed: \(error.localizedDescription)")
@@ -1175,7 +1216,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.uiState.updatePhase = nil
                     if permanent { self?.rejectedUpdate = version }
                     // Network hiccups on an automatic attempt stay quiet: the next tick retries.
-                    if userInitiated || permanent {
+                    if byHand || permanent {
                         self?.sendNotification(title: "Aggiornamento non installato", body: error.localizedDescription)
                     }
                 }
@@ -1366,7 +1407,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         popover.performClose(nil)
-        if let wc = restoreCenterWC, wc.window?.isVisible == true {
+        // Still working with its window closed: show that one again rather than a second restore beside it.
+        if let wc = restoreCenterWC, wc.window?.isVisible == true
+            || restoreCenterModel.map({ $0.busy || $0.browser.busy }) == true {
             wc.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -1387,6 +1430,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         wc.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         restoreCenterWC = wc
+        restoreCenterModel = model
     }
 
     private func handleCoverage(_ gap: CoverageGap, ignore: Bool) {

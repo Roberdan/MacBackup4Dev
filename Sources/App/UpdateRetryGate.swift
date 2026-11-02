@@ -23,3 +23,19 @@ final class UpdateRetryGate {
         install(pending)
     }
 }
+
+/// What keeps the disk or the user's files busy, for updates and compaction. The polled backup
+/// state alone is not enough: it reads idle during an in-app restore (no lock file), and the
+/// "Ripristina" window restores on its own.
+struct DiskActivity {
+    var polledBusy = false          // backup running/stopping, tree restore state
+    var lockHolderAlive = false     // a backup in any process holds the destination lock
+    var maintenance = false         // cleanup, ejection, recovery copy, compaction, store opening
+    var restoresInFlight = 0        // tree restore and undo started by the app
+    var restoreWindowBusy = false   // "Ripristina" window: file, folder, new-Mac stages, undo
+    var setupWindowOpen = false     // encryption migration or first-launch adoption may be copying
+
+    var isBusy: Bool {
+        polledBusy || lockHolderAlive || maintenance || restoresInFlight > 0 || restoreWindowBusy || setupWindowOpen
+    }
+}
