@@ -96,6 +96,7 @@ struct TestRunner {
             ("Automatic.previewIsReadOnly", automatic.test_nextBackupPreviewIsReadOnlyAndMatchesWhatTheBackupAdds),
             ("Automatic.previewIsQuick", automatic.test_menuPreviewReadsDatabasesFromTheLastAuditInsteadOfWalkingEverySource),
             ("Automatic.noSavedFolderWalk", preparation.test_aBackupDoesNotWalkTheSavedFoldersForDatabases),
+            ("Automatic.pickerDatabases", preparation.test_pickerConfirmationStillAddsDatabasesInsideChosenFolders),
             ("Automatic.auditFeedsNextPreparation", preparation.test_theAuditOfAFinishedBackupFeedsTheNextPreparation),
             ("Automatic.newDatabaseSameBackup", preparation.test_aNewDatabaseInASavedFolderIsSavedByTheSameBackup),
             ("Automatic.savedByItselfAnnouncedOnce", preparation.test_whatABackupSavedByItselfIsAnnouncedOnceAndEntersTheSettingsNext),

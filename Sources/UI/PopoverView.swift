@@ -243,7 +243,7 @@ struct PopoverView: View {
                     .font(.system(size: 11)).foregroundColor(Look.secondaryText)
                     .accessibilityLabel("Applicazioni: \(apps.saved) copie salvate, \(apps.needsInstaller) da reinstallare")
             }
-            if !state.isRunning, let label = state.automaticallyAddedLabel {
+            if let label = state.automaticallyAddedLabel {
                 HStack(spacing: 6) {
                     Image(systemName: "plus.circle").font(.system(size: 10))
                     Text(label)

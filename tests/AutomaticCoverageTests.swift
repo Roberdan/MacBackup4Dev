@@ -364,7 +364,7 @@ final class AutomaticCoverageTests {
         state.status = status
         try expectEqual(state.automaticallyAddedLabel, "Aggiunte da sole: 0", "a backup with nothing new still says so")
         state.appState = .running
-        try expectNil(state.automaticallyAddedLabel, "not while a backup is running")
+        try expectNil(state.automaticallyAddedLabel, "no automatic additions yet in this running backup")
         state.appState = .idle
 
         try expectNil(state.pendingAutomaticTitle, "nothing announced when nothing is coming")
@@ -376,5 +376,25 @@ final class AutomaticCoverageTests {
         state.coverageGaps = [gap("~/A"), gap("~/Other")]
         try expectEqual(state.visibleCoverageGaps.map(\.path), ["~/Other"],
                         "a gap the next backup takes care of is not shown as an open problem")
+
+        let database = CoverageGap(kind: .database, path: "~/A/runtime/new.db",
+                                   lastModified: "", approximateBytes: 1)
+        state.pendingAutomatic = []
+        state.coverageGaps = [database, gap("~/Other")]
+        status.autoIncluded = [database.path]
+        state.status = status
+        state.appState = .running
+        try expectEqual(state.visibleCoverageGaps.map(\.path), ["~/Other"],
+                        "a database the running backup adds never asks for an Add click")
+        try expectEqual(state.automaticallyAddedLabel, "Incluse in questo backup: 1",
+                        "automatic inclusion is visible before the backup finishes")
+        try expect(state.automaticallyAddedHelp.contains(database.path)
+                   && state.automaticallyAddedHelp.contains("non ancora completato"),
+                   "the menu names the addition without claiming its copy is already saved")
+        status.lastResult = "incomplete"
+        state.status = status
+        state.appState = .idle
+        try expectEqual(state.visibleCoverageGaps.map(\.path), [database.path, "~/Other"],
+                        "a gap still reported after an incomplete backup must not disappear behind an inclusion")
     }
 }
