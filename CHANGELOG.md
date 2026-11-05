@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.3.10] - 2026-11-05
+
+### Fixed
+- Databases included automatically by the running backup no longer appear as "Database
+  non copiato" with an unnecessary "Aggiungi" button. The menu shows their automatic inclusion
+  without claiming that the backup has already finished; unresolved gaps remain visible afterward.
+- Confirming the folder picker now also remembers eligible databases inside the chosen folders,
+  including ones saved automatically by the previous backup. No extra folders are selected,
+  explicit database opt-outs are preserved, and disabling automatic inclusion is still respected.
+
 ## [4.3.9] - 2026-11-02
 
 ### Fixed
