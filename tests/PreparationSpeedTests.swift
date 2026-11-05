@@ -31,7 +31,8 @@ final class PreparationSpeedTests {
 
     /// The path every backup takes (preparation, then the real engine), in the sandbox; databases saved.
     private func prepareAndBackUp(_ url: URL, _ writer: StatusWriter, _ box: SafetyTests.Sandbox,
-                                  captureDatabases: Bool = true) throws -> (result: BackupRunResult, config: Config) {
+                                  captureDatabases: Bool = true,
+                                  selectedPaths: [String]? = nil) throws -> (result: BackupRunResult, config: Config) {
         let options = BackupRunOptions(home: box.home, captureEnvironment: false, captureGit: false,
                                        captureDatabases: captureDatabases, auditCoverage: true, captureApplications: false)
         let outcome = ResultBox<Result<BackupRunResult?, Error>>()
@@ -40,7 +41,8 @@ final class PreparationSpeedTests {
         Task {
             do {
                 outcome.value = .success(try await AutomaticCoverage.prepareAndRun(
-                    from: url, statusWriter: writer, options: options, onPrepared: { published.value = $0 }))
+                    from: url, selectedPaths: selectedPaths, statusWriter: writer, options: options,
+                    onPrepared: { published.value = $0 }))
             } catch { outcome.value = .failure(error) }
             done.signal()
         }
@@ -171,6 +173,56 @@ final class PreparationSpeedTests {
         try expect(walked.databases.sqlite.contains("~/existing/runtime/fresh.db")
                    && walked.databases.sqlite.contains("~/existing/runtime/known.db"),
                    "without an audit the sources are walked, as before: \(walked.databases.sqlite)")
+    }
+
+    func test_pickerConfirmationStillAddsDatabasesInsideChosenFolders() throws {
+        let (box, url) = try fixture()
+        defer { safety.cleanup(box) }
+        let known = "~/existing/runtime/known.db"
+        let fresh = "~/existing/runtime/fresh.db"
+        let outside = "~/NewFolder/runtime/new.db"
+        let candidates = [known, fresh, outside].map(gap)
+        let writer = StatusWriter(directory: box.state)
+        var report = CoverageReport(checkedAt: ISO8601DateFormatter().string(from: Date()),
+                                    gaps: [gap(fresh), gap(outside)])
+        report.addedByBackup = [gap(known)]
+        try writer.writeCoverage(report)
+        let (result, prepared) = try prepareAndBackUp(url, writer, box, selectedPaths: ["~/existing"])
+        try expectEqual(prepared.source.paths, ["~/existing"], "the exact folder choice is preserved")
+        try expectEqual(Set(prepared.databases.sqlite), Set([known, fresh]),
+                        "chosen folders' databases enter the settings without a separate Add click")
+        try expectEqual(result.manifest.automaticallyIncluded, [fresh], "previously saved databases are not announced twice")
+        try expectEqual(try Config.load(from: url).databases.sqlite, prepared.databases.sqlite,
+                        "automatic databases persist even when this backup comes from the picker")
+        try expect(result.manifest.complete, "the backup is complete: \(result.manifest.incompleteReasons)")
+        try expectEqual(Set(result.manifest.databases.map(\.source)), Set([known, fresh]),
+                        "only the chosen folders' databases are saved")
+        for record in result.manifest.databases {
+            guard let file = record.file, record.error == nil else {
+                throw TestFailure.failed("automatic database was not saved: \(record)")
+            }
+            let copied = Shell.run("/usr/bin/sqlite3", [result.snapshot.appendingPathComponent(file).path, "SELECT v FROM t;"])
+            try expect(copied.ok && copied.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "1",
+                       "the database copy really contains the source data")
+        }
+
+        var config = safety.config(box, sources: ["existing"])
+        config.coverage.ignore = [fresh]
+        try config.save(to: url)
+        let ignored = try AutomaticCoverage.prepareReporting(
+            from: url, selectedPaths: ["~/existing"], home: box.home,
+            knownDatabaseGaps: [gap(known), gap(outside)])
+        try expectEqual(ignored.config.databases.sqlite, [known], "explicit database exclusions still win")
+        try expect(ignored.config.coverage.ignore.contains(fresh),
+                   "choosing a folder preserves a database opt-out even when the last audit omitted it")
+        let next = try prepareAndBackUp(url, writer, box)
+        try expect(!next.result.manifest.databases.contains { $0.source == fresh },
+                   "an ignored database does not return on the next automatic backup either")
+        config.coverage.autoInclude = false
+        try config.save(to: url)
+        let disabled = try AutomaticCoverage.prepareReporting(
+            from: url, selectedPaths: ["~/existing"], home: box.home, knownDatabaseGaps: candidates)
+        try expect(disabled.config.databases.sqlite.isEmpty, "confirming folders respects automatic inclusion being off")
     }
 
     func test_theAuditOfAFinishedBackupFeedsTheNextPreparation() throws {

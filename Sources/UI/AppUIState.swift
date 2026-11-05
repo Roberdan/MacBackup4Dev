@@ -126,21 +126,27 @@ final class AppUIState: ObservableObject {
     /// refreshes in the background. Nothing is saved until a backup runs.
     @Published var pendingAutomatic: [CoverageGap] = []
 
-    /// A gap the next backup takes care of is announced as such, not shown as an open problem.
+    /// Automatic additions are not manual decisions, including those found by the running backup.
     var visibleCoverageGaps: [CoverageGap] {
-        let pending = Set(pendingAutomatic.map(\.path))
+        var pending = Set(pendingAutomatic.map(\.path))
+        if isRunning { pending.formUnion(status?.autoIncluded ?? []) }
         return coverageGaps.filter { !pending.contains($0.path) }
     }
 
-    /// "Aggiunte da sole: N" for the last finished backup; nil while one runs or when that
-    /// backup's status was written before the app recorded it.
+    /// Inclusion in a running backup is not yet proof that its copies succeeded.
     var automaticallyAddedLabel: String? {
-        guard !isRunning, status?.lastResult != nil, let added = status?.autoIncluded else { return nil }
+        guard let added = status?.autoIncluded else { return nil }
+        if isRunning { return added.isEmpty ? nil : "Incluse in questo backup: \(added.count)" }
+        guard status?.lastResult != nil else { return nil }
         return "Aggiunte da sole: \(added.count)"
     }
 
     var automaticallyAddedHelp: String {
         let added = status?.autoIncluded ?? []
+        if isRunning {
+            return "Incluse automaticamente nel backup in corso; salvataggio non ancora completato:\n"
+                + added.joined(separator: "\n")
+        }
         return added.isEmpty ? "L'ultimo backup non ha trovato niente di nuovo da aggiungere."
             : "Inserite da sole nell'ultimo backup:\n" + added.joined(separator: "\n")
     }

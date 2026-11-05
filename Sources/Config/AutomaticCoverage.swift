@@ -54,14 +54,30 @@ enum AutomaticCoverage {
             // partial selection, and rejecting the folder would also block its new projects.
             func holdsChoice(_ path: String) -> Bool { selected.contains { contains(expanded(path), $0) } }
             config.coverage.ignore.removeAll { ignored in
-                selected.contains { contains($0, expanded(ignored)) } || holdsChoice(ignored)
+                // The folder picker has no separate database choice: keep its explicit opt-outs.
+                if holdsChoice(ignored) { return true }
+                let path = expanded(ignored)
+                guard selected.contains(where: { contains($0, path) }) else { return false }
+                do {
+                    let values = try URL(fileURLWithPath: path).resourceValues(
+                        forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                    return values.isDirectory == true && values.isSymbolicLink != true
+                } catch {
+                    Log.warn("Kept coverage opt-out: cannot inspect \(ignored): \(error.localizedDescription)")
+                    return false
+                }
             }
             for path in declined where !selected.contains(where: { contains($0, expanded(path)) }) && !holdsChoice(path) {
                 if !config.coverage.ignore.contains(path) { config.coverage.ignore.append(path) }
             }
-        } else if config.coverage.autoInclude {
+        }
+        if config.coverage.autoInclude {
             let recorded = Set(alreadyRecorded.map(expanded))
-            for addition in plan(config: config, candidates: candidates, home: home) {
+            // Confirming folders must not postpone their databases or broaden the chosen sources.
+            let additions = selectedPaths == nil
+                ? plan(config: config, candidates: candidates, home: home)
+                : databasesToSave(found: candidates, config: config, home: home)
+            for addition in additions {
                 switch addition.kind {
                 case .folder: config.source.paths.append(addition.path)
                 case .database: config.databases.sqlite.append(addition.path)
