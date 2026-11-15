@@ -469,6 +469,9 @@ mb4d prune --older-than 6m --yes     # permanently delete after reviewing
 mb4d prune --older-than 7d          # preserve the last seven days, preview only
 ```
 
+Add `--snapshot NAME` (repeatable) to select specific age-qualified snapshots.
+Recent, protected or unknown names refuse the whole operation; omitting the age also fails.
+
 Age refers to the snapshot date, not the modification dates of files inside it.
 Month/year periods use calendar months; `7d` preserves the preceding 168 hours.
 Snapshots exactly on the cutoff are retained.

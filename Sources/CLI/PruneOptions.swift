@@ -3,6 +3,7 @@ import Foundation
 struct PruneOptions {
     var age: CleanupAge?
     var days: Int?
+    var snapshotNames: Set<String> = []
     var confirmed = false
 
     func cutoff(from now: Date) -> Date? {
@@ -28,17 +29,26 @@ struct PruneOptions {
                 }
             case "--yes": options.confirmed = true
             case "--dry-run": dryRun = true
+            case "--snapshot":
+                index += 1
+                guard index < arguments.count,
+                      RetentionManager.parseBackupName(arguments[index]) != nil,
+                      options.snapshotNames.insert(arguments[index]).inserted else { throw invalidArguments() }
             default: throw invalidArguments()
             }
             index += 1
         }
         guard !(dryRun && options.confirmed) else { throw invalidArguments() }
+        guard options.snapshotNames.isEmpty || options.age != nil || options.days != nil else {
+            throw invalidArguments()
+        }
         return options
     }
 
     private static func invalidArguments() -> NSError {
         NSError(domain: AppIdentity.name, code: 1, userInfo: [
-            NSLocalizedDescriptionKey: "Usage: prune [--older-than 7d|1m|6m|1y] [--dry-run | --yes]"
+            NSLocalizedDescriptionKey:
+                "Usage: prune [--older-than 7d|1m|6m|1y] [--snapshot NAME ...] [--dry-run | --yes]"
         ])
     }
 }
