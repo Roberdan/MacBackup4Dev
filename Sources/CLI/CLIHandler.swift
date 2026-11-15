@@ -105,7 +105,7 @@ enum CLIHandler {
           status          Show backup status
           list            List backup snapshots
           prune           Clean up old backups (preview unless --yes)
-                          --older-than 1m|6m|1y [--dry-run | --yes]
+                          --older-than 7d|1m|6m|1y [--dry-run | --yes]
           restore         Restore from backup
           config          Manage configuration
           schedule        Manage backup schedule
@@ -356,8 +356,8 @@ enum CLIHandler {
         let dryRun = !options.confirmed
         let destination = URL(fileURLWithPath: cfg.destination.path)
         let pruned: [String]
-        if let age = options.age {
-            let cleanup = try SnapshotCleanup(at: destination, age: age)
+        if let cutoff = options.cutoff(from: Date()) {
+            let cleanup = try SnapshotCleanup(at: destination, cutoff: cutoff)
             print("Destination: \(destination.path)")
             print("Before: \(cleanup.cutoff.formatted(date: .abbreviated, time: .standard))")
             print("Latest snapshot is always kept. Shared hard-linked data may not free space.")

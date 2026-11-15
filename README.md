@@ -338,7 +338,7 @@ mb4d list
 | `new-mac --stage servizi --agents <label> --yes` | Turn on one service, watched; moved aside if it fails |
 | `new-mac --undo <id>` / `--undo servizio:<label>` | Undo a phase / turn a service off |
 | `prune [--dry-run \| --yes]` | Preview retention-policy cleanup; `--yes` deletes |
-| `prune --older-than 1m\|6m\|1y [--dry-run \| --yes]` | Preview/delete snapshots older than 1 month, 6 months or 1 year |
+| `prune --older-than 7d\|1m\|6m\|1y [--dry-run \| --yes]` | Preview/delete snapshots older than 7 days, 1 month, 6 months or 1 year |
 | `restore <snapshot> [path] --to <dest>` | Legacy whole-path restore |
 | `config show\|add\|remove\|edit` | Manage backed-up paths |
 | `schedule on\|off\|interval <min>\|daily <hour>` | Manage LaunchAgent schedule |
@@ -441,7 +441,7 @@ mb4d list
 | `status` | Live status, last result, folder list |
 | `list` | List snapshots on disk |
 | `prune [--dry-run \| --yes]` | Preview retention-policy cleanup; `--yes` deletes |
-| `prune --older-than 1m\|6m\|1y [--dry-run \| --yes]` | Preview/delete snapshots older than 1 month, 6 months or 1 year |
+| `prune --older-than 7d\|1m\|6m\|1y [--dry-run \| --yes]` | Preview/delete snapshots older than 7 days, 1 month, 6 months or 1 year |
 | `restore <snapshot> [path] --to <dest>` | Restore files from a snapshot |
 | `config show\|add\|remove\|edit` | Manage backed-up paths |
 | `schedule on\|off\|interval <min>\|daily <hour>` | Manage LaunchAgent schedule |
@@ -466,10 +466,12 @@ The same operation is available from the CLI:
 ```bash
 mb4d prune --older-than 6m           # preview only
 mb4d prune --older-than 6m --yes     # permanently delete after reviewing
+mb4d prune --older-than 7d          # preserve the last seven days, preview only
 ```
 
 Age refers to the snapshot date, not the modification dates of files inside it.
-Periods use calendar months; snapshots exactly on the cutoff are retained.
+Month/year periods use calendar months; `7d` preserves the preceding 168 hours.
+Snapshots exactly on the cutoff are retained.
 Cleanup only removes complete, timestamp-named snapshot directories in the configured
 destination, never source files, in-progress backups, symbolic links or unrelated folders.
 Backup, restore and cleanup share a destination lock to prevent concurrent deletion.

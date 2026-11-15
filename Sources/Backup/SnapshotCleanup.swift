@@ -34,11 +34,14 @@ final class SnapshotCleanup {
     let latest: BackupEntry?
     private let lock: DestinationLock
 
-    init(at destination: URL, age: CleanupAge, now: Date = Date()) throws {
+    convenience init(at destination: URL, age: CleanupAge, now: Date = Date()) throws {
+        try self.init(at: destination, cutoff: age.cutoff(from: now))
+    }
+
+    init(at destination: URL, cutoff: Date) throws {
         try RetentionManager.validateDestination(destination)
         let lock = try DestinationLock(at: destination)
         let backups = try RetentionManager.readBackups(at: destination)
-        let cutoff = age.cutoff(from: now)
         self.destination = destination
         self.cutoff = cutoff
         self.latest = backups.first
