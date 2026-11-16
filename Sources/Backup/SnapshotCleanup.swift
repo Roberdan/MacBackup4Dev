@@ -33,17 +33,31 @@ final class SnapshotCleanup {
     let candidates: [BackupEntry]
     let latest: BackupEntry?
     private let lock: DestinationLock
+    private let snapshotNames: Set<String>?
 
-    init(at destination: URL, age: CleanupAge, now: Date = Date()) throws {
+    convenience init(at destination: URL, age: CleanupAge, now: Date = Date()) throws {
+        try self.init(at: destination, cutoff: age.cutoff(from: now))
+    }
+
+    init(at destination: URL, cutoff: Date, snapshotNames: Set<String>? = nil) throws {
         try RetentionManager.validateDestination(destination)
         let lock = try DestinationLock(at: destination)
         let backups = try RetentionManager.readBackups(at: destination)
-        let cutoff = age.cutoff(from: now)
         self.destination = destination
         self.cutoff = cutoff
         self.latest = backups.first
         let protected = RetentionManager.protectedNames(backups, fillWithUnverified: false)
-        self.candidates = backups.dropFirst().filter { $0.timestamp < cutoff && !protected.contains($0.name) }
+        let eligible = backups.dropFirst().filter { $0.timestamp < cutoff && !protected.contains($0.name) }
+        if let snapshotNames {
+            guard !snapshotNames.isEmpty, snapshotNames.isSubset(of: Set(eligible.map(\.name))) else {
+                throw NSError(domain: "SnapshotCleanup", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "I backup scelti devono esistere, essere più vecchi del limite e non essere protetti."
+                ])
+            }
+        }
+        self.candidates = eligible.filter { snapshotNames?.contains($0.name) ?? true }
+        self.snapshotNames = snapshotNames
         self.lock = lock
     }
 
@@ -54,7 +68,10 @@ final class SnapshotCleanup {
             try RetentionManager.validateDestination(destination)
             let current = try RetentionManager.readBackups(at: destination)
             let protected = RetentionManager.protectedNames(current, fillWithUnverified: false)
-            let eligible = current.dropFirst().filter { $0.timestamp < cutoff && !protected.contains($0.name) }.map(\.name)
+            let eligible = current.dropFirst().filter {
+                $0.timestamp < cutoff && !protected.contains($0.name)
+                    && (snapshotNames?.contains($0.name) ?? true)
+            }.map(\.name)
             guard eligible == candidates.map(\.name) else {
                 throw NSError(domain: "SnapshotCleanup", code: 1, userInfo: [
                     NSLocalizedDescriptionKey: "I backup sono cambiati. Ripeti l'anteprima prima di eliminare."

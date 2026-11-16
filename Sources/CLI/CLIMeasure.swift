@@ -64,7 +64,16 @@ extension CLIHandler {
         state.storeOpening = false
         state.cachedBackupAccessible = true
         state.appState = .running
+        let previousFinish = Date().addingTimeInterval(-3600)
+        state.protection = ProtectionSummary(
+            level: .protected, headline: "Protetto", detail: "", lastComplete: "previous-demo",
+            lastCompleteDate: previousFinish.addingTimeInterval(-600), latestIsIncomplete: false,
+            latestReasons: [], looksLikeNewMac: false, days: Array(repeating: .complete, count: 14),
+            reposWithSavedCommits: 6, databasesSaved: 3, filesInLastComplete: 156_000,
+            lastCompleteFinishedDate: previousFinish)
         var st = BackupStatusFile(); st.state = "running"; st.phase = "scanning"
+        st.lastResult = "complete"; st.lastSnapshot = "previous-demo"
+        st.lastCompleteAt = ISO8601DateFormatter().string(from: previousFinish)
         st.filesDone = 151_000; st.filesTotal = 156_000; st.scanFinished = false
         st.currentFile = "GitHub/x/y.json"; st.etaSecs = 90
         st.startedAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-600))
@@ -89,6 +98,13 @@ extension CLIHandler {
         st.lastCompleteAt = ISO8601DateFormatter().string(from: finish)
         state.status = st
         report("backup terminato (non in corso)")
+        st.state = "cancelled"
+        state.status = st
+        report("ultimo completo dopo tentativo interrotto")
+        state.appState = .diskAbsent
+        report("ultimo completo con disco assente")
+        state.appState = .idle
+        st.state = "idle"
         st.applications = AppCapture.Summary(saved: 42, needsInstaller: 8, failed: 0, unselectedDataPaths: 12,
                                              dataCountRule: AppCapture.dataCountRule)
         state.status = st

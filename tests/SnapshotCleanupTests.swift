@@ -146,18 +146,84 @@ final class SnapshotCleanupTests {
     }
 
     func test_cliOptions() throws {
+        let now = try date("2026-11-15_120000")
+        let week = try PruneOptions.parse(["--older-than", "7d"])
+        try expectEqual(week.cutoff(from: now), now.addingTimeInterval(-604_800),
+                        "Seven days must preserve the full preceding 168 hours")
+        try expect(!week.confirmed, "Seven-day cleanup must default to preview")
+        let confirmedWeek = try PruneOptions.parse(["--older-than", "7d", "--yes"])
+        try expect(confirmedWeek.confirmed, "Seven-day deletion needs explicit confirmation")
+        let selected = try PruneOptions.parse(["--older-than", "7d", "--snapshot", "2026-10-19_150005",
+                                              "--snapshot", "2026-10-19_160005"])
+        try expectEqual(selected.snapshotNames, ["2026-10-19_150005", "2026-10-19_160005"],
+                        "Explicit names narrow the age-based cleanup")
         for (value, age) in [("1m", CleanupAge.oneMonth), ("6m", .sixMonths), ("1y", .oneYear)] {
             let preview = try PruneOptions.parse(["--older-than", value])
             try expectEqual(preview.age, age, "Parse exact supported ages")
+            try expectEqual(preview.cutoff(from: now), age.cutoff(from: now), "Preserve calendar-month cutoffs")
             try expect(!preview.confirmed, "Destructive action must be opt-in")
             let confirmed = try PruneOptions.parse(["--older-than", value, "--yes"])
             try expect(confirmed.confirmed, "--yes confirms deletion")
         }
         for args in [["--older-than"], ["--older-than", "2m"], ["--yes", "--dry-run"],
-                     ["--older-than", "1m", "--older-than", "6m"], ["--yse"], ["--older-than", "-1m"]] {
+                     ["--older-than", "1m", "--older-than", "6m"], ["--yse"], ["--older-than", "-1m"],
+                     ["--older-than", "7d", "--older-than", "1m"],
+                     ["--older-than", "1m", "--older-than", "7d"], ["--older-than", "6d"],
+                     ["--snapshot", "2026-10-19_150005"], ["--older-than", "7d", "--snapshot"],
+                     ["--older-than", "7d", "--snapshot", "../2026-10-19_150005"],
+                     ["--older-than", "7d", "--snapshot", "2026-10-19_150005",
+                      "--snapshot", "2026-10-19_150005"]] {
             try expectFailure { _ = try PruneOptions.parse(args) }
         }
         let legacy = try PruneOptions.parse([])
         try expect(!legacy.confirmed, "Legacy prune also defaults to preview")
+    }
+
+    func test_sevenDayBoundaryAndHardLinks() throws {
+        let names = ["2026-11-15_120000", "2026-11-08_120001", "2026-11-08_120000",
+                     "2026-11-08_115959", "2026-11-07_120000"]
+        let root = try fixture(names)
+        defer { try? fm.removeItem(at: root) }
+        let options = try PruneOptions.parse(["--older-than", "7d"])
+        guard let cutoff = options.cutoff(from: try date(names[0])) else {
+            throw TestFailure.failed("Seven-day cleanup requires a cutoff")
+        }
+        let oldFile = root.appendingPathComponent(names[3] + "/data.txt")
+        let retainedFile = root.appendingPathComponent(names[2] + "/data.txt")
+        try "retained data".write(to: oldFile, atomically: true, encoding: .utf8)
+        try fm.linkItem(at: oldFile, to: retainedFile)
+        let cleanup = try SnapshotCleanup(at: root, cutoff: cutoff)
+        try expectEqual(cleanup.candidates.map(\.name), Array(names.suffix(2)),
+                        "Retain snapshots on and after the seven-day boundary")
+        let result = try cleanup.execute()
+        try expectEqual(result.deleted, Array(names.suffix(2)), "Delete only previewed old snapshots")
+        let remaining = try RetentionManager.readBackups(at: root)
+        try expectEqual(remaining.map(\.name), Array(names.prefix(3)), "Preserve every recent snapshot")
+        let contents = try String(contentsOf: retainedFile)
+        try expectEqual(contents, "retained data", "Deleting an old hard link must preserve the recent copy")
+    }
+
+    func test_selectedSnapshotsRespectProtection() throws {
+        let names = ["2026-11-15_120000", "2026-10-19_150005",
+                     "2026-10-18_120000", "2026-10-17_120000"]
+        let root = try fixture(names)
+        defer { try? fm.removeItem(at: root) }
+        let reference = root.appendingPathComponent(names[0] + "/" + AppCapture.referenceName)
+        try fm.createDirectory(at: reference.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try names[2].write(to: reference, atomically: true, encoding: .utf8)
+        let cutoff = try date("2026-11-08_120000")
+        for selection in [Set([names[0]]), [names[2]], [names[1], names[2]],
+                          ["2026-10-16_120000"], []] {
+            try expectFailure {
+                _ = try SnapshotCleanup(at: root, cutoff: cutoff, snapshotNames: selection)
+            }
+        }
+        let cleanup = try SnapshotCleanup(at: root, cutoff: cutoff, snapshotNames: [names[1]])
+        try expectEqual(cleanup.candidates.map(\.name), [names[1]], "Preview only the chosen eligible snapshot")
+        let result = try cleanup.execute()
+        try expectEqual(result.deleted, [names[1]], "Remove only the chosen snapshot")
+        let remaining = try RetentionManager.readBackups(at: root)
+        try expectEqual(remaining.map(\.name), [names[0], names[2], names[3]],
+                        "Recent snapshots, application holders and unselected history must survive")
     }
 }

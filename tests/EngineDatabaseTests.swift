@@ -18,24 +18,41 @@ final class EngineDatabaseTests {
         try expect(!engine("\(home)/Library/Application Support/persisted_state.db"), "its root neither")
         try expect(!engine("\(home)/\(profile)/../../x/Default/load_statistics.db"), "no dot parts")
         try expect(!engine("\(home)/\(profile)/load_statistics.db", { _ in false }), "no Local State, no profile")
+        let electronRoot = "\(home)/Library/Application Support/Claude"
+        let electronMarkers: (String) -> Bool = {
+            $0 == electronRoot + "/Local State" || $0 == electronRoot + "/Preferences"
+        }
+        try expect(engine(electronRoot + "/declarative_performance_observer.db", electronMarkers), "Electron uses its data root as the profile")
+        try expect(!engine(electronRoot + "/notes.db", electronMarkers), "Electron user databases stay protected")
+        try expect(!engine(electronRoot + "/nested/load_statistics.db", electronMarkers), "markers do not cover arbitrary subfolders")
+        try expect(!engine(electronRoot + "/load_statistics.db", { $0 == electronRoot + "/Local State" }), "a root also needs profile preferences")
+        try expect(!engine(electronRoot + "/load_statistics.db", { $0 == electronRoot + "/Preferences" }), "preferences alone do not identify Chromium")
     }
 
     func test_discoveryNeverProposesEngineDatabases() throws {
         let box = try safety.makeSandbox()
         defer { safety.cleanup(box) }
         let url = box.root.appendingPathComponent("config.toml")
-        try safety.config(box, sources: ["Library/Application Support/Copilot"]).save(to: url)
+        try safety.config(box, sources: ["Library/Application Support/Copilot", "Library/Application Support/Claude"]).save(to: url)
         let engineDB = box.home + "/\(profile)/declarative_performance_observer.db"
         let real = box.home + "/\(profile)/notes.db"
-        for path in [engineDB, real] { try safety.write("sqlite", to: path) }
+        let electronRoot = box.home + "/Library/Application Support/Claude"
+        let electronDB = electronRoot + "/declarative_performance_observer.db"
+        for path in [engineDB, real, electronDB, electronRoot + "/notes.db"] { try safety.write("sqlite", to: path) }
         try safety.write("{}", to: box.home + "/Library/Application Support/Copilot/Local State")
+        try safety.write("{}", to: electronRoot + "/Local State")
+        try safety.write("{}", to: electronRoot + "/Preferences")
         let config = try Config.load(from: url)
         let found = CoverageAuditor.audit(config: config, home: box.home, measuringSizes: false).map(\.path)
         try expect(found.contains { $0.hasSuffix("notes.db") }, "a real database is still proposed: \(found)")
+        try expect(found.contains { $0.hasSuffix("Claude/notes.db") }, "Electron user data is still proposed: \(found)")
         try expect(!found.contains { $0.hasSuffix("declarative_performance_observer.db") }, "engine database not proposed: \(found)")
         let gap = CoverageGap(kind: .database, path: ConfigDiscovery.contract(engineDB, home: box.home),
                               lastModified: "", approximateBytes: 1)
         try expect(!AutomaticCoverage.Admission(config: config, home: box.home).admits(gap), "admission refuses it too")
+        let electronGap = CoverageGap(kind: .database, path: ConfigDiscovery.contract(electronDB, home: box.home),
+                                      lastModified: "", approximateBytes: 1)
+        try expect(!AutomaticCoverage.Admission(config: config, home: box.home).admits(electronGap), "Electron telemetry is refused too")
     }
 
     func test_savedEngineDatabasesAreIgnoredAndCleanedFromTheSettings() throws {
@@ -43,10 +60,13 @@ final class EngineDatabaseTests {
         defer { safety.cleanup(box) }
         let url = box.root.appendingPathComponent("config.toml")
         var config = safety.config(box, sources: ["existing"])
-        config.databases.sqlite = ["~/\(profile)/load_statistics.db", "~/x/history.db"]
+        config.databases.sqlite = ["~/\(profile)/load_statistics.db",
+                                   "~/Library/Application Support/Claude/declarative_performance_observer.db", "~/x/history.db"]
         try config.save(to: url)
         try safety.write("data", to: box.home + "/existing/a.txt")
         try safety.write("{}", to: box.home + "/Library/Application Support/Copilot/Local State")
+        try safety.write("{}", to: box.home + "/Library/Application Support/Claude/Local State")
+        try safety.write("{}", to: box.home + "/Library/Application Support/Claude/Preferences")
         let kept = DatabaseDumps.captureAll(config: config.databases, home: box.home,
                                             into: box.root.appendingPathComponent("snap"))
         try expectEqual(kept.map(\.source), ["~/x/history.db"], "the engine database is not captured, nor reported")
