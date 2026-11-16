@@ -247,6 +247,16 @@ final class AppUIState: ObservableObject {
         return protection?.level == .protected ? "Backup completato" : (protection?.headline ?? "Nessun backup")
     }
 
+    var lastCompleteBackup: (date: Date, isFinished: Bool)? {
+        guard let protection, let snapshot = protection.lastComplete else { return nil }
+        if let status, status.lastResult == "complete", status.lastSnapshot == snapshot,
+           let date = status.lastCompleteAt.flatMap({ ISO8601DateFormatter().date(from: $0) }) {
+            return (date, true)
+        }
+        if let date = protection.lastCompleteFinishedDate { return (date, true) }
+        return protection.lastCompleteDate.map { ($0, false) }
+    }
+
     var backupDetail: String {
         if appState == .running {
             let start = status.flatMap { ISO8601DateFormatter().date(from: $0.startedAt) }
@@ -257,14 +267,7 @@ final class AppUIState: ObservableObject {
             return "L'ultimo tentativo è stato interrotto. Nessun backup in corso."
         }
         guard let protection, protection.level == .protected else { return protection?.detail ?? "" }
-        var finished = protection.lastCompleteFinishedDate
-        if let status, status.state == "idle", status.lastResult == "complete",
-           let snapshot = protection.lastComplete, status.lastSnapshot == snapshot,
-           let date = status.lastCompleteAt.flatMap({ ISO8601DateFormatter().date(from: $0) }) {
-            finished = date
-        }
-        let date = finished.map { "Terminato \(ProtectionSummary.dateLabel($0))" }
-            ?? protection.lastCompleteDate.map { "Avviato \(ProtectionSummary.dateLabel($0))" }
+        let date = lastCompleteBackup.map { "\($0.isFinished ? "Terminato" : "Avviato") \(ProtectionSummary.dateLabel($0.date))" }
             ?? ""
         return date.isEmpty ? "Nessun backup in corso." : "\(date). Nessun backup in corso."
     }

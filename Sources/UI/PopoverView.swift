@@ -238,6 +238,7 @@ struct PopoverView: View {
                 }
                 Spacer(minLength: 0)
             }
+            lastCompleteBackupSection
             if !state.isRunning, let apps = state.status?.applications {
                 Text("\(apps.saved) app nel backup · \(apps.needsInstaller) richiedono un installer")
                     .font(.system(size: 11)).foregroundColor(Look.secondaryText)
@@ -304,6 +305,40 @@ struct PopoverView: View {
         }
         .padding(16)
         .background(glassCard(radius: 18))
+    }
+
+    private var lastCompleteBackupSection: some View {
+        let backup = state.lastCompleteBackup
+        return HStack(spacing: 10) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundColor(backup == nil ? Look.secondaryText : Look.green)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(backup?.isFinished == false ? "Ultimo backup completo · avviato" : "Ultimo backup completo")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(Look.secondaryText)
+                if let backup {
+                    Text(backup.date.formatted(.dateTime.day().month(.abbreviated).year()
+                        .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).locale(Locale(identifier: "it_IT"))))
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(Look.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(state.protection?.lastComplete == nil && state.protection != nil
+                         ? "Non ancora eseguito" : "Data non disponibile")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Look.text)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Look.glass))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Look.glassStroke, lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 
     private func stat(_ icon: String, _ text: String) -> some View {

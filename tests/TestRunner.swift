@@ -146,6 +146,7 @@ struct TestRunner {
             ("Postgres.symlinksAndCancellation", postgres.test_symlinkMetadataAndCancellation),
             ("Progress.terminalIsIdle", backup.test_terminalStatusNeverClaimsWorkInProgress),
             ("Progress.activityAndFinish", backup.test_backupActivityAndFinishTimeAreExplicit),
+            ("Progress.lastCompleteAlwaysVisible", backup.test_lastCompleteBackupStaysVisibleWithoutInventingAFinish),
             ("Actions.accessibleBackupDisk", backup.test_backupActionsRequireAccessibleDisk),
             ("Recovery.backupDoesNotCopyApp", recovery.test_backupFinishesWithoutRefreshingPhysicalDisk),
             ("Recovery.concurrentCopySkipped", recovery.test_competingCopyDoesNotWaitOrTouchStaging),

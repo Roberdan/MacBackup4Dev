@@ -176,6 +176,48 @@ final class BackupEngineTests {
         try expectEqual(state.backupHeadline, "Ultimo backup incompleto", "attention is not changed into success")
     }
 
+    func test_lastCompleteBackupStaysVisibleWithoutInventingAFinish() throws {
+        let start = Date(timeIntervalSince1970: 1_791_705_600)
+        let finish = start.addingTimeInterval(600)
+        let state = AppUIState()
+        var status = BackupStatusFile(state: "running", startedAt: ISO8601DateFormatter().string(from: finish.addingTimeInterval(3600)))
+        status.lastResult = "complete"
+        status.lastSnapshot = "previous-complete"
+        status.lastCompleteAt = ISO8601DateFormatter().string(from: finish)
+        state.status = status
+        try expectNil(state.lastCompleteBackup, "status alone cannot certify this disk's history")
+        state.protection = ProtectionSummary(
+            level: .protected, headline: "Protetto", detail: "", lastComplete: "previous-complete",
+            lastCompleteDate: start, latestIsIncomplete: false, latestReasons: [],
+            looksLikeNewMac: false, days: [], reposWithSavedCommits: 0, databasesSaved: 0)
+        for mode in [AppState.running, .stopping, .restoring, .error, .diskAbsent, .idle] {
+            state.appState = mode
+            try expectEqual(state.lastCompleteBackup?.date, finish, "previous complete backup stays visible in \(mode)")
+            try expectEqual(state.lastCompleteBackup?.isFinished, true, "completion time is distinct from the current run's start")
+        }
+        status.state = "cancelled"
+        state.status = status
+        try expectEqual(state.lastCompleteBackup?.date, finish, "cancellation does not erase the previous complete backup")
+        let manifestFinish = finish.addingTimeInterval(-30)
+        state.protection?.lastCompleteFinishedDate = manifestFinish
+        status.lastSnapshot = "unrelated-snapshot"
+        state.status = status
+        try expectEqual(state.lastCompleteBackup?.date, manifestFinish, "another snapshot's status cannot replace the catalog's finish")
+        status.lastSnapshot = "previous-complete"
+        status.lastCompleteAt = "invalid"
+        state.status = status
+        try expectEqual(state.lastCompleteBackup?.date, manifestFinish, "invalid status time uses the verified manifest")
+        status.lastResult = "incomplete"
+        status.lastCompleteAt = ISO8601DateFormatter().string(from: finish.addingTimeInterval(7200))
+        state.status = status
+        try expectEqual(state.lastCompleteBackup?.date, manifestFinish, "an incomplete attempt cannot claim a new completion")
+        state.protection?.lastCompleteFinishedDate = nil
+        try expectEqual(state.lastCompleteBackup?.date, start, "legacy snapshots retain their known start time")
+        try expectEqual(state.lastCompleteBackup?.isFinished, false, "legacy start must be labeled as a start")
+        state.protection?.lastComplete = nil
+        try expectNil(state.lastCompleteBackup, "no complete snapshot never invents a successful backup")
+    }
+
     func test_backupActionsRequireAccessibleDisk() throws {
         let state = AppUIState()
         state.config = Config(source: SourceConfig(paths: []),
